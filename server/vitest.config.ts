@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts']
+    include: ['src/**/*.test.ts'],
+    fileParallelism: false,
+    maxWorkers: 1
   },
   resolve: {
     alias: {
