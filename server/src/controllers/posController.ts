@@ -1,4 +1,4 @@
-import { posDailyQuerySchema, posDailySummarySchema } from '@retailsync/shared';
+import { PosDailySummaryInput, posDailyQuerySchema, posDailySummarySchema } from '@retailsync/shared';
 import { parse } from 'csv-parse/sync';
 import { Request, Response } from 'express';
 import { POSDailySummaryModel } from '../models/POSDailySummary';
@@ -104,16 +104,30 @@ export const importPosCsv = async (req: Request, res: Response) => {
     trim: true
   }) as CsvRow[];
 
-  const parsedRows = rows
-    .map(mapRow)
-    .filter((row): row is NonNullable<ReturnType<typeof mapRow>> => !!row)
-    .map((row) => posDailySummarySchema.parse(row));
+  const parsedRows = rows.map(mapRow).filter((row): row is NonNullable<ReturnType<typeof mapRow>> => !!row);
+  const validatedRows = parsedRows.map((row, index) => {
+    const parsed = posDailySummarySchema.safeParse(row);
+    if (!parsed.success) {
+      return { index, error: parsed.error.flatten() };
+    }
+    return { index, data: parsed.data };
+  });
 
-  if (parsedRows.length === 0) {
+  const validationError = validatedRows.find((row) => 'error' in row);
+  if (validationError && 'error' in validationError) {
+    return fail(res, 'Validation failed', 422, {
+      rowIndex: validationError.index,
+      issues: validationError.error
+    });
+  }
+
+  const normalizedRows = validatedRows.map((row) => (row as { index: number; data: PosDailySummaryInput }).data);
+
+  if (normalizedRows.length === 0) {
     return fail(res, 'No valid POS rows found in CSV', 400);
   }
 
-  const ops = parsedRows.map((row) => {
+  const ops = normalizedRows.map((row) => {
     const date = new Date(`${row.date}T00:00:00.000Z`);
     return {
       updateOne: {
@@ -124,10 +138,10 @@ export const importPosCsv = async (req: Request, res: Response) => {
     };
   });
 
-  const writeResult = await POSDailySummaryModel.bulkWrite(ops);
+  const writeResult = await POSDailySummaryModel.bulkWrite(ops as any);
 
   return ok(res, {
-    imported: parsedRows.length,
+    imported: normalizedRows.length,
     upserted: writeResult.upsertedCount,
     modified: writeResult.modifiedCount
   });

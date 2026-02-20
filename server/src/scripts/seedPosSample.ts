@@ -24,6 +24,7 @@ const run = async () => {
   if (!companyId) {
     throw new Error('Pass companyId: pnpm --filter @retailsync/server seed:pos <companyId>');
   }
+  const companyObjectId = new mongoose.Types.ObjectId(companyId);
 
   const filePath = path.resolve(process.cwd(), 'src/data/pos-sample.csv');
   const content = fs.readFileSync(filePath, 'utf8');
@@ -41,10 +42,10 @@ const run = async () => {
 
     return {
       updateOne: {
-        filter: { companyId, date: new Date(`${date}T00:00:00.000Z`) },
+        filter: { companyId: companyObjectId, date: new Date(`${date}T00:00:00.000Z`) },
         update: {
           $set: {
-            companyId,
+            companyId: companyObjectId,
             date: new Date(`${date}T00:00:00.000Z`),
             day: toDay(date),
             highTax,
@@ -67,7 +68,7 @@ const run = async () => {
     };
   });
 
-  const result = await POSDailySummaryModel.bulkWrite(ops);
+  const result = await POSDailySummaryModel.bulkWrite(ops as any);
   console.log('Seed complete', {
     imported: rows.length,
     upserted: result.upsertedCount,

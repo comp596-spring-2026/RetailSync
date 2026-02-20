@@ -84,14 +84,9 @@ export const DashboardLayout = () => {
               );
             })}
             {hasPermission(permissions, 'rolesSettings', 'view') && (
-              <>
-                <ListItemButton component={Link} to="/dashboard/roles" selected={location.pathname === '/dashboard/roles'}>
-                  <ListItemText primary="Roles" />
-                </ListItemButton>
-                <ListItemButton component={Link} to="/dashboard/users" selected={location.pathname === '/dashboard/users'}>
-                  <ListItemText primary="Users" />
-                </ListItemButton>
-              </>
+              <ListItemButton component={Link} to="/dashboard/roles" selected={location.pathname === '/dashboard/roles'}>
+                <ListItemText primary="Roles" />
+              </ListItemButton>
             )}
           </List>
         </Box>

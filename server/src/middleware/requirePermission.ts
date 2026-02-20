@@ -24,7 +24,12 @@ export const requirePermission = (moduleKey: ModuleKey, action: CrudAction | str
       return fail(res, 'Role not found', 403);
     }
 
-    const permission = role.permissions[moduleKey];
+    const permissionsMap =
+      (role.permissions as unknown as Record<
+        string,
+        { view: boolean; create: boolean; edit: boolean; delete: boolean; actions: string[] }
+      >) ?? {};
+    const permission = permissionsMap[moduleKey];
     if (!permission || !isAllowed(permission, action)) {
       return fail(res, 'Forbidden', 403);
     }

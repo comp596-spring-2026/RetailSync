@@ -27,7 +27,7 @@ const clearRefreshCookie = (res: Response) => {
   });
 };
 
-const buildAccess = (user: { _id: string; email: string; companyId: unknown; roleId: unknown }) =>
+const buildAccess = (user: { _id: { toString(): string }; email: string; companyId?: unknown; roleId?: unknown }) =>
   signAccessToken({
     sub: user._id.toString(),
     email: user.email,

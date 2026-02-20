@@ -31,7 +31,7 @@ export const memberPermissions = (): PermissionsMap => ({
   items: makePermission('items', { view: true, create: true, edit: true, actions: ['import'] }),
   invoices: makePermission('invoices', { view: true, create: true, edit: true, actions: ['confirm'] }),
   inventory: makePermission('inventory', { view: true, create: true, edit: true, actions: ['move'] }),
-  locations: makePermission('locations', { view: true }),
+  locations: makePermission('locations', { view: true, create: true, edit: true }),
   reconciliation: makePermission('reconciliation', { view: true, create: true, actions: ['auto_match', 'confirm_match'] }),
   bankStatements: makePermission('bankStatements', { view: true, create: true, actions: ['import'] }),
   suppliers: makePermission('suppliers', { view: true, create: true, edit: true }),

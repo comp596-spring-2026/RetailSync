@@ -86,6 +86,44 @@ export const monthlySummaryQuerySchema = z.object({
   month: z.string().trim().regex(/^\d{4}-\d{2}$/)
 });
 
+export const itemCreateSchema = z.object({
+  upc: z.string().trim().min(1),
+  modifier: z.string().trim().default(''),
+  description: z.string().trim().min(1),
+  department: z.string().trim().min(1),
+  price: z.number().min(0),
+  sku: z.string().trim().optional(),
+  defaultLocationCode: z.string().trim().optional()
+});
+
+export const itemUpdateSchema = itemCreateSchema.partial().refine((value) => Object.keys(value).length > 0, {
+  message: 'At least one field is required'
+});
+
+export const locationTypeSchema = z.enum(['shelf', 'fridge', 'freezer', 'backroom']);
+
+export const locationCreateSchema = z.object({
+  code: z.string().trim().min(1),
+  type: locationTypeSchema,
+  label: z.string().trim().min(1)
+});
+
+export const locationUpdateSchema = locationCreateSchema.partial().refine((value) => Object.keys(value).length > 0, {
+  message: 'At least one field is required'
+});
+
+export const inventoryMoveSchema = z.object({
+  itemId: z.string().trim().min(1),
+  fromLocationCode: z.string().trim().min(1),
+  toLocationCode: z.string().trim().min(1),
+  qty: z.number().positive(),
+  notes: z.string().trim().optional()
+});
+
+export const barcodeSearchSchema = z.object({
+  barcode: z.string().trim().min(1)
+});
+
 export const modulePermissionInputSchema = z.record(z.enum(moduleKeys), permissionSetSchema);
 
 export type RegisterInput = z.infer<typeof registerSchema>;
@@ -99,3 +137,8 @@ export type AssignRoleInput = z.infer<typeof assignRoleSchema>;
 export type PosDailySummaryInput = z.infer<typeof posDailySummarySchema>;
 export type PosDailyQueryInput = z.infer<typeof posDailyQuerySchema>;
 export type MonthlySummaryQueryInput = z.infer<typeof monthlySummaryQuerySchema>;
+export type ItemCreateInput = z.infer<typeof itemCreateSchema>;
+export type ItemUpdateInput = z.infer<typeof itemUpdateSchema>;
+export type LocationCreateInput = z.infer<typeof locationCreateSchema>;
+export type LocationUpdateInput = z.infer<typeof locationUpdateSchema>;
+export type InventoryMoveInput = z.infer<typeof inventoryMoveSchema>;

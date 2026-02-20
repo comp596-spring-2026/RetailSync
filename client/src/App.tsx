@@ -13,6 +13,9 @@ import { RolesPage } from './pages/RolesPage';
 import { UsersPage } from './pages/UsersPage';
 import { PosPage } from './pages/PosPage';
 import { ReportsPage } from './pages/ReportsPage';
+import { ItemsPage } from './pages/ItemsPage';
+import { LocationsPage } from './pages/LocationsPage';
+import { InventoryPage } from './pages/InventoryPage';
 
 const App = () => {
   return (
@@ -32,10 +35,10 @@ const App = () => {
           <Route path="roles" element={<RolesPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="pos" element={<PosPage />} />
-          <Route path="items" element={<ModuleShellPage module="items" />} />
+          <Route path="items" element={<ItemsPage />} />
           <Route path="invoices" element={<ModuleShellPage module="invoices" />} />
-          <Route path="inventory" element={<ModuleShellPage module="inventory" />} />
-          <Route path="locations" element={<ModuleShellPage module="locations" />} />
+          <Route path="inventory" element={<InventoryPage />} />
+          <Route path="locations" element={<LocationsPage />} />
           <Route path="reconciliation" element={<ModuleShellPage module="reconciliation" />} />
           <Route path="bankStatements" element={<ModuleShellPage module="bankStatements" />} />
           <Route path="suppliers" element={<ModuleShellPage module="suppliers" />} />

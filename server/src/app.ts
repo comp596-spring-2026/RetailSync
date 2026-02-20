@@ -10,6 +10,9 @@ import userRoutes from './routes/userRoutes';
 import moduleRoutes from './routes/moduleRoutes';
 import posRoutes from './routes/posRoutes';
 import reportRoutes from './routes/reportRoutes';
+import itemRoutes from './routes/itemRoutes';
+import locationRoutes from './routes/locationRoutes';
+import inventoryRoutes from './routes/inventoryRoutes';
 import { notFound } from './middleware/notFound';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -36,6 +39,9 @@ export const createApp = () => {
   app.use('/api/users', userRoutes);
   app.use('/api/pos', posRoutes);
   app.use('/api/reports', reportRoutes);
+  app.use('/api/items', itemRoutes);
+  app.use('/api/locations', locationRoutes);
+  app.use('/api/inventory', inventoryRoutes);
   app.use('/api', moduleRoutes);
 
   app.use(notFound);
