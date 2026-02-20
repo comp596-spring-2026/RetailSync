@@ -70,6 +70,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [quality]
+    env:
+      MONGOMS_PREFER_GLOBAL_PATH: "0"
+      MONGOMS_DOWNLOAD_DIR: ${{ runner.temp }}/mongodb-binaries
 
     steps:
       - name: Checkout
@@ -100,6 +103,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
+
+      - name: Prepare mongodb-memory-server cache
+        run: |
+          mkdir -p "$MONGOMS_DOWNLOAD_DIR"
+          find "$MONGOMS_DOWNLOAD_DIR" -name '*.lock' -type f -delete || true
 
       - name: Run all tests
         run: pnpm test
