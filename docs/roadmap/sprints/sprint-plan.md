@@ -44,14 +44,15 @@ Sprint 1 close criteria:
 - S2-6 Playwright smoke paths (Phase 0-2): `TODO`
 
 ### EPIC S2-E4 CI/CD + Docker
-- S2-7 CI execution confirmation + branch protections: `TODO`
-- S2-8 Docker compose single-command boot hardening: `TODO`
-- S2-9 Registry/BuildKit reliability runbook: `TODO`
+- S2-7 CI execution confirmation + branch protections: `IN_PROGRESS`
+- S2-8 Docker compose single-command boot hardening: `IN_PROGRESS`
+- S2-9 Registry/BuildKit reliability runbook: `IN_PROGRESS`
 
 Sprint 2 close criteria:
 - CI green in hosted runner
 - Docker build and compose smoke green
 - E2E smoke suite green
+- Coverage reporting policy defined and enforced
 
 ## Sprint 3: Phase 3 OCR Scaffolding
 

@@ -21,7 +21,7 @@ Status legend:
 | Phase 2 | Items + locations + inventory ledger | `DONE` | CRUD/import/move/aggregate complete |
 | Phase 3 | Invoice OCR + confirm flow | `TODO` | Next major build |
 | Phase 4 | Bank statements + reconciliation + payments allocation | `TODO` | Planned after Phase 3 |
-| DevOps | Docker + CI/CD + docs | `PARTIAL` | Artifacts complete, local infra/network blockers remain |
+| DevOps | Docker + CI/CD + docs | `PARTIAL` | CI quality/tests/build gates active; Docker publishing is manual-only |
 
 ---
 
@@ -179,15 +179,19 @@ Status legend:
 
 ### Implemented tests
 - Server: health endpoint smoke test: `DONE`
+- Server: auth refresh rotation (including old refresh token reuse rejection): `DONE`
+- Server: tenant isolation read/write protections and aggregate scoping: `DONE`
+- Server: inventory ledger immutability: `DONE`
 - Client: permission utility tests: `DONE`
+- Client: `PermissionGate` render behavior tests: `DONE`
 
 ### Needed test expansion
-- Auth refresh lifecycle tests: `TODO`
-- Onboarding edge-case tests: `TODO`
-- RBAC middleware route coverage: `TODO`
-- POS import parser/idempotency tests: `TODO`
-- Inventory ledger aggregation tests: `TODO`
-- E2E happy-path flows (Playwright/Cypress): `TODO`
+- Onboarding edge-case tests (invite mismatch/expired paths): `TODO`
+- RBAC middleware route coverage across all module/action combinations: `TODO`
+- POS import parser failure paths and idempotency tests: `TODO`
+- Items/locations CRUD negative paths and validation matrix: `TODO`
+- End-to-end happy-path smoke flows (Playwright/Cypress): `TODO`
+- Coverage threshold gate in CI (line/branch/function targets): `TODO`
 
 ---
 
@@ -195,25 +199,25 @@ Status legend:
 
 ### Done
 - Docker artifacts (server/client/compose): `DONE`
-- CI gate workflow (quality/tests/build/docker/security): `DONE`
-- Release image workflow to GHCR: `DONE`
+- CI gate workflow (quality/tests/build): `DONE`
+- Release image workflow to GHCR (manual dispatch): `DONE`
 - Detailed docs + runbooks + architecture diagrams: `DONE`
 - PR template (production-grade): `DONE`
 
 ### Pending hardening
-- Full CI execution confirmation in hosted runner: `TODO`
+- Full CI execution confirmation in hosted runner after mongodb-memory-server lock hardening: `IN_PROGRESS`
 - Branch protection rules activation: `TODO`
 - Secrets/env governance finalization: `TODO`
-- Vulnerability policy tuning (audit gating strategy): `TODO`
+- Coverage reporting and threshold policy in CI: `TODO`
 
 ---
 
 ## Current Blockers Observed
 
-- Local environment had intermittent npm registry resolution failures (`ENOTFOUND`) during install.
-- Docker Desktop BuildKit hit an infrastructure storage I/O error on one build attempt (`metadata_v2.db input/output error`).
+- GitHub runner occasionally hit `mongodb-memory-server` binary lock contention in test setup.
+- CI now isolates Mongo binary cache per job and clears stale lock files before running tests, but this still needs one confirmed green run on hosted CI.
 
-These are environment/runtime blockers, not core application code design blockers.
+No confirmed application-code design blocker is currently open.
 
 ---
 

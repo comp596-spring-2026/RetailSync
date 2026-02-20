@@ -19,15 +19,11 @@ Gates (all required):
    - `pnpm lint`
 2. `tests`
    - `pnpm test`
+   - isolates `mongodb-memory-server` cache per job and clears stale lock files
 3. `build`
    - `pnpm build`
    - uploads build artifacts
-4. `docker-validation`
-   - `docker compose config`
-   - server/client Docker build validation (no push)
-5. `security-audit`
-   - `pnpm audit --prod --audit-level high`
-6. `final-status`
+4. `final-status`
    - fails if any prior gate failed
 
 ```mermaid
@@ -35,19 +31,15 @@ flowchart TD
   PR[PR or Push] --> Q[Quality]
   Q --> T[Tests]
   Q --> B[Build]
-  Q --> S[Security Audit]
-  B --> D[Docker Validation]
   T --> F[Final Status]
-  D --> F
-  S --> F
+  B --> F
 ```
 
 ## Release Workflow
 
 Triggers:
 
-- push to `main`
-- push tags `v*`
+- manual run only (`workflow_dispatch`)
 
 Behavior:
 
@@ -69,18 +61,16 @@ Set on `main`:
   - `Typecheck + Lint`
   - `Test Suite`
   - `Build Artifacts`
-  - `Docker Build Validation`
-  - `Security Audit (Production Dependencies)`
   - `Final CI Status`
 - Require conversation resolution
 - Restrict force-push and branch deletion
 
-## Required Repository Settings
+## Recommended Repository Settings
 
 1. Actions permissions:
    - Workflow permissions: `Read and write`
 2. Package permissions:
-   - allow GitHub Actions to publish packages
+   - allow GitHub Actions to publish packages when running release workflow
 3. Dependabot alerts enabled
 4. Secret scanning enabled
 
@@ -94,8 +84,8 @@ Set on `main`:
 
 ### Production image release
 
-- merge to `main` -> release workflow pushes `latest` + `sha`
-- optional version tag `vX.Y.Z` -> pushes semver-tagged image refs
+- manually trigger `Release Docker Images` workflow when image publishing is needed
+- workflow publishes `sha` tags and `latest` when run against `main`
 
 ### Rollback strategy
 
@@ -109,8 +99,9 @@ sequenceDiagram
   participant CR as GHCR
   participant Env as Runtime Environment
 
-  Dev->>GH: Merge PR to main
+  Dev->>GH: Merge PR
   GH->>GH: Run CI gates
+  Dev->>GH: Manually trigger release workflow (when needed)
   GH->>CR: Push server/client images
   Env->>CR: Pull latest or pinned sha image
   Env->>Env: Deploy

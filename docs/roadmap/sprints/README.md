@@ -2,6 +2,19 @@
 
 This folder contains the official sprint-by-sprint delivery plan for RetailSync.
 
+## Current Sprint Situation (2026-02-20)
+
+- Active sprint focus: Sprint 2 (Tests + CI gates + Docker reliability)
+- Completed within this focus:
+  - core CI gates for `typecheck`, `lint`, `test`, `build`
+  - server tenant/auth/immutability integration tests
+  - client permission unit/component tests
+- Still open:
+  - CI hosted-runner stability confirmation after mongodb-memory-server lock hardening
+  - broader route-level and onboarding test expansion
+  - E2E smoke suite
+  - explicit coverage threshold policy
+
 ## Sprint Order
 
 1. Sprint 1: Multi-tenant + security hardening

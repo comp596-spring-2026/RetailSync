@@ -111,8 +111,19 @@ Tests are implemented and runnable now:
 
 - `/Users/trupal/Projects/RetailSync/server/src/app.test.ts`
   - verifies `/health` endpoint behavior
+- `/Users/trupal/Projects/RetailSync/server/src/auth.refresh.test.ts`
+  - verifies refresh rotation behavior and token reuse rejection
+- `/Users/trupal/Projects/RetailSync/server/src/tenantIsolation.test.ts`
+  - verifies tenant isolation for reads/writes and aggregate scoping
+- `/Users/trupal/Projects/RetailSync/server/src/inventoryLedger.immutability.test.ts`
+  - verifies immutable ledger constraints
 - `/Users/trupal/Projects/RetailSync/client/src/utils/permissions.test.ts`
   - verifies RBAC action checks for CRUD + custom actions + wildcard
+- `/Users/trupal/Projects/RetailSync/client/src/components/PermissionGate.test.tsx`
+  - verifies UI gating by module/action permission
+
+Current gap:
+- Coverage thresholds are not yet enforced in CI (test pass/fail is enforced today).
 
 See `/Users/trupal/Projects/RetailSync/docs/testing/testing-strategy.md` for full test plan and next test targets.
 
