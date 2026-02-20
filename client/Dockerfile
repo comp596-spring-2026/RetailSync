@@ -13,6 +13,7 @@ COPY client/package.json client/tsconfig.json client/tsconfig.node.json client/v
 COPY client/src ./client/src
 
 RUN pnpm install --no-frozen-lockfile
+RUN pnpm --filter @retailsync/shared build
 RUN pnpm --filter @retailsync/client build
 
 FROM nginx:1.27-alpine AS runtime
