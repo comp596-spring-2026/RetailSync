@@ -58,5 +58,21 @@ services:
     ports:
       - "8080:80"
 
+  smoke:
+    image: curlimages/curl:8.12.1
+    container_name: retailsync-smoke
+    profiles: ["verify"]
+    depends_on:
+      server:
+        condition: service_healthy
+      client:
+        condition: service_healthy
+    command:
+      [
+        "sh",
+        "-c",
+        "set -e; curl -fsS http://server:4000/health >/dev/null; curl -fsS http://client/ >/dev/null; echo 'smoke-check: ok'"
+      ]
+
 volumes:
   mongo_data:

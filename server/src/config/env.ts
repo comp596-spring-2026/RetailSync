@@ -1,6 +1,35 @@
 import dotenv from 'dotenv';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-dotenv.config();
+const currentFileDir = dirname(fileURLToPath(import.meta.url));
+
+const envCandidates = [
+  resolve(process.cwd(), 'server/.env'),
+  resolve(process.cwd(), '.env'),
+  resolve(currentFileDir, '../../.env')
+];
+
+const exampleCandidates = [
+  resolve(process.cwd(), 'server/.env.example'),
+  resolve(process.cwd(), '.env.example'),
+  resolve(currentFileDir, '../../.env.example')
+];
+
+for (const path of envCandidates) {
+  if (existsSync(path)) {
+    dotenv.config({ path, override: false });
+    break;
+  }
+}
+
+for (const path of exampleCandidates) {
+  if (existsSync(path)) {
+    dotenv.config({ path, override: false });
+    break;
+  }
+}
 
 const required = [
   'PORT',

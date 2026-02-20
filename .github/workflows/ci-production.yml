@@ -184,10 +184,44 @@ jobs:
           echo "## Build Gate" >> $GITHUB_STEP_SUMMARY
           echo "- Shared, server, and client builds: passed" >> $GITHUB_STEP_SUMMARY
 
+  docker-smoke:
+    name: Docker Smoke Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [build]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker compose build and startup
+        run: docker compose up --build -d
+
+      - name: Run smoke verification profile
+        run: docker compose --profile verify run --rm smoke
+
+      - name: Print compose service status
+        if: ${{ always() }}
+        run: docker compose ps
+
+      - name: Print compose logs on failure
+        if: ${{ failure() }}
+        run: docker compose logs --no-color
+
+      - name: Shutdown compose stack
+        if: ${{ always() }}
+        run: docker compose down -v --remove-orphans
+
+      - name: Summary
+        run: |
+          echo "## Docker Smoke Gate" >> $GITHUB_STEP_SUMMARY
+          echo "- docker compose stack started successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- smoke profile checks passed" >> $GITHUB_STEP_SUMMARY
+
   final-status:
     name: Final CI Status
     runs-on: ubuntu-latest
-    needs: [quality, tests, build]
+    needs: [quality, tests, build, docker-smoke]
     if: ${{ always() }}
 
     steps:
@@ -196,12 +230,14 @@ jobs:
           quality="${{ needs.quality.result }}"
           tests="${{ needs.tests.result }}"
           build="${{ needs.build.result }}"
+          docker_smoke="${{ needs.docker-smoke.result }}"
 
           echo "quality => $quality"
           echo "tests => $tests"
           echo "build => $build"
+          echo "docker-smoke => $docker_smoke"
           echo "## Final Status" >> $GITHUB_STEP_SUMMARY
-          if [ "$quality" = "success" ] && [ "$tests" = "success" ] && [ "$build" = "success" ]; then
+          if [ "$quality" = "success" ] && [ "$tests" = "success" ] && [ "$build" = "success" ] && [ "$docker_smoke" = "success" ]; then
             echo "- All CI quality gates passed." >> $GITHUB_STEP_SUMMARY
             exit 0
           else
