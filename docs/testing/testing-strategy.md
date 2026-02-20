@@ -66,6 +66,5 @@ Coverage percentages are not currently gated in CI.
 
 ## Suggested Near-Term Tooling Expansion
 
-- Add mongodb-memory-server for route+model integration tests.
 - Add Playwright for critical frontend flows.
-- Add CI workflow to run `typecheck + test` on pull requests.
+- Add coverage reporting in CI with explicit thresholds for line/branch/function/statements.

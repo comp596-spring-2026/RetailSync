@@ -19,7 +19,9 @@ Gates (all required):
    - `pnpm lint`
 2. `tests`
    - `pnpm test`
-   - isolates `mongodb-memory-server` cache per job and clears stale lock files
+   - sets `MONGOMS_DOWNLOAD_DIR` explicitly
+   - caches mongodb-memory-server binaries
+   - clears stale mongodb-memory-server lock files
 3. `build`
    - `pnpm build`
    - uploads build artifacts
@@ -78,14 +80,31 @@ Set on `main`:
 
 ### PR validation
 
-- open PR -> CI gate runs automatically
-- fix failing job
-- merge only after all gates pass
+1. Run local gate before push:
+   - `make check`
+2. Open PR:
+   - CI gate runs automatically.
+3. Fix failing jobs and re-run.
+4. Merge only after all gates pass.
 
 ### Production image release
 
 - manually trigger `Release Docker Images` workflow when image publishing is needed
 - workflow publishes `sha` tags and `latest` when run against `main`
+
+## CI Troubleshooting
+
+1. `actions/setup-node` says lock file missing:
+- Ensure `/Users/trupal/Projects/RetailSync/pnpm-lock.yaml` is tracked in git.
+
+2. `actions/cache` fails with `Input required and not supplied: path`:
+- Ensure `Resolve pnpm store path` step exists before each pnpm cache step.
+
+3. `mkdir: cannot create directory ''` in tests:
+- Ensure `MONGOMS_DOWNLOAD_DIR` is set before mkdir (via `$GITHUB_ENV`).
+
+4. mongodb-memory-server lock errors in CI:
+- Keep per-job cache dir and stale `.lock` cleanup step in test job.
 
 ### Rollback strategy
 

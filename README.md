@@ -41,7 +41,7 @@ RetailSync/
 
 ```bash
 cd /Users/trupal/Projects/RetailSync
-pnpm install
+make install
 ```
 
 2. Configure environment files:
@@ -66,7 +66,7 @@ VITE_API_URL=http://localhost:4000/api
 3. Run both apps:
 
 ```bash
-pnpm dev
+make dev
 ```
 
 4. Open:
@@ -77,15 +77,42 @@ pnpm dev
 
 ```bash
 # quality
-pnpm typecheck
-pnpm lint
-pnpm test
+make typecheck
+make lint
+make test
+make build
+make check
 
 # single-package checks
 pnpm --filter @retailsync/server typecheck
 pnpm --filter @retailsync/client typecheck
 pnpm --filter @retailsync/server test
 pnpm --filter @retailsync/client test
+```
+
+## Makefile Workflow
+
+The repository now includes a root Makefile for the full lifecycle.
+
+```bash
+# list commands
+make help
+
+# local development
+make dev
+make dev-server
+make dev-client
+
+# docker lifecycle
+make start
+make stop
+make restart
+make logs
+
+# cleanup
+make clean
+make reset
+make reset-hard
 ```
 
 ## Security Model
@@ -164,7 +191,7 @@ Detailed roadmap: `/Users/trupal/Projects/RetailSync/docs/roadmap/milestones.md`
 ### Run Full Stack with Docker Compose
 
 ```bash
-docker compose up --build -d
+make start
 ```
 
 Endpoints:
@@ -176,13 +203,13 @@ Endpoints:
 Stop:
 
 ```bash
-docker compose down
+make stop
 ```
 
 Stop + remove db volume:
 
 ```bash
-docker compose down -v
+make reset
 ```
 
 ### Production Validation Commands
@@ -190,10 +217,7 @@ docker compose down -v
 Run all checks locally:
 
 ```bash
-pnpm typecheck
-pnpm lint
-pnpm build
-pnpm test
+make check
 ```
 
 Run checks in Dockerized server/client containers (after `docker compose up`):
@@ -206,3 +230,16 @@ docker compose exec client nginx -v
 ## Current Environment Note
 
 If you see `ENOTFOUND registry.npmjs.org` during `pnpm install`, the environment has no npm registry access. In that case, dependency install, local build, and tests cannot execute until network access is restored.
+
+## End-to-End Workflow
+
+1. Start from a clean local state:
+   - `make install`
+   - `make check`
+2. Run app locally for manual verification:
+   - `make dev` (or `make start` for Docker)
+3. Push branch and open PR:
+   - CI runs `quality`, `tests`, and `build` gates.
+4. Merge only after all required checks pass.
+5. Trigger image publishing manually when needed:
+   - run `Release Docker Images` workflow in GitHub Actions.
