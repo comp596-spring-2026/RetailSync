@@ -239,7 +239,7 @@ Current sprint execution status:
 
 | Sprint | Primary Scope | Current Status |
 |---|---|---|
-| Sprint 1 | Tenant/security hardening | `TODO` |
+| Sprint 1 | Tenant/security hardening | `IN_PROGRESS` |
 | Sprint 2 | Tests + CI + Docker reliability | `IN_PROGRESS` |
 | Sprint 3 | Invoice OCR scaffolding | `TODO` |
 | Sprint 4 | Invoice hardening | `TODO` |

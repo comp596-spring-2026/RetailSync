@@ -1,9 +1,11 @@
 import bcrypt from 'bcryptjs';
+import { createHash, randomUUID } from 'node:crypto';
 import { Request, Response } from 'express';
 import { loginSchema, registerSchema } from '@retailsync/shared';
 import { UserModel } from '../models/User';
 import { CompanyModel } from '../models/Company';
 import { RoleModel } from '../models/Role';
+import { RefreshTokenModel } from '../models/RefreshToken';
 import { fail, ok } from '../utils/apiResponse';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { env } from '../config/env';
@@ -25,6 +27,22 @@ const clearRefreshCookie = (res: Response) => {
     sameSite: 'lax',
     secure: env.nodeEnv === 'production'
   });
+};
+
+const hashTokenId = (value: string) => createHash('sha256').update(value).digest('hex');
+
+const refreshExpiryDate = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+const issueRefreshToken = async (userId: string, email: string, res: Response) => {
+  const jti = randomUUID();
+  const token = signRefreshToken({ sub: userId, email, jti });
+  await RefreshTokenModel.create({
+    userId,
+    jtiHash: hashTokenId(jti),
+    expiresAt: refreshExpiryDate()
+  });
+  setRefreshCookie(res, token);
+  return token;
 };
 
 const buildAccess = (user: { _id: { toString(): string }; email: string; companyId?: unknown; roleId?: unknown }) =>
@@ -57,8 +75,7 @@ export const register = async (req: Request, res: Response) => {
   });
 
   const accessToken = buildAccess(user);
-  const refreshToken = signRefreshToken({ sub: user._id.toString(), email: user.email });
-  setRefreshCookie(res, refreshToken);
+  await issueRefreshToken(user._id.toString(), user.email, res);
 
   return ok(res, { accessToken }, 201);
 };
@@ -80,8 +97,7 @@ export const login = async (req: Request, res: Response) => {
   }
 
   const accessToken = buildAccess(user);
-  const refreshToken = signRefreshToken({ sub: user._id.toString(), email: user.email });
-  setRefreshCookie(res, refreshToken);
+  await issueRefreshToken(user._id.toString(), user.email, res);
 
   return ok(res, { accessToken });
 };
@@ -94,14 +110,41 @@ export const refresh = async (req: Request, res: Response) => {
 
   try {
     const payload = verifyRefreshToken(token);
+    const currentJtiHash = hashTokenId(payload.jti);
     const user = await UserModel.findById(payload.sub);
     if (!user || !user.isActive) {
       clearRefreshCookie(res);
       return fail(res, 'Unauthorized', 401);
     }
 
+    const tokenRecord = await RefreshTokenModel.findOne({
+      userId: user._id,
+      jtiHash: currentJtiHash,
+      revokedAt: null,
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!tokenRecord) {
+      clearRefreshCookie(res);
+      return fail(res, 'Unauthorized', 401);
+    }
+
     const accessToken = buildAccess(user);
-    const refreshToken = signRefreshToken({ sub: user._id.toString(), email: user.email });
+    const nextJti = randomUUID();
+    const nextJtiHash = hashTokenId(nextJti);
+    const refreshToken = signRefreshToken({ sub: user._id.toString(), email: user.email, jti: nextJti });
+
+    tokenRecord.revokedAt = new Date();
+    tokenRecord.replacedByHash = nextJtiHash;
+
+    await Promise.all([
+      tokenRecord.save(),
+      RefreshTokenModel.create({
+        userId: user._id,
+        jtiHash: nextJtiHash,
+        expiresAt: refreshExpiryDate()
+      })
+    ]);
     setRefreshCookie(res, refreshToken);
 
     return ok(res, { accessToken });
@@ -111,7 +154,19 @@ export const refresh = async (req: Request, res: Response) => {
   }
 };
 
-export const logout = async (_req: Request, res: Response) => {
+export const logout = async (req: Request, res: Response) => {
+  const token = req.cookies?.[refreshCookieName];
+  if (token) {
+    try {
+      const payload = verifyRefreshToken(token);
+      await RefreshTokenModel.updateOne(
+        { userId: payload.sub, jtiHash: hashTokenId(payload.jti), revokedAt: null },
+        { $set: { revokedAt: new Date() } }
+      );
+    } catch {
+      // No-op on malformed/expired token.
+    }
+  }
   clearRefreshCookie(res);
   return ok(res, { message: 'Logged out' });
 };

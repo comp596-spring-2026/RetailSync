@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { fail } from '../utils/apiResponse';
 import { verifyAccessToken } from '../utils/jwt';
 import { UserModel } from '../models/User';
+import { setRequestContext } from '../config/requestContext';
 
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -28,6 +29,10 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       req.companyId = req.user.companyId;
     }
     req.roleId = req.user.roleId ?? undefined;
+    setRequestContext({
+      tenantId: req.user.companyId ?? undefined,
+      userId: req.user.id
+    });
     return next();
   } catch {
     return fail(res, 'Unauthorized', 401);

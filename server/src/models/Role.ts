@@ -1,5 +1,6 @@
 import { moduleKeys } from '@retailsync/shared';
 import { Schema, model, InferSchemaType } from 'mongoose';
+import { tenantPlugin } from './plugins/tenantPlugin';
 
 const permissionSetSchema = new Schema(
   {
@@ -25,6 +26,7 @@ const roleSchema = new Schema(
 );
 
 roleSchema.index({ companyId: 1, name: 1 }, { unique: true });
+roleSchema.plugin(tenantPlugin);
 
 export type RoleDoc = InferSchemaType<typeof roleSchema> & { _id: string };
 export const RoleModel = model('Role', roleSchema);

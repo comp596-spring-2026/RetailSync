@@ -1,4 +1,5 @@
 import { Schema, model, InferSchemaType } from 'mongoose';
+import { tenantPlugin } from './plugins/tenantPlugin';
 
 const locationSchema = new Schema(
   {
@@ -11,6 +12,7 @@ const locationSchema = new Schema(
 );
 
 locationSchema.index({ companyId: 1, code: 1 }, { unique: true });
+locationSchema.plugin(tenantPlugin);
 
 export type LocationDoc = InferSchemaType<typeof locationSchema> & { _id: string };
 export const LocationModel = model('Location', locationSchema);

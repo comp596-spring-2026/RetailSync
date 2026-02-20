@@ -15,6 +15,7 @@ import locationRoutes from './routes/locationRoutes';
 import inventoryRoutes from './routes/inventoryRoutes';
 import { notFound } from './middleware/notFound';
 import { errorHandler } from './middleware/errorHandler';
+import { withRequestContext } from './config/requestContext';
 
 export const createApp = () => {
   const app = express();
@@ -27,6 +28,7 @@ export const createApp = () => {
   );
   app.use(express.json());
   app.use(cookieParser());
+  app.use(withRequestContext);
 
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', data: { uptime: process.uptime() } });

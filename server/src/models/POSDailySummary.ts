@@ -1,4 +1,5 @@
 import { Schema, model, InferSchemaType } from 'mongoose';
+import { tenantPlugin } from './plugins/tenantPlugin';
 
 const posDailySummarySchema = new Schema(
   {
@@ -23,6 +24,7 @@ const posDailySummarySchema = new Schema(
 );
 
 posDailySummarySchema.index({ companyId: 1, date: 1 }, { unique: true });
+posDailySummarySchema.plugin(tenantPlugin);
 
 export type POSDailySummaryDoc = InferSchemaType<typeof posDailySummarySchema> & { _id: string };
 export const POSDailySummaryModel = model('POSDailySummary', posDailySummarySchema);

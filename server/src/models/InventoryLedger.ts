@@ -1,4 +1,5 @@
 import { Schema, model, InferSchemaType } from 'mongoose';
+import { tenantPlugin } from './plugins/tenantPlugin';
 
 const inventoryLedgerSchema = new Schema(
   {
@@ -19,6 +20,11 @@ const inventoryLedgerSchema = new Schema(
 
 inventoryLedgerSchema.index({ companyId: 1, itemId: 1, createdAt: -1 });
 inventoryLedgerSchema.index({ companyId: 1, fromLocationId: 1, toLocationId: 1 });
+inventoryLedgerSchema.plugin(tenantPlugin);
+
+inventoryLedgerSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function immutableLedgerGuard() {
+  throw new Error('Ledger entries are immutable');
+});
 
 export type InventoryLedgerDoc = InferSchemaType<typeof inventoryLedgerSchema> & { _id: string };
 export const InventoryLedgerModel = model('InventoryLedger', inventoryLedgerSchema);

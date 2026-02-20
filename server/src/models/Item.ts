@@ -1,4 +1,5 @@
 import { Schema, model, InferSchemaType } from 'mongoose';
+import { tenantPlugin } from './plugins/tenantPlugin';
 
 const itemSchema = new Schema(
   {
@@ -17,6 +18,7 @@ const itemSchema = new Schema(
 
 itemSchema.index({ companyId: 1, barcode: 1 }, { unique: true });
 itemSchema.index({ companyId: 1, upc: 1, modifier: 1 }, { unique: true });
+itemSchema.plugin(tenantPlugin);
 
 export type ItemDoc = InferSchemaType<typeof itemSchema> & { _id: string };
 export const ItemModel = model('Item', itemSchema);

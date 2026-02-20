@@ -9,16 +9,16 @@ Status legend:
 ## Sprint 1: Multi-tenant + Security Hardening
 
 ### EPIC S1-E1 Tenant Isolation Enforcement
-- S1-1 Tenant query enforcement layer (wrapper/plugin/repository): `TODO`
-- S1-2 Tenant aggregate helper + lint rule: `TODO`
-- S1-3 Tenant breach regression suite: `TODO`
+- S1-1 Tenant query enforcement layer (wrapper/plugin/repository): `DONE`
+- S1-2 Tenant aggregate helper + lint rule: `IN_PROGRESS`
+- S1-3 Tenant breach regression suite: `DONE`
 
 ### EPIC S1-E2 Auth + Refresh Security
-- S1-4 Refresh token rotation + revoke: `TODO`
-- S1-5 Auth middleware contract hardening: `TODO`
+- S1-4 Refresh token rotation + revoke: `DONE`
+- S1-5 Auth middleware contract hardening: `IN_PROGRESS`
 
 ### EPIC S1-E3 Immutability + Delete Governance
-- S1-6 Inventory ledger immutability enforcement: `TODO`
+- S1-6 Inventory ledger immutability enforcement: `DONE`
 - S1-7 Never-delete framework + void contract: `TODO`
 
 ### EPIC S1-E4 Audit Foundation
@@ -37,7 +37,7 @@ Sprint 1 close criteria:
 - S2-3 RBAC middleware coverage tests: `TODO`
 
 ### EPIC S2-E2 Frontend Tests
-- S2-4 PermissionGate behavior tests: `TODO`
+- S2-4 PermissionGate behavior tests: `DONE`
 - S2-5 Axios refresh flow tests: `TODO`
 
 ### EPIC S2-E3 E2E Smoke Suite
