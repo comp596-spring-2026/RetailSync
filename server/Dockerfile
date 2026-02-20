@@ -17,16 +17,17 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN addgroup -S nodejs && adduser -S nodeuser -G nodejs
+RUN apk add --no-cache wget && addgroup -S nodejs && adduser -S nodeuser -G nodejs
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/shared/package.json ./shared/package.json
 COPY --from=builder /app/shared/dist ./shared/dist
 COPY --from=builder /app/server/package.json ./server/package.json
 COPY --from=builder /app/server/dist ./server/dist
+COPY --from=builder /app/server/src ./server/src
 
 USER nodeuser
 WORKDIR /app/server
 EXPOSE 4000
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "tsx", "src/index.ts"]
