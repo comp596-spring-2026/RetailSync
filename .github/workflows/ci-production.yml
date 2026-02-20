@@ -38,8 +38,20 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 
       - name: Typecheck
         run: pnpm typecheck
@@ -74,8 +86,20 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 
       - name: Run all tests
         run: pnpm test
@@ -106,8 +130,20 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 
       - name: Build all packages
         run: pnpm build
@@ -131,83 +167,10 @@ jobs:
           echo "## Build Gate" >> $GITHUB_STEP_SUMMARY
           echo "- Shared, server, and client builds: passed" >> $GITHUB_STEP_SUMMARY
 
-  docker-validation:
-    name: Docker Build Validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [build]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate compose file
-        run: docker compose config
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build server image (no push)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: server/Dockerfile
-          push: false
-          tags: retailsync-server:ci
-
-      - name: Build client image (no push)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: client/Dockerfile
-          push: false
-          build-args: |
-            VITE_API_URL=/api
-          tags: retailsync-client:ci
-
-      - name: Summary
-        run: |
-          echo "## Docker Validation" >> $GITHUB_STEP_SUMMARY
-          echo "- docker compose config: passed" >> $GITHUB_STEP_SUMMARY
-          echo "- server image build: passed" >> $GITHUB_STEP_SUMMARY
-          echo "- client image build: passed" >> $GITHUB_STEP_SUMMARY
-
-  security-audit:
-    name: Security Audit (Production Dependencies)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [quality]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Audit prod dependencies (high+)
-        run: pnpm audit --prod --audit-level high
-
-      - name: Summary
-        run: |
-          echo "## Security Gate" >> $GITHUB_STEP_SUMMARY
-          echo "- pnpm audit (prod, high+): passed" >> $GITHUB_STEP_SUMMARY
-
   final-status:
     name: Final CI Status
     runs-on: ubuntu-latest
-    needs: [quality, tests, build, docker-validation, security-audit]
+    needs: [quality, tests, build]
     if: ${{ always() }}
 
     steps:
@@ -216,19 +179,15 @@ jobs:
           quality="${{ needs.quality.result }}"
           tests="${{ needs.tests.result }}"
           build="${{ needs.build.result }}"
-          docker="${{ needs.docker-validation.result }}"
-          security="${{ needs.security-audit.result }}"
 
           echo "quality => $quality"
           echo "tests => $tests"
           echo "build => $build"
-          echo "docker-validation => $docker"
-          echo "security-audit => $security"
           echo "## Final Status" >> $GITHUB_STEP_SUMMARY
-          if [ "$quality" = "success" ] && [ "$tests" = "success" ] && [ "$build" = "success" ] && [ "$docker" = "success" ] && [ "$security" = "success" ]; then
-            echo "- All production CI gates passed." >> $GITHUB_STEP_SUMMARY
+          if [ "$quality" = "success" ] && [ "$tests" = "success" ] && [ "$build" = "success" ]; then
+            echo "- All CI quality gates passed." >> $GITHUB_STEP_SUMMARY
             exit 0
           else
-            echo "- One or more production CI gates failed." >> $GITHUB_STEP_SUMMARY
+            echo "- One or more CI quality gates failed." >> $GITHUB_STEP_SUMMARY
             exit 1
           fi

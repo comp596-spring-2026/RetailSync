@@ -35,11 +35,9 @@ export const tenantPlugin = (schema: Schema, options?: TenantPluginOptions) => {
   const guardedQueryMethods = [
     'find',
     'findOne',
-    'count',
     'countDocuments',
     'findOneAndUpdate',
     'findOneAndDelete',
-    'findOneAndRemove',
     'updateOne',
     'updateMany',
     'deleteOne',
@@ -47,7 +45,7 @@ export const tenantPlugin = (schema: Schema, options?: TenantPluginOptions) => {
   ] as const;
 
   for (const method of guardedQueryMethods) {
-    schema.pre(method, function tenantScopeGuard() {
+    schema.pre(method as any, function tenantScopeGuard(this: any) {
       const filter = (this.getFilter?.() ?? {}) as TenantFilter;
       const context = getRequestContext();
       const tenantId = context?.tenantId;
@@ -64,12 +62,12 @@ export const tenantPlugin = (schema: Schema, options?: TenantPluginOptions) => {
     });
   }
 
-  schema.pre('aggregate', function tenantAggregateGuard() {
+  schema.pre('aggregate', function tenantAggregateGuard(this: any) {
     const pipeline = this.pipeline();
     const context = getRequestContext();
     const tenantId = context?.tenantId;
-
-    const firstMatch = pipeline[0]?.$match as TenantFilter | undefined;
+    const firstStage = pipeline[0] as Record<string, unknown> | undefined;
+    const firstMatch = firstStage?.$match as TenantFilter | undefined;
 
     if (!tenantId) {
       if (!firstMatch || firstMatch[tenantField] === undefined) {

@@ -1,9 +1,7 @@
 name: Release Docker Images
 
 on:
-  push:
-    branches: ["main"]
-    tags: ["v*"]
+  workflow_dispatch:
 
 concurrency:
   group: release-images-${{ github.ref }}
@@ -70,6 +68,8 @@ jobs:
           tags: ${{ steps.meta-server.outputs.tags }}
           labels: ${{ steps.meta-server.outputs.labels }}
           provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build and push client image
         uses: docker/build-push-action@v6
@@ -82,6 +82,8 @@ jobs:
           tags: ${{ steps.meta-client.outputs.tags }}
           labels: ${{ steps.meta-client.outputs.labels }}
           provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Release summary
         run: |

@@ -8,6 +8,7 @@ import authReducer from '../features/auth/authSlice';
 import companyReducer from '../features/company/companySlice';
 import rbacReducer from '../features/rbac/rbacSlice';
 import uiReducer from '../features/ui/uiSlice';
+import type { RootState } from '../app/store';
 import { PermissionGate } from './PermissionGate';
 
 const buildPermissions = (): PermissionsMap =>
@@ -23,6 +24,20 @@ const buildPermissions = (): PermissionsMap =>
   }, {} as PermissionsMap);
 
 const renderWithState = (permissions: PermissionsMap) => {
+  const preloadedState: RootState = {
+    auth: {
+      accessToken: 'token',
+      user: null,
+      role: null,
+      permissions,
+      status: 'authenticated',
+      error: null
+    },
+    company: { company: null },
+    rbac: { modules: [], roles: [], selectedRole: null },
+    ui: { open: false, message: '', severity: 'info' }
+  };
+
   const store = configureStore({
     reducer: {
       auth: authReducer,
@@ -30,19 +45,7 @@ const renderWithState = (permissions: PermissionsMap) => {
       rbac: rbacReducer,
       ui: uiReducer
     },
-    preloadedState: {
-      auth: {
-        accessToken: 'token',
-        user: null,
-        role: null,
-        permissions,
-        status: 'authenticated',
-        error: null
-      },
-      company: { company: null },
-      rbac: { modules: [], roles: [], selectedRole: null },
-      ui: { open: false, message: '', severity: 'info' }
-    }
+    preloadedState
   });
 
   return render(
