@@ -1,0 +1,32 @@
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+RUN corepack enable
+
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
+COPY shared/package.json shared/tsconfig.json ./shared/
+COPY shared/src ./shared/src
+COPY server/package.json server/tsconfig.json ./server/
+COPY server/src ./server/src
+
+RUN pnpm install --no-frozen-lockfile
+RUN pnpm --filter @retailsync/shared build
+RUN pnpm --filter @retailsync/server build
+
+FROM node:20-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+
+RUN addgroup -S nodejs && adduser -S nodeuser -G nodejs
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/shared/package.json ./shared/package.json
+COPY --from=builder /app/shared/dist ./shared/dist
+COPY --from=builder /app/server/package.json ./server/package.json
+COPY --from=builder /app/server/dist ./server/dist
+
+USER nodeuser
+WORKDIR /app/server
+EXPOSE 4000
+
+CMD ["node", "dist/index.js"]

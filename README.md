@@ -21,6 +21,7 @@ Current state:
 - `/Users/trupal/Projects/RetailSync/docs/frontend/routing-and-permission-gates.md`
 - `/Users/trupal/Projects/RetailSync/docs/operations/local-development.md`
 - `/Users/trupal/Projects/RetailSync/docs/operations/seeding-and-sample-data.md`
+- `/Users/trupal/Projects/RetailSync/docs/operations/ci-cd-pipeline.md`
 - `/Users/trupal/Projects/RetailSync/docs/testing/testing-strategy.md`
 - `/Users/trupal/Projects/RetailSync/docs/roadmap/milestones.md`
 
@@ -138,3 +139,59 @@ Module shells still placeholder:
 - Milestone 4: bank statement upload + auto-match suggestions + payment allocation
 
 Detailed roadmap: `/Users/trupal/Projects/RetailSync/docs/roadmap/milestones.md`
+
+## Production Docker
+
+### Files
+
+- `/Users/trupal/Projects/RetailSync/.dockerignore`
+- `/Users/trupal/Projects/RetailSync/server/Dockerfile`
+- `/Users/trupal/Projects/RetailSync/client/Dockerfile`
+- `/Users/trupal/Projects/RetailSync/client/nginx.conf`
+- `/Users/trupal/Projects/RetailSync/docker-compose.yml`
+
+### Run Full Stack with Docker Compose
+
+```bash
+docker compose up --build -d
+```
+
+Endpoints:
+
+- App: `http://localhost:8080`
+- API health: `http://localhost:4000/health`
+- MongoDB: `localhost:27017`
+
+Stop:
+
+```bash
+docker compose down
+```
+
+Stop + remove db volume:
+
+```bash
+docker compose down -v
+```
+
+### Production Validation Commands
+
+Run all checks locally:
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm build
+pnpm test
+```
+
+Run checks in Dockerized server/client containers (after `docker compose up`):
+
+```bash
+docker compose exec server node -v
+docker compose exec client nginx -v
+```
+
+## Current Environment Note
+
+If you see `ENOTFOUND registry.npmjs.org` during `pnpm install`, the environment has no npm registry access. In that case, dependency install, local build, and tests cannot execute until network access is restored.
