@@ -26,6 +26,7 @@ COPY --from=builder /app/shared/dist ./shared/dist
 COPY --from=builder /app/shared/src ./shared/src
 COPY --from=builder /app/server/package.json ./server/package.json
 COPY --from=builder /app/server/tsconfig.json ./server/tsconfig.json
+COPY --from=builder /app/server/node_modules ./server/node_modules
 COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/server/src ./server/src
 
