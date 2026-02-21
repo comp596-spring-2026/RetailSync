@@ -22,6 +22,7 @@ RUN apk add --no-cache wget && addgroup -S nodejs && adduser -S nodeuser -G node
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/tsconfig.base.json ./tsconfig.base.json
 COPY --from=builder /app/shared/package.json ./shared/package.json
+COPY --from=builder /app/shared/node_modules ./shared/node_modules
 COPY --from=builder /app/shared/dist ./shared/dist
 COPY --from=builder /app/shared/src ./shared/src
 COPY --from=builder /app/server/package.json ./server/package.json
@@ -31,7 +32,7 @@ COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/server/src ./server/src
 
 USER nodeuser
-WORKDIR /app/server
+WORKDIR /app
 EXPOSE 4000
 
-CMD ["node", "--import", "tsx", "src/index.ts"]
+CMD ["node", "--import", "tsx", "server/src/index.ts"]
