@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Button,
+  InputAdornment,
   Paper,
   Stack,
   Table,
@@ -12,11 +13,17 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import AddBoxIcon from '@mui/icons-material/AddBox';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import SaveIcon from '@mui/icons-material/Save';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
 import { useEffect, useState } from 'react';
 import { itemsApi } from '../api/itemsApi';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
 import { NoAccess } from '../components/NoAccess';
 import { PermissionGate } from '../components/PermissionGate';
+import { PageHeader } from '../components/PageHeader';
 import { showSnackbar } from '../features/ui/uiSlice';
 import { hasPermission } from '../utils/permissions';
 
@@ -102,19 +109,21 @@ export const ItemsPage = () => {
 
   return (
     <Stack spacing={2}>
+      <PageHeader title="Items" subtitle="Manage catalog and import item files" icon={<Inventory2Icon />} />
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <UploadFileIcon fontSize="small" color="primary" />
           Import Items CSV
         </Typography>
         <Stack direction="row" spacing={2} alignItems="center">
           <PermissionGate module="items" action="actions:import" mode="disable">
-            <Button variant="contained" component="label" disabled={!canImport}>
+            <Button variant="contained" startIcon={<UploadFileIcon />} component="label" disabled={!canImport}>
               Choose CSV
               <input hidden type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
             </Button>
           </PermissionGate>
           <PermissionGate module="items" action="actions:import" mode="disable">
-            <Button variant="outlined" onClick={() => void upload()} disabled={!file || !canImport}>
+            <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={() => void upload()} disabled={!file || !canImport}>
               Import
             </Button>
           </PermissionGate>
@@ -123,11 +132,23 @@ export const ItemsPage = () => {
       </Paper>
 
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <AddBoxIcon fontSize="small" color="primary" />
           Create Item
         </Typography>
         <Stack direction="row" spacing={2} flexWrap="wrap">
-          <TextField label="UPC" value={form.upc} onChange={(e) => setForm((prev) => ({ ...prev, upc: e.target.value }))} />
+          <TextField
+            label="UPC"
+            value={form.upc}
+            onChange={(e) => setForm((prev) => ({ ...prev, upc: e.target.value }))}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Inventory2Icon fontSize="small" />
+                </InputAdornment>
+              )
+            }}
+          />
           <TextField
             label="Modifier"
             value={form.modifier}
@@ -146,7 +167,7 @@ export const ItemsPage = () => {
           <TextField label="Price" type="number" value={form.price} onChange={(e) => setForm((prev) => ({ ...prev, price: e.target.value }))} />
           <TextField label="SKU" value={form.sku} onChange={(e) => setForm((prev) => ({ ...prev, sku: e.target.value }))} />
           <PermissionGate module="items" action="create" mode="disable">
-            <Button variant="contained" onClick={() => void createItem()} disabled={!canCreate}>
+            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => void createItem()} disabled={!canCreate}>
               Save
             </Button>
           </PermissionGate>
@@ -199,6 +220,7 @@ export const ItemsPage = () => {
                         size="small"
                         color="error"
                         variant="outlined"
+                        startIcon={<DeleteOutlineIcon />}
                         disabled={!canDelete}
                         onClick={() => void removeItem(item._id)}
                       >

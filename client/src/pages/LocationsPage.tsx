@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  InputAdornment,
   MenuItem,
   Paper,
   Select,
@@ -13,11 +14,16 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import AddLocationIcon from '@mui/icons-material/AddLocation';
+import WarehouseIcon from '@mui/icons-material/Warehouse';
+import SaveIcon from '@mui/icons-material/Save';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useEffect, useState } from 'react';
 import { locationsApi } from '../api/locationsApi';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
 import { NoAccess } from '../components/NoAccess';
 import { PermissionGate } from '../components/PermissionGate';
+import { PageHeader } from '../components/PageHeader';
 import { showSnackbar } from '../features/ui/uiSlice';
 import { hasPermission } from '../utils/permissions';
 
@@ -75,12 +81,25 @@ export const LocationsPage = () => {
 
   return (
     <Stack spacing={2}>
+      <PageHeader title="Locations" subtitle="Maintain shelves, coolers, and storage areas" icon={<WarehouseIcon />} />
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <AddLocationIcon fontSize="small" color="primary" />
           Create Location
         </Typography>
         <Stack direction="row" spacing={2}>
-          <TextField label="Code" value={form.code} onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))} />
+          <TextField
+            label="Code"
+            value={form.code}
+            onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <WarehouseIcon fontSize="small" />
+                </InputAdornment>
+              )
+            }}
+          />
           <Select value={form.type} onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value as LocationItem['type'] }))}>
             <MenuItem value="shelf">Shelf</MenuItem>
             <MenuItem value="fridge">Fridge</MenuItem>
@@ -89,7 +108,7 @@ export const LocationsPage = () => {
           </Select>
           <TextField label="Label" value={form.label} onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))} />
           <PermissionGate module="locations" action="create" mode="disable">
-            <Button variant="contained" disabled={!canCreate} onClick={() => void createLocation()}>
+            <Button variant="contained" startIcon={<SaveIcon />} disabled={!canCreate} onClick={() => void createLocation()}>
               Save
             </Button>
           </PermissionGate>
@@ -134,6 +153,7 @@ export const LocationsPage = () => {
                         size="small"
                         variant="outlined"
                         color="error"
+                        startIcon={<DeleteOutlineIcon />}
                         disabled={!canDelete}
                         onClick={() => void locationsApi.remove(row._id).then(() => load())}
                       >

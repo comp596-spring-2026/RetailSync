@@ -13,11 +13,16 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import GroupIcon from '@mui/icons-material/Group';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import MailOutlineIcon from '@mui/icons-material/MailOutline';
+import BadgeIcon from '@mui/icons-material/Badge';
 import { useEffect, useState } from 'react';
 import { rbacApi } from '../api/rbacApi';
 import { userApi } from '../api/userApi';
 import { useAppDispatch } from '../app/hooks';
 import { showSnackbar } from '../features/ui/uiSlice';
+import { PageHeader } from '../components/PageHeader';
 
 type UserItem = {
   _id: string;
@@ -84,8 +89,10 @@ export const UsersPage = () => {
 
   return (
     <Stack spacing={2}>
+      <PageHeader title="Users" subtitle="Invite users and manage assigned roles" icon={<GroupIcon />} />
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <PersonAddIcon fontSize="small" color="primary" />
           Invite Member
         </Typography>
         <Stack direction="row" spacing={2}>
@@ -97,7 +104,7 @@ export const UsersPage = () => {
               </MenuItem>
             ))}
           </Select>
-          <Button variant="contained" onClick={sendInvite}>
+          <Button variant="contained" startIcon={<MailOutlineIcon />} onClick={sendInvite}>
             Send Invite
           </Button>
         </Stack>
@@ -109,7 +116,8 @@ export const UsersPage = () => {
       </Paper>
 
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <GroupIcon fontSize="small" color="primary" />
           Members
         </Typography>
         <Table size="small">
@@ -148,7 +156,8 @@ export const UsersPage = () => {
       </Paper>
 
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <BadgeIcon fontSize="small" color="primary" />
           Invites
         </Typography>
         <Table size="small">

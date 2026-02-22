@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Button,
+  InputAdornment,
   Paper,
   Stack,
   Table,
@@ -12,11 +13,17 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import TableRowsIcon from '@mui/icons-material/TableRows';
+import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import { useEffect, useMemo, useState } from 'react';
 import { posApi } from '../api/posApi';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
 import { NoAccess } from '../components/NoAccess';
 import { PermissionGate } from '../components/PermissionGate';
+import { PageHeader } from '../components/PageHeader';
 import { showSnackbar } from '../features/ui/uiSlice';
 import { hasPermission } from '../utils/permissions';
 
@@ -107,6 +114,11 @@ export const PosPage = () => {
 
   return (
     <Stack spacing={2}>
+      <PageHeader
+        title="POS"
+        subtitle="Import daily sales CSV and review summaries"
+        icon={<PointOfSaleIcon />}
+      />
       <Paper sx={{ p: 3 }}>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
           <TextField
@@ -115,12 +127,19 @@ export const PosPage = () => {
             value={month}
             onChange={(e) => setMonth(e.target.value)}
             InputLabelProps={{ shrink: true }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <CalendarMonthIcon fontSize="small" />
+                </InputAdornment>
+              )
+            }}
           />
-          <Button variant="outlined" onClick={() => void loadDaily()} disabled={loading}>
+          <Button variant="outlined" startIcon={<RefreshIcon />} onClick={() => void loadDaily()} disabled={loading}>
             Refresh
           </Button>
           <PermissionGate module="pos" action="actions:import" mode="disable">
-            <Button variant="contained" component="label" disabled={!canImport || loading}>
+            <Button variant="contained" startIcon={<UploadFileIcon />} component="label" disabled={!canImport || loading}>
               Choose CSV
               <input
                 hidden
@@ -131,7 +150,13 @@ export const PosPage = () => {
             </Button>
           </PermissionGate>
           <PermissionGate module="pos" action="actions:import" mode="disable">
-            <Button variant="contained" onClick={() => void upload()} disabled={!selectedFile || !canImport || loading}>
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={<UploadFileIcon />}
+              onClick={() => void upload()}
+              disabled={!selectedFile || !canImport || loading}
+            >
               Upload
             </Button>
           </PermissionGate>
@@ -146,7 +171,8 @@ export const PosPage = () => {
       {error && <Alert severity="error">{error}</Alert>}
 
       <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>
+        <Typography variant="h6" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TableRowsIcon fontSize="small" color="primary" />
           Daily POS Summary
         </Typography>
         <Table size="small">

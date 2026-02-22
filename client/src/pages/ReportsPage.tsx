@@ -1,9 +1,12 @@
-import { Alert, Card, CardContent, Grid2 as Grid, Paper, Stack, TextField, Typography } from '@mui/material';
+import { Alert, Card, CardContent, Grid2 as Grid, InputAdornment, Paper, Stack, TextField, Typography } from '@mui/material';
+import AssessmentIcon from '@mui/icons-material/Assessment';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { useEffect, useState } from 'react';
 import { reportsApi } from '../api/reportsApi';
 import { NoAccess } from '../components/NoAccess';
 import { useAppSelector } from '../app/hooks';
 import { hasPermission } from '../utils/permissions';
+import { PageHeader } from '../components/PageHeader';
 
 type Summary = {
   month: string;
@@ -62,6 +65,7 @@ export const ReportsPage = () => {
 
   return (
     <Stack spacing={2}>
+      <PageHeader title="Reports" subtitle="Monthly financial summary and expected deposits" icon={<AssessmentIcon />} />
       <Paper sx={{ p: 3 }}>
         <TextField
           label="Month"
@@ -69,6 +73,13 @@ export const ReportsPage = () => {
           value={month}
           onChange={(e) => setMonth(e.target.value)}
           InputLabelProps={{ shrink: true }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <CalendarMonthIcon fontSize="small" />
+              </InputAdornment>
+            )
+          }}
         />
       </Paper>
       {error && <Alert severity="error">{error}</Alert>}

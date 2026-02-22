@@ -7,8 +7,13 @@ export const AppSnackbar = () => {
   const snackbar = useAppSelector((state) => state.ui);
 
   return (
-    <Snackbar open={snackbar.open} autoHideDuration={3000} onClose={() => dispatch(hideSnackbar())}>
-      <Alert severity={snackbar.severity} onClose={() => dispatch(hideSnackbar())}>
+    <Snackbar
+      open={snackbar.open}
+      autoHideDuration={3200}
+      anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      onClose={() => dispatch(hideSnackbar())}
+    >
+      <Alert variant="filled" severity={snackbar.severity} onClose={() => dispatch(hideSnackbar())}>
         {snackbar.message}
       </Alert>
     </Snackbar>

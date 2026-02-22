@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  InputAdornment,
   Paper,
   Stack,
   Table,
@@ -11,12 +12,18 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import SearchIcon from '@mui/icons-material/Search';
+import PlaceIcon from '@mui/icons-material/Place';
+import TransformIcon from '@mui/icons-material/Transform';
+import InventoryIcon from '@mui/icons-material/Inventory';
+import MoveUpIcon from '@mui/icons-material/MoveUp';
 import { useEffect, useState } from 'react';
 import { inventoryApi } from '../api/inventoryApi';
 import { itemsApi } from '../api/itemsApi';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
 import { NoAccess } from '../components/NoAccess';
 import { PermissionGate } from '../components/PermissionGate';
+import { PageHeader } from '../components/PageHeader';
 import { showSnackbar } from '../features/ui/uiSlice';
 import { hasPermission } from '../utils/permissions';
 
@@ -105,13 +112,30 @@ export const InventoryPage = () => {
 
   return (
     <Stack spacing={2}>
+      <PageHeader
+        title="Inventory"
+        subtitle="Search stock, inspect locations, and move quantities"
+        icon={<InventoryIcon />}
+      />
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <SearchIcon fontSize="small" color="primary" />
           Search Item by Barcode
         </Typography>
         <Stack direction="row" spacing={2} alignItems="center">
-          <TextField label="Barcode" value={barcode} onChange={(e) => setBarcode(e.target.value)} />
-          <Button variant="outlined" onClick={() => void searchBarcode()}>
+          <TextField
+            label="Barcode"
+            value={barcode}
+            onChange={(e) => setBarcode(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              )
+            }}
+          />
+          <Button variant="outlined" startIcon={<SearchIcon />} onClick={() => void searchBarcode()}>
             Search
           </Button>
           {match && (
@@ -123,12 +147,13 @@ export const InventoryPage = () => {
       </Paper>
 
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <PlaceIcon fontSize="small" color="primary" />
           View Inventory by Location
         </Typography>
         <Stack direction="row" spacing={2} alignItems="center">
           <TextField label="Location Code" value={locationCode} onChange={(e) => setLocationCode(e.target.value)} />
-          <Button variant="outlined" onClick={() => void loadByLocation()}>
+          <Button variant="outlined" startIcon={<PlaceIcon />} onClick={() => void loadByLocation()}>
             Load
           </Button>
           {stock && <Typography variant="body2">{stock.location.label}</Typography>}
@@ -136,7 +161,8 @@ export const InventoryPage = () => {
       </Paper>
 
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TransformIcon fontSize="small" color="primary" />
           Move Inventory
         </Typography>
         <Stack direction="row" spacing={2} flexWrap="wrap">
@@ -159,7 +185,12 @@ export const InventoryPage = () => {
           <TextField label="Qty" type="number" value={move.qty} onChange={(e) => setMove((prev) => ({ ...prev, qty: e.target.value }))} />
           <TextField label="Notes" value={move.notes} onChange={(e) => setMove((prev) => ({ ...prev, notes: e.target.value }))} />
           <PermissionGate module="inventory" action="actions:move" mode="disable">
-            <Button variant="contained" disabled={!canEdit || !canMove} onClick={() => void moveInventory()}>
+            <Button
+              variant="contained"
+              startIcon={<MoveUpIcon />}
+              disabled={!canEdit || !canMove}
+              onClick={() => void moveInventory()}
+            >
               Move
             </Button>
           </PermissionGate>

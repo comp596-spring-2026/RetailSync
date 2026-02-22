@@ -15,12 +15,16 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import SaveIcon from '@mui/icons-material/Save';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { ModuleKey, PermissionsMap, moduleKeys } from '@retailsync/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { rbacApi } from '../api/rbacApi';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
 import { setRoles } from '../features/rbac/rbacSlice';
 import { showSnackbar } from '../features/ui/uiSlice';
+import { PageHeader } from '../components/PageHeader';
 
 type LocalPermission = PermissionsMap;
 
@@ -114,8 +118,13 @@ export const RolesPage = () => {
 
   return (
     <Paper sx={{ p: 3 }}>
-      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-        <Typography variant="h5">Roles & Permissions</Typography>
+      <Stack spacing={2} sx={{ mb: 2 }}>
+        <PageHeader
+          title="Roles & Permissions"
+          subtitle="Define module-level access rules for each role"
+          icon={<AdminPanelSettingsIcon />}
+        />
+        <Stack direction="row" spacing={2} alignItems="center" sx={{ flexWrap: 'wrap' }}>
         <Select size="small" value={selectedRoleId} onChange={(e) => setSelectedRoleId(e.target.value)}>
           <MenuItem value="new">Create New Role</MenuItem>
           {roles.map((role) => (
@@ -123,14 +132,21 @@ export const RolesPage = () => {
           ))}
         </Select>
         <TextField size="small" label="Role Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Button variant="contained" onClick={saveRole}>
+        <Button variant="contained" startIcon={<SaveIcon />} onClick={saveRole}>
           Save
         </Button>
         {selectedRole && (
-          <Button variant="outlined" color="error" onClick={removeRole} disabled={selectedRole.isSystem}>
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteOutlineIcon />}
+            onClick={removeRole}
+            disabled={selectedRole.isSystem}
+          >
             Delete
           </Button>
         )}
+      </Stack>
       </Stack>
       <Divider sx={{ mb: 2 }} />
       <Box sx={{ overflowX: 'auto' }}>

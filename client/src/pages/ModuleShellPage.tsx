@@ -1,10 +1,15 @@
 import { Box, Button, Paper, Stack, Typography } from '@mui/material';
+import BuildCircleIcon from '@mui/icons-material/BuildCircle';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { ModuleKey } from '@retailsync/shared';
 import { PermissionGate } from '../components/PermissionGate';
 import { NoAccess } from '../components/NoAccess';
 import { moduleActionsMap } from '../constants/modules';
 import { useAppSelector } from '../app/hooks';
 import { hasPermission } from '../utils/permissions';
+import { PageHeader } from '../components/PageHeader';
 
 type ModuleShellProps = {
   module: ModuleKey;
@@ -22,23 +27,20 @@ export const ModuleShellPage = ({ module }: ModuleShellProps) => {
 
   return (
     <Paper sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        {title}
-      </Typography>
-      <Typography variant="body2" sx={{ mb: 2 }}>
-        Placeholder module shell with RBAC-aware controls.
-      </Typography>
+      <PageHeader title={title} subtitle="RBAC-aware module shell and action controls" icon={<BuildCircleIcon />} />
       <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
         <PermissionGate module={module} action="create">
-          <Button variant="contained">Create</Button>
+          <Button variant="contained" startIcon={<AddCircleOutlineIcon />}>
+            Create
+          </Button>
         </PermissionGate>
         <PermissionGate module={module} action="edit">
-          <Button variant="contained" color="warning">
+          <Button variant="contained" color="warning" startIcon={<EditOutlinedIcon />}>
             Edit
           </Button>
         </PermissionGate>
         <PermissionGate module={module} action="delete">
-          <Button variant="contained" color="error">
+          <Button variant="contained" color="error" startIcon={<DeleteOutlineIcon />}>
             Delete
           </Button>
         </PermissionGate>
