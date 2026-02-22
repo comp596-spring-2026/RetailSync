@@ -35,4 +35,4 @@ USER nodeuser
 WORKDIR /app
 EXPOSE 4000
 
-CMD ["node", "--import", "tsx", "server/src/index.ts"]
+CMD ["node", "--import", "./server/node_modules/tsx/dist/esm/index.mjs", "server/src/index.ts"]
