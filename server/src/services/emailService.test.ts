@@ -83,7 +83,7 @@ describe('emailService', () => {
     );
   });
 
-  it('throws when resend returns a non-2xx response', async () => {
+  it('surfaces resend sandbox/domain restriction response (403)', async () => {
     env.nodeEnv = 'development';
     env.resendApiKey = 're_test_key';
     env.resendFrom = 'RetailSync <onboarding@resend.dev>';
@@ -91,7 +91,8 @@ describe('emailService', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: false,
       status: 403,
-      text: async () => '{"message":"forbidden"}'
+      text: async () =>
+        '{"statusCode":403,"name":"validation_error","message":"You can only send testing emails to your own email address. Verify a domain to send to other recipients."}'
     } as Response);
 
     await expect(
@@ -100,7 +101,8 @@ describe('emailService', () => {
         subject: 'Failure',
         html: '<p>Hello</p>'
       })
-    ).rejects.toThrow('Resend email failed: 403 {"message":"forbidden"}');
+    ).rejects.toThrow(
+      'Resend email failed: 403 {"statusCode":403,"name":"validation_error","message":"You can only send testing emails to your own email address. Verify a domain to send to other recipients."}'
+    );
   });
 });
-

@@ -63,6 +63,8 @@ sequenceDiagram
 
 1. `403 validation_error` and testing-mode recipient restriction:
 - only own inbox allowed until domain verification is completed.
+- if you use `onboarding@resend.dev`, Resend allows only the account-owner inbox.
+- this is expected behavior and not an application bug.
 
 2. unverified sender domain:
 - verify domain in Resend and use matching sender.
@@ -86,6 +88,11 @@ cat /Users/trupal/Projects/RetailSync/server/.env | rg "RESEND_API_KEY|RESEND_FR
 - `/Users/trupal/Projects/RetailSync/server/src/services/emailService.test.ts`
 - `/Users/trupal/Projects/RetailSync/server/src/services/emailTemplates.test.ts`
 - `/Users/trupal/Projects/RetailSync/server/src/auth.account-recovery.e2e.test.ts`
+
+Test policy note:
+
+- tests do not call live Resend in CI; transport behavior is validated via mocked responses and `NODE_ENV=test` outbox capture.
+- a dedicated unit test covers provider-side 403 rejection propagation for sandbox/domain restrictions.
 
 Run:
 

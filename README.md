@@ -49,6 +49,12 @@ It solves:
 | Google APIs (`googleapis`) | Sheets read and OAuth connect/callback flow | `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI` |
 | Resend | Transactional email delivery (verification/reset OTP) | `RESEND_API_KEY`, `RESEND_FROM`, `RESEND_BRAND_ICON_URL` |
 
+### Resend Sandbox Restriction
+
+- If `RESEND_FROM` uses `resend.dev` (for example `onboarding@resend.dev`), Resend only allows delivery to the account owner's email.
+- Sending to other recipients requires verified custom domain setup in Resend and a matching `from` address on that domain.
+- Localhost image URLs (for example `http://localhost:4630/...`) are not reachable by external inbox clients; use a public URL for production email branding.
+
 ## Brand Assets
 
 Client brand assets are served from `/client/public/brand` and used across auth UI and email templates.
