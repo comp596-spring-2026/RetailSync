@@ -61,6 +61,7 @@ export const registerAndCreateCompany = async (app: any, userSeed: string) => {
 
 export const registerVerifyAndLogin = async (app: any, userSeed: string) => {
   const email = `user.${userSeed}@example.com`;
+  const normalizedEmail = email.toLowerCase();
   const registerRes = await request(app).post('/api/auth/register').send({
     firstName: 'Test',
     lastName: userSeed,
@@ -74,16 +75,14 @@ export const registerVerifyAndLogin = async (app: any, userSeed: string) => {
     return match?.[0];
   };
 
+  const verifyCodeFromResponse = registerRes.body?.data?.verifyCode as string | undefined;
   const latestVerificationEmail = [...testEmailOutbox]
     .reverse()
-    .find((entry) => entry.to === email && entry.subject.includes('Verify'));
-  if (!latestVerificationEmail) {
-    throw new Error(`Verification email not captured for ${email}`);
-  }
-
-  const verifyCode = extractCodeFromHtml(latestVerificationEmail.html);
+    .find((entry) => entry.to.toLowerCase() === normalizedEmail && entry.subject.includes('Verify'));
+  const verifyCode =
+    verifyCodeFromResponse || (latestVerificationEmail ? extractCodeFromHtml(latestVerificationEmail.html) : undefined);
   if (!verifyCode) {
-    throw new Error(`Verification code not found in email HTML for ${email}`);
+    throw new Error(`Verification code not available for ${email}`);
   }
 
   await request(app).post('/api/auth/verify-email').send({ token: verifyCode }).expect(200);
