@@ -4,7 +4,7 @@
 
 - Node 20+
 - pnpm 10+
-- Docker Desktop (optional, for containerized run)
+- Docker Desktop (recommended for Mongo)
 
 ## Initial Setup
 
@@ -21,8 +21,14 @@ cp /Users/trupal/Projects/RetailSync/client/.env.example /Users/trupal/Projects/
 make dev
 ```
 
+- Client: `http://localhost:4630`
 - Server: `http://localhost:4000`
-- Client: `http://localhost:5173`
+- Health: `http://localhost:4000/health`
+
+`make dev` behavior:
+
+- kills occupied dev ports (`4000`, `4630`, `5173`, `5174`)
+- ensures Mongo is available on `27017` (starts `docker compose up -d mongo` if needed)
 
 Optional split mode:
 
@@ -31,7 +37,7 @@ make dev-server
 make dev-client
 ```
 
-## Start Development (Docker)
+## Start Full Stack (Docker)
 
 ```bash
 make start
@@ -49,6 +55,27 @@ make logs
 make stop
 ```
 
+## Email Integration (Resend)
+
+Required for real OTP delivery:
+
+- `RESEND_API_KEY`
+- `RESEND_FROM`
+
+Development note:
+
+- If your Resend account is in testing mode, you can only send to your own verified inbox.
+- API returns `emailDebug` in non-production when delivery fails.
+
+## Google Integration
+
+For Sheets/service-account and OAuth flows:
+
+- `GOOGLE_SERVICE_ACCOUNT_JSON`
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `GOOGLE_OAUTH_REDIRECT_URI`
+
 ## Quality and Validation
 
 ```bash
@@ -59,31 +86,27 @@ make build
 make check
 ```
 
-`make check` mirrors the local CI gate sequence.
-
 ## Reset and Cleanup
 
 ```bash
-# remove build artifacts
 make clean
-
-# stop docker + remove docker volumes + clean artifacts
 make reset
-
-# full clean including node_modules and local pnpm store
 make reset-hard
 ```
 
 ## Common Issues
 
-1. `pnpm install` build scripts are blocked:
+1. `EADDRINUSE` on 4000/4630:
+- Run `make kill-dev-ports`, then `make dev`.
+
+2. `pnpm install` build scripts blocked:
 - Run `make approve-builds` and approve required packages.
 
-2. `ENOTFOUND registry.npmjs.org`:
-- Network/DNS issue in local environment; retry after connectivity is restored.
-
-3. Docker cannot connect to daemon:
+3. Docker daemon unavailable:
 - Start Docker Desktop and verify `docker info`.
 
-4. Auth cookie/401 loop in browser:
-- Validate `CLIENT_URL`, CORS, and `withCredentials` behavior.
+4. Email API returns 403 validation error:
+- Verify Resend domain/sender policy and `RESEND_FROM` value.
+
+5. OAuth connect returns 401:
+- Use connect-url flow and ensure auth/cookie strategy is configured.

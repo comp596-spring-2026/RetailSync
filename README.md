@@ -16,67 +16,100 @@ Multi-tenant retail operations platform for small grocery stores and gas station
 [![JWT](https://img.shields.io/badge/JWT-Auth-000000?logo=jsonwebtokens&logoColor=white)](https://jwt.io/)
 [![Vitest](https://img.shields.io/badge/Vitest-2.x-6E9F18?logo=vitest&logoColor=white)](https://vitest.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Google APIs](https://img.shields.io/badge/Google%20APIs-Sheets%20%2B%20OAuth-4285F4?logo=google&logoColor=white)](https://developers.google.com/sheets/api)
+[![Resend](https://img.shields.io/badge/Resend-Email%20Delivery-000000)](https://resend.com/)
 
 ## Overview
 
-RetailSync centralizes day-to-day operational and financial workflows for independent retail operators.  
-It is implemented as a TypeScript monorepo with a React client, Express API, and MongoDB persistence.
+RetailSync centralizes sales, inventory, permissions, and operational workflows with strict tenant scoping and role enforcement.
 
 It solves:
 
-- Fragmented POS, inventory, and operational data
-- Weak cross-module visibility between sales and stock movement
-- Inconsistent role/permission enforcement across teams
-- Lack of structured foundation for invoice ingestion and reconciliation workflows
-- Missing tenant-safe architecture for multi-company SaaS deployment
+- fragmented POS and stock workflows
+- inconsistent permission enforcement
+- weak traceability for inventory changes
+- missing secure auth recovery and verification flows
+- need for integrations (Google Sheets and email delivery)
 
-## Design Principles
+## Major Features
 
-RetailSync is designed around:
-
-- Tenant-safe isolation by default
-- Append-only inventory and financial records
-- Explicit permission enforcement at the API boundary
-- Deterministic ingestion and reconciliation workflows
-- Transactional confirm paths for accounting consistency
-
-## Key Features
-
-| Feature | Description |
+| Area | Capabilities |
 |---|---|
-| Multi-tenant data model | `companyId`-scoped records and request-level tenant context |
-| Authentication and onboarding | Register/login/refresh/logout/me + company create/join |
-| RBAC | Role-based permission checks per module/action |
-| POS CSV ingestion | CSV import and daily/monthly reporting foundations |
-| Inventory domain | Items, locations, immutable `InventoryLedger` movement model |
-| Client permission gates | Module/action-based route and component gating |
-| Invoice OCR ingestion | Invoice ingestion and confirm workflow (Phase 3) |
-| Bank statement parsing | Bank ingestion and normalization (Phase 4) |
-| Settlement reconciliation | Credit card settlement matching workflows (Phase 4) |
-| Supplier payment allocation | Supplier payment allocation workflows (Phase 4) |
+| Auth | Register/login/refresh/logout, OTP email verification, OTP reset password |
+| Tenant and RBAC | `companyId`-scoped data, server-side permission checks |
+| POS | CSV import, daily views, monthly reporting |
+| Inventory | Items, locations, immutable `InventoryLedger` movements |
+| Integrations | Google Sheets (service account + OAuth connect scaffolding), Resend email delivery |
+| Quality | Vitest test suites, Docker workflows, CI quality gates |
 
-## System Architecture
+## External Product Dependencies
+
+| Product | Used For | Required Env |
+|---|---|---|
+| Google APIs (`googleapis`) | Sheets read and OAuth connect/callback flow | `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI` |
+| Resend | Transactional email delivery (verification/reset OTP) | `RESEND_API_KEY`, `RESEND_FROM`, `RESEND_BRAND_ICON_URL` |
+
+## Brand Assets
+
+Client brand assets are served from `/client/public/brand` and used across auth UI and email templates.
+
+| Asset | Purpose |
+|---|---|
+| `icon.svg` / `icon.png` / `icon.ico` | icon-only mark, favicon, compact UI |
+| `BigLogo.png` | large auth/onboarding logo (icon + wordmark) |
+| `logo-horizontal-removebg.png` | horizontal logo in dashboard header |
+
+## Architecture
 
 ```mermaid
 flowchart LR
-  subgraph TenantBoundary["Tenant Boundary (companyId-scoped domain)"]
-    C["React Client"]
-    A["Auth Middleware (JWT)"]
-    R["RBAC Guard"]
-    API["API Controllers"]
-    L["Inventory Ledger Service"]
-    DB[("MongoDB")]
-    AUD["Audit Log (Phase 3+)"]
-
-    C --> A --> R --> API
-    API --> L --> DB
-    API --> DB
-    API --> AUD
+  subgraph TenantBoundary["Tenant Boundary (companyId scoped)"]
+    C["React Client"] --> A["Auth Middleware"] --> R["RBAC Guard"] --> API["Express Controllers"]
+    API --> DB[("MongoDB")]
   end
 
   POS["POS CSV"] --> API
-  INV["Invoice PDF/Image"] --> API
-  BANK["Bank Statement PDF/CSV"] --> API
+  GS["Google Sheets API"] --> API
+  RESEND["Resend Email API"] --> API
+```
+
+## Auth OTP Workflow
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant UI as Client
+  participant API as Server
+  participant M as MongoDB
+  participant E as Resend
+
+  U->>UI: Register
+  UI->>API: POST /api/auth/register
+  API->>M: Store user + hashed verification token
+  API->>E: Send verification OTP email
+  API-->>UI: Account created
+
+  U->>UI: Enter OTP
+  UI->>API: POST /api/auth/verify-email
+  API->>M: Match hashed token + expiry + consumedAt
+  API->>M: Set emailVerifiedAt
+  API-->>UI: Verified
+```
+
+## Integration Workflow (POS Sources)
+
+```mermaid
+flowchart TD
+  A["POS Source Modal"] --> B["Upload CSV/XLSX"]
+  A --> C["Google OAuth Connect"]
+  A --> D["Service Account Access"]
+
+  B --> E["/api/pos/import-file"]
+  C --> F["/api/google/connect-url and callback"]
+  C --> G["/api/sheets/read"]
+  D --> G
+  G --> H["Preview Rows"]
+  H --> I["/api/pos/import-rows"]
 ```
 
 ## Monorepo Structure
@@ -86,101 +119,18 @@ RetailSync/
   client/        # Vite + React + TypeScript + Redux Toolkit + MUI
   server/        # Express + TypeScript + MongoDB + Mongoose + Zod + JWT
   shared/        # Shared types and Zod schemas
-  docs/          # Architecture, operations, testing, roadmap docs
+  docs/          # Architecture, backend, frontend, operations, testing
   docker-compose.yml
   pnpm-workspace.yaml
 ```
 
-## Core Concepts
-
-### Multi-Tenant Model
-
-- Every business document is scoped by `companyId`
-- Request context attaches tenant identity server-side
-- Controllers and queries enforce tenant-safe filtering
-
-### RBAC Permission Matrix
-
-- Roles: `Admin`, `Member`, `Viewer`
-- Authorization is evaluated on module/action tuples
-- Action set includes `view`, `create`, `edit`, `delete`, plus module-specific actions
-- Server-side checks are authoritative; client gating is UX-only defense-in-depth
-
-### Event-Sourced Inventory
-
-- Inventory mutations are append-only ledger entries (`InventoryLedger`)
-- No mutable “current quantity” source of truth
-- Stock views are derived from ledger aggregates
-- Immutability supports traceability and future audit workflows
-
-### Reconciliation Engine
-
-- Bank and settlement ingestion will feed matching workflows
-- Invoice, payments, and statements will converge into reconciliation views
-- Confirm flows are planned to use transactional writes for consistency
-
-## Data Flow Diagrams
-
-### POS Import Flow
-
-```mermaid
-flowchart LR
-  A["POS CSV Upload"] --> B["Parse and Normalize"]
-  B --> C["Validate with Zod"]
-  C --> D["Persist tenant scoped records"]
-  D --> E["Daily Views"]
-  D --> F["Monthly Summary Reports"]
-```
-
-### Invoice Confirm Flow
-
-```mermaid
-flowchart LR
-  A["Invoice File Upload"] --> B["OCR Extraction"]
-  B --> C["Preview and Field Mapping"]
-  C --> D["User Confirm"]
-  D --> E["Transactional Writes"]
-  E --> F["Inventory and Purchase Ledger Impact"]
-```
-
-### Bank Reconciliation Flow
-
-```mermaid
-flowchart LR
-  A["Bank Statement Ingestion"] --> B["Normalize Transactions"]
-  B --> C["Match Candidates"]
-  C --> D["User Confirm and Adjust"]
-  D --> E["Reconciliation State"]
-  E --> F["Payment Allocation and Reporting"]
-```
-
-## Example Workflow
-
-1. Import POS CSV files for a store/day range.
-2. Review daily and monthly report views.
-3. Manage items and location-level stock movements.
-4. Ingest supplier invoices and confirm mapped entries (Phase 3).
-5. Ingest bank statements and run matching workflows (Phase 4).
-6. Confirm reconciliations and allocate supplier payments (Phase 4).
-
-## Implementation Scope by Phase
-
-| Phase | Scope |
-|---|---|
-| Phase 0 | Auth, company onboarding, RBAC, dashboard shell |
-| Phase 1 | POS CSV import and reports |
-| Phase 2 | Items, locations, inventory ledger and stock views |
-| Phase 3 | Invoice OCR ingestion + confirm flow |
-| Phase 4 | Bank parsing + reconciliation + payment allocation |
-| DevOps | Docker + CI artifacts, with infrastructure hardening and workflow stabilization |
-
-## Local Development Setup
+## Local Development
 
 ### Prerequisites
 
 - Node.js 20+
 - pnpm 10+
-- MongoDB (local or remote URI), unless using Docker Compose
+- Docker Desktop (recommended for Mongo)
 
 ### Install
 
@@ -188,25 +138,19 @@ flowchart LR
 make install
 ```
 
-Optional direct command:
-
-```bash
-pnpm install
-```
-
-### Run (workspace)
+### Start
 
 ```bash
 make dev
 ```
 
-Optional direct command:
+Default local endpoints:
 
-```bash
-pnpm dev
-```
+- Client: `http://localhost:4630`
+- Server: `http://localhost:4000`
+- Health: `http://localhost:4000/health`
 
-### Build / Quality
+### Quality Gate
 
 ```bash
 make typecheck
@@ -216,137 +160,71 @@ make build
 make check
 ```
 
-### Workspace-specific commands
-
-```bash
-make dev-server
-make dev-client
-pnpm --filter @retailsync/server dev
-pnpm --filter @retailsync/client dev
-pnpm --filter @retailsync/server test
-pnpm --filter @retailsync/client test
-pnpm --filter @retailsync/server seed:pos <companyId>
-```
-
 ## Environment Variables
 
 ### Server (`/server/.env`)
 
-| Variable | Example / Default | Required | Notes |
-|---|---|---|---|
-| `PORT` | `4000` | Yes | API bind port |
-| `MONGO_URI` | `mongodb://127.0.0.1:27017/retailsync` | Yes | Mongo connection string |
-| `JWT_ACCESS_SECRET` | `replace-with-strong-secret` | Yes | Access token signing secret |
-| `JWT_REFRESH_SECRET` | `replace-with-strong-secret` | Yes | Refresh token signing secret |
-| `CLIENT_URL` | `http://localhost:5173` | Yes | Allowed client origin |
-| `NODE_ENV` | `development` | Yes | Runtime mode |
+| Variable | Required | Notes |
+|---|---|---|
+| `PORT` | Yes | API port (`4000`) |
+| `MONGO_URI` | Yes | Mongo connection string |
+| `JWT_ACCESS_SECRET` | Yes | Access token signing secret |
+| `JWT_REFRESH_SECRET` | Yes | Refresh token signing secret |
+| `CLIENT_URL` | Yes | Allowed CORS origin |
+| `NODE_ENV` | Yes | `development` / `test` / `production` |
+| `RESEND_API_KEY` | No* | Required for real email delivery |
+| `RESEND_FROM` | No* | Must match Resend sending policy/domain |
+| `RESEND_BRAND_ICON_URL` | No | Logo URL in HTML email templates |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | No | Service account auth for Sheets read |
+| `GOOGLE_OAUTH_CLIENT_ID` | No | Google OAuth |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | No | Google OAuth |
+| `GOOGLE_OAUTH_REDIRECT_URI` | No | Google OAuth callback |
 
 ### Client (`/client/.env`)
 
-| Variable | Example / Default | Required | Notes |
-|---|---|---|---|
-| `VITE_API_URL` | `http://localhost:4000/api` | Yes | API base URL for client |
-
-### Future modules (Phase 3–4)
-
-| Variable | Value |
-|---|---|
-| OCR/storage/reconciliation-specific env keys | TBD |
-
-## Testing Strategy
-
-### Test Layers
-
-| Layer | Tooling | Purpose |
+| Variable | Required | Notes |
 |---|---|---|
-| Unit | Vitest (server + client) | Utilities, schema behavior, pure logic |
-| Integration | Vitest + `mongodb-memory-server` | DB-backed route/model behavior |
-| End-to-End | Playwright (roadmap) | Cross-module workflows across UI + API |
+| `VITE_API_URL` | Yes | API base URL (for local: `http://localhost:4000/api`) |
+
+## Testing
+
+| Layer | Tooling | Notes |
+|---|---|---|
+| Unit | Vitest | utility, schema, email transport tests |
+| Integration | Vitest + mongodb-memory-server | DB-backed auth and domain tests |
+| UI | Vitest + RTL | component-level behavior |
+| E2E | Planned | Playwright roadmap |
+
+## API and Docs
+
+- API reference: `/Users/trupal/Projects/RetailSync/docs/backend/api-reference.md`
+- Email system guide: `/Users/trupal/Projects/RetailSync/docs/email-system.md`
+- System architecture: `/Users/trupal/Projects/RetailSync/docs/architecture/system-overview.md`
+- Local runbook: `/Users/trupal/Projects/RetailSync/docs/operations/local-development.md`
+- Testing strategy: `/Users/trupal/Projects/RetailSync/docs/testing/testing-strategy.md`
 
 ## Docker
 
-Start full stack:
-
 ```bash
 make start
-```
-
-Optional direct command:
-
-```bash
-docker compose up --build
-```
-
-### Services
-
-| Service | Purpose | Port Mapping |
-|---|---|---|
-| `mongo` | MongoDB persistence | `27017:27017` |
-| `server` | Express API | `4000:4000` |
-| `client` | Static frontend (Nginx) | `8080:80` |
-
-Notes:
-
-- Client is built and served by Nginx in the containerized runtime.
-- Mongo data is persisted using the `mongo_data` Docker volume.
-- Compose injects production-oriented server env values in `docker-compose.yml`.
-- Secrets in compose are placeholders and should be replaced for non-local environments
-- Client build arg currently sets `VITE_API_URL=/api` in container build context
-
-To reset containers and database volume:
-
-```bash
+make stop
+make logs
 make reset
 ```
 
-## Roadmap
+Services:
 
-### Phase 3 Goals
+- `mongo` -> `27017`
+- `server` -> `4000`
+- `client` -> `8080`
 
-- Supplier invoice ingestion pipeline
-- OCR extraction interface and preview/confirm workflow
-- Transactional confirm path for consistent writes
+## Security Notes
 
-### Phase 4 Goals
-
-- Bank statement ingestion and parsing
-- Credit card settlement reconciliation workflows
-- Supplier payment allocation and matching lifecycle
-
-### Long-Term Direction
-
-- Multi-store operational support
-- Stronger analytics/reporting depth
-- Forecasting-oriented inventory and cashflow insights
-
-## Security & Architecture Notes
-
-- Tenant isolation is enforced via `companyId` in persistence and query paths
-- Inventory uses immutable ledger entries (append-only event model)
-- POS import flow is designed for idempotent ingestion behavior
-- Refresh-token model is implemented with rotation-oriented auth flow
-- Permission checks are enforced on the server; client checks complement UX
-- Confirm flows are designed to use transaction-wrapped writes in financial paths
-- Invoice and bank lifecycle flows are designed around immutable/void-oriented records
-- File uploads currently use local storage; production storage backend is TBD
-
-## Architectural Highlights
-
-- Tenant isolation enforced at persistence and query boundaries
-- Server-authoritative role/module/action permission model
-- Event-sourced inventory with append-only ledger semantics
-- Deterministic matching workflows for reconciliation
-- Confirm-path consistency via transactional write boundaries
-
-## Contributing
-
-Contributions should follow existing TypeScript, module, and validation patterns.
-
-Recommended pre-PR flow:
-
-1. Run `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`
-2. Keep tenant isolation and RBAC behavior intact
-3. Update docs for any API, workflow, or environment changes
+- Tenant isolation is enforced with `companyId` on protected domains.
+- Role permission checks are server-authoritative.
+- Inventory is append-only ledger based.
+- OTP tokens are stored hashed, with expiry and one-time consumption.
+- Refresh token rotation and revocation are implemented.
 
 ## License
 

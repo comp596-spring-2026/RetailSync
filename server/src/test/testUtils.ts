@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import request from 'supertest';
+import { clearTestEmailOutbox, testEmailOutbox } from '../services/emailService';
 
 let mongo: MongoMemoryServer | null = null;
 
@@ -21,6 +22,7 @@ export const connectTestDb = async () => {
 };
 
 export const clearTestDb = async () => {
+  clearTestEmailOutbox();
   const collections = mongoose.connection.collections;
   await Promise.all(
     Object.values(collections).map(async (collection) => {
@@ -38,16 +40,7 @@ export const disconnectTestDb = async () => {
 };
 
 export const registerAndCreateCompany = async (app: any, userSeed: string) => {
-  const email = `user.${userSeed}@example.com`;
-  const registerRes = await request(app).post('/api/auth/register').send({
-    firstName: 'Test',
-    lastName: userSeed,
-    email,
-    password: 'Password123',
-    confirmPassword: 'Password123'
-  });
-
-  const accessToken = registerRes.body.data.accessToken as string;
+  const { email, accessToken, registerRes, loginRes } = await registerVerifyAndLogin(app, userSeed);
 
   await request(app)
     .post('/api/company/create')
@@ -63,5 +56,46 @@ export const registerAndCreateCompany = async (app: any, userSeed: string) => {
     })
     .expect(201);
 
-  return { email, accessToken, registerRes };
+  return { email, accessToken, registerRes, loginRes };
+};
+
+export const registerVerifyAndLogin = async (app: any, userSeed: string) => {
+  const email = `user.${userSeed}@example.com`;
+  const registerRes = await request(app).post('/api/auth/register').send({
+    firstName: 'Test',
+    lastName: userSeed,
+    email,
+    password: 'Password123',
+    confirmPassword: 'Password123'
+  });
+
+  const extractCodeFromHtml = (html: string) => {
+    const match = html.match(/\b\d{3}-\d{3}\b/);
+    return match?.[0];
+  };
+
+  const latestVerificationEmail = [...testEmailOutbox]
+    .reverse()
+    .find((entry) => entry.to === email && entry.subject.includes('Verify'));
+  if (!latestVerificationEmail) {
+    throw new Error(`Verification email not captured for ${email}`);
+  }
+
+  const verifyCode = extractCodeFromHtml(latestVerificationEmail.html);
+  if (!verifyCode) {
+    throw new Error(`Verification code not found in email HTML for ${email}`);
+  }
+
+  await request(app).post('/api/auth/verify-email').send({ token: verifyCode }).expect(200);
+
+  const loginRes = await request(app).post('/api/auth/login').send({
+    email,
+    password: 'Password123'
+  });
+  const accessToken = loginRes.body.data.accessToken as string;
+  if (!accessToken) {
+    throw new Error(`Login access token missing for ${email}`);
+  }
+
+  return { email, accessToken, registerRes, loginRes };
 };

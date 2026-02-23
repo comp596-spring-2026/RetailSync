@@ -1,6 +1,12 @@
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { clearTestDb, connectTestDb, disconnectTestDb, setupTestEnv } from './test/testUtils';
+import {
+  clearTestDb,
+  connectTestDb,
+  disconnectTestDb,
+  registerVerifyAndLogin,
+  setupTestEnv
+} from './test/testUtils';
 
 describe('auth refresh rotation', () => {
   let app: ReturnType<(typeof import('./app'))['createApp']>;
@@ -21,15 +27,8 @@ describe('auth refresh rotation', () => {
   });
 
   it('rejects reuse of old refresh token after rotation', async () => {
-    const registerRes = await request(app).post('/api/auth/register').send({
-      firstName: 'Rotate',
-      lastName: 'Test',
-      email: 'rotate@example.com',
-      password: 'Password123',
-      confirmPassword: 'Password123'
-    });
-
-    const firstCookie = registerRes.headers['set-cookie']?.[0];
+    const { loginRes } = await registerVerifyAndLogin(app, 'Rotate');
+    const firstCookie = loginRes.headers['set-cookie']?.[0];
     expect(firstCookie).toBeDefined();
 
     const refreshRes = await request(app).post('/api/auth/refresh').set('Cookie', firstCookie).expect(200);
@@ -40,15 +39,8 @@ describe('auth refresh rotation', () => {
   });
 
   it('revokes refresh token on logout', async () => {
-    const registerRes = await request(app).post('/api/auth/register').send({
-      firstName: 'Logout',
-      lastName: 'Test',
-      email: 'logout@example.com',
-      password: 'Password123',
-      confirmPassword: 'Password123'
-    });
-
-    const cookie = registerRes.headers['set-cookie']?.[0];
+    const { loginRes } = await registerVerifyAndLogin(app, 'Logout');
+    const cookie = loginRes.headers['set-cookie']?.[0];
     expect(cookie).toBeDefined();
 
     await request(app).post('/api/auth/logout').set('Cookie', cookie).expect(200);
