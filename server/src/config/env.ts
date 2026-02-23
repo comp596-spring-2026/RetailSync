@@ -51,5 +51,13 @@ export const env = {
   accessSecret: process.env.JWT_ACCESS_SECRET as string,
   refreshSecret: process.env.JWT_REFRESH_SECRET as string,
   clientUrl: process.env.CLIENT_URL as string,
-  nodeEnv: process.env.NODE_ENV ?? 'development'
+  nodeEnv: process.env.NODE_ENV ?? 'development',
+  encryptionKey: process.env.ENCRYPTION_KEY,
+  googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
+  googleOAuthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
+  googleOAuthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+  googleOAuthRedirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI,
+  resendApiKey: process.env.RESEND_API_KEY,
+  resendFrom: process.env.RESEND_FROM,
+  resendBrandIconUrl: process.env.RESEND_BRAND_ICON_URL
 };

@@ -8,17 +8,21 @@ import App from './App';
 import { persistor, store } from './app/store';
 import { theme } from './theme';
 import { AppSnackbar } from './components/AppSnackbar';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { WonderLoader } from './components/WonderLoader';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Provider store={store}>
-      <PersistGate loading={null} persistor={persistor}>
+      <PersistGate loading={<WonderLoader fullscreen label="Restoring your workspace..." />} persistor={persistor}>
         <ThemeProvider theme={theme}>
           <CssBaseline />
-          <BrowserRouter>
-            <App />
-            <AppSnackbar />
-          </BrowserRouter>
+          <ErrorBoundary>
+            <BrowserRouter>
+              <App />
+              <AppSnackbar />
+            </BrowserRouter>
+          </ErrorBoundary>
         </ThemeProvider>
       </PersistGate>
     </Provider>

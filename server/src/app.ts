@@ -13,6 +13,9 @@ import reportRoutes from './routes/reportRoutes';
 import itemRoutes from './routes/itemRoutes';
 import locationRoutes from './routes/locationRoutes';
 import inventoryRoutes from './routes/inventoryRoutes';
+import sheetsRoutes from './routes/sheetsRoutes';
+import googleRoutes from './routes/googleRoutes';
+import settingsRoutes from './routes/settingsRoutes';
 import { notFound } from './middleware/notFound';
 import { errorHandler } from './middleware/errorHandler';
 import { withRequestContext } from './config/requestContext';
@@ -44,6 +47,9 @@ export const createApp = () => {
   app.use('/api/items', itemRoutes);
   app.use('/api/locations', locationRoutes);
   app.use('/api/inventory', inventoryRoutes);
+  app.use('/api/sheets', sheetsRoutes);
+  app.use('/api/google', googleRoutes);
+  app.use('/api/settings', settingsRoutes);
   app.use('/api', moduleRoutes);
 
   app.use(notFound);

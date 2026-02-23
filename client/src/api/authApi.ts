@@ -9,6 +9,11 @@ export const authApi = {
     confirmPassword: string;
   }) => api.post('/auth/register', payload),
   login: (payload: { email: string; password: string }) => api.post('/auth/login', payload),
+  forgotPassword: (payload: { email: string }) => api.post('/auth/forgot-password', payload),
+  resetPassword: (payload: { token: string; password: string; confirmPassword: string }) =>
+    api.post('/auth/reset-password', payload),
+  verifyEmail: (payload: { token: string }) => api.post('/auth/verify-email', payload),
+  resendVerification: (payload: { email: string }) => api.post('/auth/resend-verification', payload),
   me: () => api.get('/auth/me'),
   logout: () => api.post('/auth/logout')
 };

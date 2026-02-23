@@ -1,6 +1,7 @@
 import { PosDailySummaryInput, posDailyQuerySchema, posDailySummarySchema } from '@retailsync/shared';
 import { parse } from 'csv-parse/sync';
 import { Request, Response } from 'express';
+import XLSX from 'xlsx';
 import { POSDailySummaryModel } from '../models/POSDailySummary';
 import { fail, ok } from '../utils/apiResponse';
 
@@ -88,23 +89,43 @@ const mapRow = (row: CsvRow) => {
   };
 };
 
-export const importPosCsv = async (req: Request, res: Response) => {
-  if (!req.companyId) {
-    return fail(res, 'Company onboarding required', 403);
-  }
+const parseRowsWithHeader = (rows: string[][]) => {
+  if (rows.length < 2) return [] as CsvRow[];
+  const [header, ...body] = rows;
+  const normalizedHeader = header.map((cell) => String(cell ?? '').trim());
+  return body
+    .filter((row) => row.some((cell) => String(cell ?? '').trim().length > 0))
+    .map((row) => {
+      const obj: CsvRow = {};
+      normalizedHeader.forEach((column, index) => {
+        obj[column] = String(row[index] ?? '');
+      });
+      return obj;
+    });
+};
 
-  if (!req.file) {
-    return fail(res, 'CSV file is required', 400);
-  }
-
-  const csv = req.file.buffer.toString('utf-8');
-  const rows = parse(csv, {
+const parseCsvFileRows = (buffer: Buffer) => {
+  const csv = buffer.toString('utf-8');
+  return parse(csv, {
     columns: true,
     skip_empty_lines: true,
     trim: true
   }) as CsvRow[];
+};
 
-  const parsedRows = rows.map(mapRow).filter((row): row is NonNullable<ReturnType<typeof mapRow>> => !!row);
+const parseXlsxRows = (buffer: Buffer) => {
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) return [] as CsvRow[];
+  const firstSheet = workbook.Sheets[firstSheetName];
+  return XLSX.utils.sheet_to_json(firstSheet, {
+    defval: '',
+    raw: false
+  }) as CsvRow[];
+};
+
+const importRowsForCompany = async (companyId: string, rawRows: CsvRow[]) => {
+  const parsedRows = rawRows.map(mapRow).filter((row): row is NonNullable<ReturnType<typeof mapRow>> => !!row);
   const validatedRows = parsedRows.map((row, index) => {
     const parsed = posDailySummarySchema.safeParse(row);
     if (!parsed.success) {
@@ -115,23 +136,30 @@ export const importPosCsv = async (req: Request, res: Response) => {
 
   const validationError = validatedRows.find((row) => 'error' in row);
   if (validationError && 'error' in validationError) {
-    return fail(res, 'Validation failed', 422, {
-      rowIndex: validationError.index,
-      issues: validationError.error
-    });
+    return {
+      ok: false as const,
+      error: {
+        rowIndex: validationError.index,
+        issues: validationError.error
+      }
+    };
   }
 
   const normalizedRows = validatedRows.map((row) => (row as { index: number; data: PosDailySummaryInput }).data);
-
   if (normalizedRows.length === 0) {
-    return fail(res, 'No valid POS rows found in CSV', 400);
+    return {
+      ok: false as const,
+      error: {
+        message: 'No valid POS rows found'
+      }
+    };
   }
 
   const ops = normalizedRows.map((row) => {
     const date = new Date(`${row.date}T00:00:00.000Z`);
     return {
       updateOne: {
-        filter: { companyId: req.companyId, date },
+        filter: { companyId, date },
         update: { $set: { ...row, date } },
         upsert: true
       }
@@ -140,11 +168,85 @@ export const importPosCsv = async (req: Request, res: Response) => {
 
   const writeResult = await POSDailySummaryModel.bulkWrite(ops as any);
 
-  return ok(res, {
-    imported: normalizedRows.length,
-    upserted: writeResult.upsertedCount,
-    modified: writeResult.modifiedCount
-  });
+  return {
+    ok: true as const,
+    data: {
+      imported: normalizedRows.length,
+      upserted: writeResult.upsertedCount,
+      modified: writeResult.modifiedCount
+    }
+  };
+};
+
+export const importPosCsv = async (req: Request, res: Response) => {
+  if (!req.companyId) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  if (!req.file) {
+    return fail(res, 'CSV file is required', 400);
+  }
+
+  const rows = parseCsvFileRows(req.file.buffer);
+  const result = await importRowsForCompany(req.companyId, rows);
+  if (!result.ok) {
+    return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
+  }
+
+  return ok(res, result.data);
+};
+
+export const importPosFile = async (req: Request, res: Response) => {
+  if (!req.companyId) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  if (!req.file) {
+    return fail(res, 'File is required', 400);
+  }
+
+  const mime = req.file.mimetype;
+  const name = req.file.originalname.toLowerCase();
+  const isCsv = mime.includes('csv') || name.endsWith('.csv');
+  const isXlsx = mime.includes('spreadsheetml') || name.endsWith('.xlsx');
+
+  if (!isCsv && !isXlsx) {
+    return fail(res, 'Only .csv and .xlsx files are supported', 400);
+  }
+
+  const rows = isCsv ? parseCsvFileRows(req.file.buffer) : parseXlsxRows(req.file.buffer);
+  const result = await importRowsForCompany(req.companyId, rows);
+  if (!result.ok) {
+    return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
+  }
+
+  return ok(res, result.data);
+};
+
+export const importPosRows = async (req: Request, res: Response) => {
+  if (!req.companyId) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  const body = req.body as { rows?: string[][]; hasHeader?: boolean };
+  const rows = body.rows;
+  const hasHeader = body.hasHeader ?? true;
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return fail(res, 'rows is required and must be a non-empty 2D array', 400);
+  }
+
+  const parsedRows = hasHeader ? parseRowsWithHeader(rows) : [];
+  if (parsedRows.length === 0) {
+    return fail(res, 'No data rows found. Ensure the first row contains headers.', 400);
+  }
+
+  const result = await importRowsForCompany(req.companyId, parsedRows);
+  if (!result.ok) {
+    return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
+  }
+
+  return ok(res, result.data);
 };
 
 export const listPosDaily = async (req: Request, res: Response) => {

@@ -1,6 +1,5 @@
 import {
   Alert,
-  Box,
   Button,
   InputAdornment,
   Paper,
@@ -20,11 +19,11 @@ import TableRowsIcon from '@mui/icons-material/TableRows';
 import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import { useEffect, useMemo, useState } from 'react';
 import { posApi } from '../api/posApi';
-import { useAppDispatch, useAppSelector } from '../app/hooks';
+import { useAppSelector } from '../app/hooks';
+import { ImportPOSDataModal } from '../components/ImportPOSDataModal';
 import { NoAccess } from '../components/NoAccess';
 import { PermissionGate } from '../components/PermissionGate';
 import { PageHeader } from '../components/PageHeader';
-import { showSnackbar } from '../features/ui/uiSlice';
 import { hasPermission } from '../utils/permissions';
 
 type PosRow = {
@@ -54,14 +53,13 @@ const monthToRange = (month: string) => {
 };
 
 export const PosPage = () => {
-  const dispatch = useAppDispatch();
   const permissions = useAppSelector((state) => state.auth.permissions);
 
   const canView = hasPermission(permissions, 'pos', 'view');
   const canImport = hasPermission(permissions, 'pos', 'create') && hasPermission(permissions, 'pos', 'actions:import');
 
   const [rows, setRows] = useState<PosRow[]>([]);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [openImportModal, setOpenImportModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [error, setError] = useState<string | null>(null);
@@ -87,26 +85,6 @@ export const PosPage = () => {
       void loadDaily();
     }
   }, [canView, month]);
-
-  const upload = async () => {
-    if (!selectedFile) {
-      dispatch(showSnackbar({ message: 'Select a CSV file first', severity: 'error' }));
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await posApi.importCsv(selectedFile);
-      dispatch(showSnackbar({ message: 'POS CSV imported', severity: 'success' }));
-      setSelectedFile(null);
-      await loadDaily();
-    } catch (err) {
-      dispatch(showSnackbar({ message: 'Import failed', severity: 'error' }));
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   if (!canView) {
     return <NoAccess />;
@@ -139,33 +117,17 @@ export const PosPage = () => {
             Refresh
           </Button>
           <PermissionGate module="pos" action="actions:import" mode="disable">
-            <Button variant="contained" startIcon={<UploadFileIcon />} component="label" disabled={!canImport || loading}>
-              Choose CSV
-              <input
-                hidden
-                type="file"
-                accept=".csv,text/csv"
-                onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
-              />
-            </Button>
-          </PermissionGate>
-          <PermissionGate module="pos" action="actions:import" mode="disable">
             <Button
               variant="contained"
               color="secondary"
               startIcon={<UploadFileIcon />}
-              onClick={() => void upload()}
-              disabled={!selectedFile || !canImport || loading}
+              onClick={() => setOpenImportModal(true)}
+              disabled={!canImport || loading}
             >
-              Upload
+              Add POS Source
             </Button>
           </PermissionGate>
         </Stack>
-        {selectedFile && (
-          <Box sx={{ mt: 1 }}>
-            <Typography variant="body2">Selected: {selectedFile.name}</Typography>
-          </Box>
-        )}
       </Paper>
 
       {error && <Alert severity="error">{error}</Alert>}
@@ -208,6 +170,11 @@ export const PosPage = () => {
           </TableBody>
         </Table>
       </Paper>
+      <ImportPOSDataModal
+        open={openImportModal}
+        onClose={() => setOpenImportModal(false)}
+        onImported={() => loadDaily()}
+      />
     </Stack>
   );
 };

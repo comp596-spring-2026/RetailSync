@@ -1,0 +1,733 @@
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Divider,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography,
+} from "@mui/material";
+import SettingsSuggestIcon from "@mui/icons-material/SettingsSuggest";
+import LinkIcon from "@mui/icons-material/Link";
+import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import SyncAltIcon from "@mui/icons-material/SyncAlt";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import GoogleIcon from "@mui/icons-material/Google";
+import TableChartIcon from "@mui/icons-material/TableChart";
+import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
+import { useEffect, useMemo, useState } from "react";
+import { AxiosError } from "axios";
+import { PageHeader } from "../components/PageHeader";
+import { settingsApi, type GoogleSheetMode } from "../api/settingsApi";
+import { useAppDispatch, useAppSelector } from "../app/hooks";
+import { showSnackbar } from "../features/ui/uiSlice";
+import { NoAccess } from "../components/NoAccess";
+import { hasPermission } from "../utils/permissions";
+
+type IntegrationSettings = {
+  googleSheets: {
+    mode: GoogleSheetMode;
+    serviceAccountEmail: string;
+    connected: boolean;
+    connectedEmail: string | null;
+    sources: Array<{
+      sourceId: string;
+      name: string;
+      spreadsheetId: string;
+      sheetGid: string | null;
+      range: string;
+      mapping: Record<string, string>;
+      active: boolean;
+    }>;
+  };
+  quickbooks: {
+    connected: boolean;
+    environment: "sandbox" | "production";
+    realmId: string | null;
+    companyName: string | null;
+  };
+};
+
+const DEFAULT_RANGE = "Sheet1!A1:Z";
+const DEFAULT_EMAIL =
+  "retialsync@lively-infinity-488304-m9.iam.gserviceaccount.com";
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  const axiosError = error as AxiosError<{ message?: string }>;
+  return axiosError.response?.data?.message ?? fallback;
+};
+
+export const SettingsPage = () => {
+  const dispatch = useAppDispatch();
+  const permissions = useAppSelector((state) => state.auth.permissions);
+  const canView = hasPermission(permissions, "rolesSettings", "view");
+  const canEdit = hasPermission(permissions, "rolesSettings", "edit");
+
+  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState<IntegrationSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [sourceName, setSourceName] = useState("POS Sheet");
+  const [spreadsheetId, setSpreadsheetId] = useState("");
+  const [range, setRange] = useState(DEFAULT_RANGE);
+  const [mappingJson, setMappingJson] = useState(
+    '{\n  "date": "Date",\n  "amount": "Amount"\n}',
+  );
+  const [preview, setPreview] = useState<string[][]>([]);
+  const [isBusy, setIsBusy] = useState(false);
+  const [integrationsExpanded, setIntegrationsExpanded] = useState(true);
+
+  const googleOauthEnabled =
+    import.meta.env.VITE_GOOGLE_OAUTH_ENABLED === "true";
+  const googleServiceEnabled =
+    import.meta.env.VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED === "true";
+  const quickbooksEnabled = import.meta.env.VITE_QUICKBOOKS_ENABLED === "true";
+
+  const modeLockedReason = useMemo(() => {
+    if (!settings) return "";
+    if (settings.googleSheets.mode === "oauth" && !googleOauthEnabled) {
+      return "OAuth mode locked: set VITE_GOOGLE_OAUTH_ENABLED=true";
+    }
+    if (
+      settings.googleSheets.mode === "service_account" &&
+      !googleServiceEnabled
+    ) {
+      return "Service account mode locked: set VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED=true";
+    }
+    return "";
+  }, [googleOauthEnabled, googleServiceEnabled, settings]);
+
+  const loadSettings = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await settingsApi.get();
+      const data = res.data.data as IntegrationSettings;
+      setSettings(data);
+      const activeSource =
+        data.googleSheets.sources.find((source) => source.active) ??
+        data.googleSheets.sources[0];
+      if (activeSource) {
+        setSourceName(activeSource.name);
+        setSpreadsheetId(activeSource.spreadsheetId);
+        setRange(activeSource.range);
+        setMappingJson(JSON.stringify(activeSource.mapping ?? {}, null, 2));
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to load settings"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadSettings();
+  }, []);
+
+  if (!canView) {
+    return <NoAccess />;
+  }
+
+  const onModeChange = async (mode: GoogleSheetMode) => {
+    if (!canEdit) return;
+    try {
+      setIsBusy(true);
+      await settingsApi.setGoogleMode(mode);
+      dispatch(
+        showSnackbar({ message: "Google mode updated", severity: "success" }),
+      );
+      await loadSettings();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "Failed to update mode"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const onConnectGoogle = async () => {
+    if (!canEdit) return;
+    try {
+      setIsBusy(true);
+      const res = await settingsApi.getGoogleConnectUrl();
+      const url = (res.data as { data?: { url?: string } }).data?.url;
+      if (!url) {
+        throw new Error("OAuth URL was not returned by server");
+      }
+      window.location.assign(url);
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "Failed to start Google OAuth"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const onTestAccess = async () => {
+    if (!settings) return;
+    if (!spreadsheetId.trim() || !range.trim()) {
+      dispatch(
+        showSnackbar({
+          message: "Spreadsheet ID and Range are required",
+          severity: "error",
+        }),
+      );
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      const res = await settingsApi.testGoogleSheet({
+        spreadsheetId: spreadsheetId.trim(),
+        range: range.trim(),
+        authMode: settings.googleSheets.mode,
+      });
+      setPreview((res.data.data.preview ?? []) as string[][]);
+      dispatch(
+        showSnackbar({
+          message: "Google Sheet access verified",
+          severity: "success",
+        }),
+      );
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "Google Sheet access failed"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const onSaveSource = async () => {
+    if (!canEdit || !settings) return;
+    if (!spreadsheetId.trim() || !range.trim() || !sourceName.trim()) {
+      dispatch(
+        showSnackbar({
+          message: "Name, Spreadsheet ID and Range are required",
+          severity: "error",
+        }),
+      );
+      return;
+    }
+
+    let mapping: Record<string, string> = {};
+    try {
+      const parsed = JSON.parse(mappingJson) as Record<string, unknown>;
+      mapping = Object.fromEntries(
+        Object.entries(parsed).map(([k, v]) => [k, String(v)]),
+      );
+    } catch {
+      dispatch(
+        showSnackbar({
+          message: "Mapping must be valid JSON",
+          severity: "error",
+        }),
+      );
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      await settingsApi.saveGoogleSource({
+        name: sourceName.trim(),
+        spreadsheetId: spreadsheetId.trim(),
+        range: range.trim(),
+        mapping,
+        active: true,
+      });
+      dispatch(
+        showSnackbar({ message: "Google source saved", severity: "success" }),
+      );
+      await loadSettings();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "Failed to save source"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const onDisconnectGoogle = async () => {
+    if (!canEdit) return;
+    try {
+      setIsBusy(true);
+      await settingsApi.disconnectGoogle();
+      dispatch(
+        showSnackbar({ message: "Google disconnected", severity: "success" }),
+      );
+      await loadSettings();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "Failed to disconnect Google"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const onConnectQuickbooks = async () => {
+    if (!canEdit) return;
+    try {
+      setIsBusy(true);
+      await settingsApi.connectQuickbooks();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "QuickBooks connect failed"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const onQuickbooksEnvironment = async (value: "sandbox" | "production") => {
+    if (!canEdit) return;
+    try {
+      setIsBusy(true);
+      await settingsApi.setQuickbooks({ environment: value });
+      dispatch(
+        showSnackbar({
+          message: "QuickBooks environment updated",
+          severity: "success",
+        }),
+      );
+      await loadSettings();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "QuickBooks update failed"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const onDisconnectQuickbooks = async () => {
+    if (!canEdit) return;
+    try {
+      setIsBusy(true);
+      await settingsApi.disconnectQuickbooks();
+      dispatch(
+        showSnackbar({
+          message: "QuickBooks disconnected",
+          severity: "success",
+        }),
+      );
+      await loadSettings();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "Failed to disconnect QuickBooks"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const copyServiceEmail = async () => {
+    const email = settings?.googleSheets.serviceAccountEmail ?? DEFAULT_EMAIL;
+    try {
+      await navigator.clipboard.writeText(email);
+      dispatch(
+        showSnackbar({
+          message: "Service account email copied",
+          severity: "success",
+        }),
+      );
+    } catch {
+      dispatch(showSnackbar({ message: "Copy failed", severity: "error" }));
+    }
+  };
+
+  return (
+    <Stack spacing={2.5}>
+      <PageHeader
+        title="Settings"
+        subtitle="Manage Google Sheets and QuickBooks integration configuration"
+        icon={<SettingsSuggestIcon />}
+      />
+
+      {error && <Alert severity="error">{error}</Alert>}
+      {loading && <Alert severity="info">Loading settings...</Alert>}
+
+      {settings && (
+        <Accordion
+          expanded={integrationsExpanded}
+          onChange={(_e, expanded) => setIntegrationsExpanded(expanded)}
+          sx={{
+            border: "1px solid #e2e8f0",
+            borderRadius: 2,
+            "&:before": { display: "none" },
+          }}
+        >
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Stack spacing={0.25}>
+              <Typography variant="h6">Integrations</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Expand to configure Google Sheets and QuickBooks.
+              </Typography>
+            </Stack>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Stack spacing={2.5}>
+              <Alert severity="info">
+                Choose an integration below, follow the connection steps, run
+                access test, and save.
+              </Alert>
+              <Card>
+                <CardContent>
+                  <Stack spacing={2}>
+                    <Stack
+                      direction="row"
+                      justifyContent="space-between"
+                      alignItems="center"
+                    >
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <GoogleIcon color="primary" fontSize="small" />
+                        <TableChartIcon color="success" fontSize="small" />
+                        <Typography variant="h6">Google Sheets</Typography>
+                      </Stack>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Typography
+                          variant="body2"
+                          color={
+                            settings.googleSheets.connected
+                              ? "success.main"
+                              : "text.secondary"
+                          }
+                        >
+                          {settings.googleSheets.connected
+                            ? "Connected"
+                            : "Not connected"}
+                        </Typography>
+                        {settings.googleSheets.mode === "oauth" && (
+                          <Button
+                            size="small"
+                            color="error"
+                            onClick={onDisconnectGoogle}
+                            disabled={isBusy || !canEdit}
+                          >
+                            Disconnect
+                          </Button>
+                        )}
+                      </Stack>
+                    </Stack>
+
+                    <FormControl size="small" sx={{ maxWidth: 260 }}>
+                      <InputLabel id="google-mode-label">Mode</InputLabel>
+                      <Select
+                        labelId="google-mode-label"
+                        label="Mode"
+                        value={settings.googleSheets.mode}
+                        onChange={(e) =>
+                          void onModeChange(e.target.value as GoogleSheetMode)
+                        }
+                        disabled={isBusy || !canEdit}
+                      >
+                        <MenuItem value="service_account">
+                          Service Account
+                        </MenuItem>
+                        <MenuItem value="oauth">OAuth</MenuItem>
+                      </Select>
+                    </FormControl>
+
+                    {modeLockedReason && (
+                      <Alert severity="warning" icon={<LockOutlinedIcon />}>
+                        {modeLockedReason}
+                      </Alert>
+                    )}
+                    <Alert severity="info">
+                      OAuth: click Connect Google and approve access. Service
+                      Account: share your sheet with the service email, then use
+                      Spreadsheet ID + Range.
+                    </Alert>
+
+                    {settings.googleSheets.mode === "oauth" ? (
+                      <Stack
+                        direction={{ xs: "column", md: "row" }}
+                        spacing={1}
+                        alignItems={{ md: "center" }}
+                      >
+                        <Tooltip
+                          title={
+                            googleOauthEnabled
+                              ? ""
+                              : "Set VITE_GOOGLE_OAUTH_ENABLED=true to unlock OAuth actions"
+                          }
+                        >
+                          <span>
+                            <Button
+                              variant="outlined"
+                              startIcon={<LinkIcon />}
+                              onClick={onConnectGoogle}
+                              disabled={
+                                !googleOauthEnabled || isBusy || !canEdit
+                              }
+                            >
+                              Connect Google
+                            </Button>
+                          </span>
+                        </Tooltip>
+                        <Typography variant="body2" color="text.secondary">
+                          {settings.googleSheets.connectedEmail
+                            ? `Connected as ${settings.googleSheets.connectedEmail}`
+                            : "Connect once, then use Spreadsheet ID and Range below."}
+                        </Typography>
+                      </Stack>
+                    ) : (
+                      <Stack spacing={1}>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <TextField
+                            size="small"
+                            label="Service Account Email"
+                            value={
+                              settings.googleSheets.serviceAccountEmail ||
+                              DEFAULT_EMAIL
+                            }
+                            fullWidth
+                            InputProps={{ readOnly: true }}
+                          />
+                          <Button
+                            variant="text"
+                            startIcon={<ContentCopyIcon />}
+                            onClick={copyServiceEmail}
+                          >
+                            Copy
+                          </Button>
+                        </Stack>
+                        <Alert severity="info">
+                          Share your sheet with this email as Viewer/Editor,
+                          then save Spreadsheet ID and Range.
+                        </Alert>
+                      </Stack>
+                    )}
+
+                    <Divider />
+
+                    <TextField
+                      label="Source Name"
+                      value={sourceName}
+                      onChange={(e) => setSourceName(e.target.value)}
+                      size="small"
+                      fullWidth
+                    />
+                    <TextField
+                      label="Spreadsheet ID"
+                      value={spreadsheetId}
+                      onChange={(e) => setSpreadsheetId(e.target.value)}
+                      size="small"
+                      fullWidth
+                    />
+                    <TextField
+                      label="Range"
+                      value={range}
+                      onChange={(e) => setRange(e.target.value)}
+                      size="small"
+                      fullWidth
+                    />
+                    <TextField
+                      label="Field Mapping (JSON)"
+                      value={mappingJson}
+                      onChange={(e) => setMappingJson(e.target.value)}
+                      multiline
+                      minRows={5}
+                      fullWidth
+                    />
+                    <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                      <Tooltip
+                        title={
+                          settings.googleSheets.mode === "oauth" &&
+                          !googleOauthEnabled
+                            ? "Set VITE_GOOGLE_OAUTH_ENABLED=true"
+                            : settings.googleSheets.mode ===
+                                  "service_account" && !googleServiceEnabled
+                              ? "Set VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED=true"
+                              : ""
+                        }
+                      >
+                        <span>
+                          <Button
+                            variant="outlined"
+                            onClick={onTestAccess}
+                            disabled={
+                              isBusy ||
+                              !canEdit ||
+                              (settings.googleSheets.mode === "oauth" &&
+                                !googleOauthEnabled) ||
+                              (settings.googleSheets.mode ===
+                                "service_account" &&
+                                !googleServiceEnabled)
+                            }
+                          >
+                            Test Access
+                          </Button>
+                        </span>
+                      </Tooltip>
+                      <Button
+                        variant="contained"
+                        onClick={onSaveSource}
+                        disabled={isBusy || !canEdit}
+                      >
+                        Save Source
+                      </Button>
+                    </Stack>
+
+                    {preview.length > 0 && (
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                          Preview (first 10 rows)
+                        </Typography>
+                        <Box
+                          sx={{
+                            p: 1.5,
+                            border: "1px solid",
+                            borderColor: "divider",
+                            borderRadius: 1,
+                          }}
+                        >
+                          {preview.map((row, index) => (
+                            <Typography
+                              key={`${index}-${row.join("|")}`}
+                              variant="body2"
+                              sx={{ fontFamily: "monospace" }}
+                            >
+                              {row.join(" | ")}
+                            </Typography>
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
+                  </Stack>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent>
+                  <Stack spacing={2}>
+                    <Stack
+                      direction="row"
+                      justifyContent="space-between"
+                      alignItems="center"
+                    >
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <AccountBalanceWalletIcon
+                          color="primary"
+                          fontSize="small"
+                        />
+                        <Typography variant="h6">QuickBooks</Typography>
+                      </Stack>
+                      <Typography
+                        variant="body2"
+                        color={
+                          settings.quickbooks.connected
+                            ? "success.main"
+                            : "text.secondary"
+                        }
+                      >
+                        {settings.quickbooks.connected
+                          ? "Connected"
+                          : "Not connected"}
+                      </Typography>
+                    </Stack>
+                    <Alert severity="info">
+                      Select environment, connect account, then verify Realm ID
+                      and Company values below.
+                    </Alert>
+
+                    <FormControl size="small" sx={{ maxWidth: 240 }}>
+                      <InputLabel id="qb-env-label">Environment</InputLabel>
+                      <Select
+                        labelId="qb-env-label"
+                        label="Environment"
+                        value={settings.quickbooks.environment}
+                        onChange={(e) =>
+                          void onQuickbooksEnvironment(
+                            e.target.value as "sandbox" | "production",
+                          )
+                        }
+                        disabled={isBusy || !canEdit}
+                      >
+                        <MenuItem value="sandbox">Sandbox</MenuItem>
+                        <MenuItem value="production">Production</MenuItem>
+                      </Select>
+                    </FormControl>
+
+                    <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                      <Tooltip
+                        title={
+                          quickbooksEnabled
+                            ? ""
+                            : "Set VITE_QUICKBOOKS_ENABLED=true to unlock QuickBooks connect"
+                        }
+                      >
+                        <span>
+                          <Button
+                            variant="outlined"
+                            startIcon={<SyncAltIcon />}
+                            onClick={onConnectQuickbooks}
+                            disabled={isBusy || !canEdit || !quickbooksEnabled}
+                          >
+                            Connect QuickBooks
+                          </Button>
+                        </span>
+                      </Tooltip>
+                      <Button
+                        color="error"
+                        onClick={onDisconnectQuickbooks}
+                        disabled={isBusy || !canEdit}
+                      >
+                        Disconnect
+                      </Button>
+                    </Stack>
+
+                    <Typography variant="body2" color="text.secondary">
+                      Realm ID: {settings.quickbooks.realmId ?? "Not set"}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Company: {settings.quickbooks.companyName ?? "Not set"}
+                    </Typography>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Stack>
+          </AccordionDetails>
+        </Accordion>
+      )}
+    </Stack>
+  );
+};

@@ -3,13 +3,13 @@ import { createTheme } from '@mui/material/styles';
 export const theme = createTheme({
   palette: {
     mode: 'light',
-    primary: { main: '#115e59' },
-    secondary: { main: '#b45309' },
+    primary: { main: '#3d9c74', light: '#9cccb4', dark: '#2c7658', contrastText: '#ffffff' },
+    secondary: { main: '#1f6f53' },
     success: { main: '#15803d' },
     error: { main: '#b91c1c' },
-    warning: { main: '#c2410c' },
-    info: { main: '#0369a1' },
-    background: { default: '#f1f5f9', paper: '#ffffff' }
+    warning: { main: '#b45309' },
+    info: { main: '#0f766e' },
+    background: { default: '#f4faf7', paper: '#ffffff' }
   },
   typography: {
     fontFamily: '"Public Sans", "Inter", "Segoe UI", sans-serif',
@@ -46,7 +46,7 @@ export const theme = createTheme({
     MuiAppBar: {
       styleOverrides: {
         root: {
-          backgroundImage: 'linear-gradient(90deg, #0f172a 0%, #115e59 100%)'
+          backgroundImage: 'linear-gradient(90deg, #2c7658 0%, #3d9c74 100%)'
         }
       }
     },
