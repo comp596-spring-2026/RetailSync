@@ -1,6 +1,6 @@
-# RetailSync
-
-Multi-tenant retail operations platform for small grocery stores and gas stations.
+<p align="center">
+  <img src="client/public/brand/BigLogo.png" alt="RetailSync Big Logo" width="360" />
+</p>
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
@@ -64,6 +64,16 @@ Client brand assets are served from `/client/public/brand` and used across auth 
 | `icon.svg` / `icon.png` / `icon.ico` | icon-only mark, favicon, compact UI |
 | `BigLogo.png` | large auth/onboarding logo (icon + wordmark) |
 | `logo-horizontal-removebg.png` | horizontal logo in dashboard header |
+
+### Brand Preview
+
+| Asset | Preview |
+|---|---|
+| `icon.svg` | <img src="client/public/brand/icon.svg" alt="RetailSync icon svg" width="72" /> |
+| `icon.png` | <img src="client/public/brand/icon.png" alt="RetailSync icon png" width="72" /> |
+| `icon.ico` | <img src="client/public/brand/icon.ico" alt="RetailSync icon ico" width="72" /> |
+| `BigLogo.png` | <img src="client/public/brand/BigLogo.png" alt="RetailSync big logo" width="320" /> |
+| `logo-horizontal-removebg.png` | <img src="client/public/brand/logo-horizontal-removebg.png" alt="RetailSync horizontal logo" width="320" /> |
 
 ## Architecture
 
