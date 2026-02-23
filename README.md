@@ -31,6 +31,17 @@ It solves:
 - missing secure auth recovery and verification flows
 - need for integrations (Google Sheets and email delivery)
 
+## Tech Stack
+
+RetailSync is a TypeScript monorepo with React/Vite on the client and Express/MongoDB on the server, with shared schema contracts and integration adapters.
+
+- Frontend: React, Vite, Redux Toolkit, Material UI
+- Backend: Express, Mongoose, Zod, JWT
+- Data: MongoDB
+- Testing: Vitest, Supertest, mongodb-memory-server
+- Integrations: Google APIs (Sheets + OAuth), Resend (transactional email)
+- DevOps/Tooling: pnpm workspaces, Docker Compose, Makefile
+
 ## Major Features
 
 | Area | Capabilities |
