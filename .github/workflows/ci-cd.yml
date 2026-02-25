@@ -98,6 +98,7 @@ jobs:
       GCP_REGION: ${{ vars.GCP_REGION }}
       CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
       GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
       GAR_LOCATION: ${{ vars.GAR_LOCATION }}
       GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
       GAR_IMAGE_NAME: retailsync-api
@@ -124,6 +125,7 @@ jobs:
           REGION="$(printf '%s' "$GCP_REGION" | tr -d '\r\n')"
           SERVICE="$(printf '%s' "$CLOUD_RUN_SERVICE" | tr -d '\r\n')"
           AUTH_SA="$(printf '%s' "$GCP_SERVICE_ACCOUNT" | tr -d '\r\n')"
+          RUNTIME_SA="$(printf '%s' "$GCP_RUNTIME_SERVICE_ACCOUNT" | tr -d '\r\n')"
           GAR_LOC="$(printf '%s' "$GAR_LOCATION" | tr -d '\r\n')"
           GAR_REPO="$(printf '%s' "$GAR_REPOSITORY" | tr -d '\r\n')"
           IMAGE_NAME="$(printf '%s' "$GAR_IMAGE_NAME" | tr -d '\r\n')"
@@ -133,6 +135,7 @@ jobs:
           [ -z "$REGION" ] && missing+=("GCP_REGION")
           [ -z "$SERVICE" ] && missing+=("CLOUD_RUN_SERVICE")
           [ -z "$AUTH_SA" ] && missing+=("GCP_SERVICE_ACCOUNT")
+          [ -z "$RUNTIME_SA" ] && missing+=("GCP_RUNTIME_SERVICE_ACCOUNT")
           [ -z "$GAR_LOC" ] && missing+=("GAR_LOCATION")
           [ -z "$GAR_REPO" ] && missing+=("GAR_REPOSITORY")
           [ -z "$IMAGE_NAME" ] && missing+=("GAR_IMAGE_NAME")
@@ -145,7 +148,8 @@ jobs:
           echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
           echo "region=$REGION" >> "$GITHUB_OUTPUT"
           echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
-          echo "service_account=$AUTH_SA" >> "$GITHUB_OUTPUT"
+          echo "auth_service_account=$AUTH_SA" >> "$GITHUB_OUTPUT"
+          echo "runtime_service_account=$RUNTIME_SA" >> "$GITHUB_OUTPUT"
           echo "gar_location=$GAR_LOC" >> "$GITHUB_OUTPUT"
           echo "gar_repository=$GAR_REPO" >> "$GITHUB_OUTPUT"
           echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
@@ -177,7 +181,7 @@ jobs:
             --platform managed \
             --port 8080 \
             --timeout 300 \
-            --service-account "${{ steps.cfg.outputs.service_account }}" \
+            --service-account "${{ steps.cfg.outputs.runtime_service_account }}" \
             --set-env-vars "NODE_ENV=production,CLIENT_URL=${CLIENT_URL}" \
             --update-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest" \
             --allow-unauthenticated
@@ -194,7 +198,7 @@ jobs:
             "resource.type=cloud_run_revision AND resource.labels.service_name=${{ steps.cfg.outputs.service }}" \
             --project "${{ steps.cfg.outputs.project_id }}" \
             --limit 50 \
-            --format="value(textPayload)"
+            --format="value(textPayload)" || true
 
       - name: Fail deploy if backend deploy failed
         if: ${{ steps.deploy_backend.outcome != 'success' }}
