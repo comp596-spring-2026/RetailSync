@@ -35,4 +35,4 @@ USER nodeuser
 WORKDIR /app
 EXPOSE 8080
 
-CMD ["node", "server/dist/server/src/index.js"]
+CMD ["node", "--import", "./server/node_modules/tsx/dist/esm/index.mjs", "server/src/index.ts"]
