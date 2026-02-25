@@ -25,6 +25,9 @@ import { OperationsHubPage } from './pages/OperationsHubPage';
 import { ProcurementHubPage } from './pages/ProcurementHubPage';
 import { AccessHubPage } from './pages/AccessHubPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
+import { PrivacyPage } from './pages/PrivacyPage';
+import { TermsPage } from './pages/TermsPage';
+import { DataDeletionPage } from './pages/DataDeletionPage';
 
 const App = () => {
   return (
@@ -35,6 +38,9 @@ const App = () => {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/auth/google/success" element={<GoogleAuthSuccessPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/data-deletion" element={<DataDeletionPage />} />
 
       <Route element={<OnboardingGuard />}>
         <Route path="/onboarding" element={<OnboardingPage />} />

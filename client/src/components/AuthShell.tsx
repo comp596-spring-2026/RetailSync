@@ -1,5 +1,6 @@
-import { Box, Paper, Stack, Typography } from '@mui/material';
+import { Box, Link as MuiLink, Paper, Stack, Typography } from '@mui/material';
 import { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { BrandLogo } from './BrandLogo';
 
 type AuthShellProps = {
@@ -58,6 +59,17 @@ export const AuthShell = ({
             </Box>
           )}
           {children}
+          <Stack direction="row" justifyContent="center" spacing={2} sx={{ pt: 1 }}>
+            <MuiLink component={Link} to="/privacy" underline="hover" variant="caption" color="text.secondary">
+              Privacy
+            </MuiLink>
+            <MuiLink component={Link} to="/terms" underline="hover" variant="caption" color="text.secondary">
+              Terms
+            </MuiLink>
+            <MuiLink component={Link} to="/data-deletion" underline="hover" variant="caption" color="text.secondary">
+              Data deletion
+            </MuiLink>
+          </Stack>
         </Stack>
       </Paper>
     </Box>
