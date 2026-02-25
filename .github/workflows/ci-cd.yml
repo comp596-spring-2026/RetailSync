@@ -265,7 +265,7 @@ jobs:
             --timeout 300 \
             --service-account "${{ steps.cfg.outputs.runtime_service_account }}" \
             --set-env-vars "NODE_ENV=production,CLIENT_URL=${CLIENT_URL}" \
-            --update-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest" \
+            --update-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,GOOGLE_OAUTH_CLIENT_ID=GOOGLE_OAUTH_CLIENT_ID:latest,GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest,GOOGLE_AUTH_REDIRECT_URI=GOOGLE_AUTH_REDIRECT_URI:latest" \
             --allow-unauthenticated
 
       - name: Cloud Run startup logs (on failure)
