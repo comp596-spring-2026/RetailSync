@@ -33,6 +33,63 @@ export const createApp = () => {
   app.use(cookieParser());
   app.use(withRequestContext);
 
+  app.get('/', (_req, res) => {
+    res.type('html').send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RetailSync API</title>
+  <style>
+    body { font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; line-height: 1.45; color: #0f172a; }
+    .card { max-width: 760px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.25rem 1.5rem; background: #ffffff; }
+    h1 { margin: 0 0 0.75rem; font-size: 1.5rem; }
+    p { margin: 0.5rem 0; }
+    ul { padding-left: 1.25rem; }
+    code { background: #f1f5f9; padding: 0.1rem 0.35rem; border-radius: 6px; }
+    .muted { color: #475569; }
+    .ok { color: #166534; font-weight: 600; }
+    .warn { color: #9a3412; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>RetailSync API</h1>
+    <p class="muted">Welcome page for the deployed backend service.</p>
+    <p><strong>Environment:</strong> <code>${env.nodeEnv}</code></p>
+    <p><strong>Health endpoint:</strong> <a href="/health"><code>/health</code></a></p>
+    <p><strong>API base:</strong> <code>/api</code></p>
+    <p id="healthStatus" class="muted">Checking health...</p>
+    <ul>
+      <li>Auth: <code>/api/auth</code></li>
+      <li>Company: <code>/api/company</code></li>
+      <li>Items: <code>/api/items</code></li>
+      <li>Inventory: <code>/api/inventory</code></li>
+    </ul>
+  </div>
+  <script>
+    (async () => {
+      const el = document.getElementById('healthStatus');
+      try {
+        const res = await fetch('/health', { credentials: 'include' });
+        const body = await res.json();
+        if (res.ok && body && body.status === 'ok') {
+          el.textContent = 'Health check: OK';
+          el.className = 'ok';
+        } else {
+          el.textContent = 'Health check: unexpected response';
+          el.className = 'warn';
+        }
+      } catch (_err) {
+        el.textContent = 'Health check: unreachable';
+        el.className = 'warn';
+      }
+    })();
+  </script>
+</body>
+</html>`);
+  });
+
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', data: { uptime: process.uptime() } });
   });
