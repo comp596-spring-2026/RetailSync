@@ -6,7 +6,7 @@ RUN corepack enable
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
 COPY shared/package.json shared/tsconfig.json ./shared/
 COPY shared/src ./shared/src
-COPY server/package.json server/tsconfig.json ./server/
+COPY server/package.json server/tsconfig.json server/tsconfig.build.json ./server/
 COPY server/src ./server/src
 
 RUN pnpm install --no-frozen-lockfile

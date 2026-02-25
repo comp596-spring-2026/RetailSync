@@ -1,20 +1,15 @@
 import dotenv from 'dotenv';
 import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const currentFileDir = dirname(fileURLToPath(import.meta.url));
+import { resolve } from 'node:path';
 
 const envCandidates = [
   resolve(process.cwd(), 'server/.env'),
-  resolve(process.cwd(), '.env'),
-  resolve(currentFileDir, '../../.env')
+  resolve(process.cwd(), '.env')
 ];
 
 const exampleCandidates = [
   resolve(process.cwd(), 'server/.env.example'),
-  resolve(process.cwd(), '.env.example'),
-  resolve(currentFileDir, '../../.env.example')
+  resolve(process.cwd(), '.env.example')
 ];
 
 for (const path of envCandidates) {
