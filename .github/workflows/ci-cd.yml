@@ -362,11 +362,14 @@ jobs:
           VITE_API_URL=${{ steps.cloud-run.outputs.url }}/api
           EOF
 
-      - name: Install frontend dependencies
-        run: pnpm --dir client install --frozen-lockfile
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter @retailsync/shared --if-present build
 
       - name: Build frontend
-        run: pnpm --dir client build
+        run: pnpm --filter @retailsync/client --if-present build
 
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
