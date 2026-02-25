@@ -11,7 +11,7 @@ permissions:
 
 env:
   NODE_VERSION: '20'
-  PNPM_VERSION: '10'
+  PNPM_VERSION: '10.4.1'
   CI: 'true'
 
 jobs:
