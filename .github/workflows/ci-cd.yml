@@ -97,6 +97,7 @@ jobs:
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
       CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
       GAR_LOCATION: ${{ vars.GAR_LOCATION }}
       GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
       GAR_IMAGE_NAME: retailsync-api
@@ -122,11 +123,12 @@ jobs:
           PROJECT_ID="$(printf '%s' "$GCP_PROJECT_ID" | tr -d '\r\n')"
           REGION="$(printf '%s' "$GCP_REGION" | tr -d '\r\n')"
           SERVICE="$(printf '%s' "$CLOUD_RUN_SERVICE" | tr -d '\r\n')"
+          RUNTIME_SA="$(printf '%s' "$GCP_RUNTIME_SERVICE_ACCOUNT" | tr -d '\r\n')"
           GAR_LOC="$(printf '%s' "$GAR_LOCATION" | tr -d '\r\n')"
           GAR_REPO="$(printf '%s' "$GAR_REPOSITORY" | tr -d '\r\n')"
           IMAGE_NAME="$(printf '%s' "$GAR_IMAGE_NAME" | tr -d '\r\n')"
 
-          if [ -z "$PROJECT_ID" ] || [ -z "$REGION" ] || [ -z "$SERVICE" ] || [ -z "$GAR_LOC" ] || [ -z "$GAR_REPO" ] || [ -z "$IMAGE_NAME" ]; then
+          if [ -z "$PROJECT_ID" ] || [ -z "$REGION" ] || [ -z "$SERVICE" ] || [ -z "$RUNTIME_SA" ] || [ -z "$GAR_LOC" ] || [ -z "$GAR_REPO" ] || [ -z "$IMAGE_NAME" ]; then
             echo "One or more required deploy variables are empty after normalization." >&2
             exit 1
           fi
@@ -134,6 +136,7 @@ jobs:
           echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
           echo "region=$REGION" >> "$GITHUB_OUTPUT"
           echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
+          echo "runtime_service_account=$RUNTIME_SA" >> "$GITHUB_OUTPUT"
           echo "gar_location=$GAR_LOC" >> "$GITHUB_OUTPUT"
           echo "gar_repository=$GAR_REPO" >> "$GITHUB_OUTPUT"
           echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
@@ -154,6 +157,8 @@ jobs:
           docker push "${{ steps.img.outputs.image }}"
 
       - name: Deploy backend to Cloud Run
+        id: deploy_backend
+        continue-on-error: true
         run: |
           CLIENT_URL="https://${{ steps.cfg.outputs.project_id }}.web.app"
           gcloud run deploy "${{ steps.cfg.outputs.service }}" \
@@ -161,9 +166,30 @@ jobs:
             --region "${{ steps.cfg.outputs.region }}" \
             --project "${{ steps.cfg.outputs.project_id }}" \
             --platform managed \
-            --set-env-vars "CLIENT_URL=${CLIENT_URL}" \
+            --port 8080 \
+            --timeout 300 \
+            --service-account "${{ steps.cfg.outputs.runtime_service_account }}" \
+            --set-env-vars "NODE_ENV=production,CLIENT_URL=${CLIENT_URL}" \
             --update-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest" \
             --allow-unauthenticated
+
+      - name: Cloud Run startup logs (on failure)
+        if: ${{ steps.deploy_backend.outcome != 'success' }}
+        run: |
+          gcloud run revisions list \
+            --service "${{ steps.cfg.outputs.service }}" \
+            --region "${{ steps.cfg.outputs.region }}" \
+            --project "${{ steps.cfg.outputs.project_id }}" \
+            --format="table(metadata.name,status.conditions[0].status,status.conditions[0].message)"
+          gcloud logging read \
+            "resource.type=cloud_run_revision AND resource.labels.service_name=${{ steps.cfg.outputs.service }}" \
+            --project "${{ steps.cfg.outputs.project_id }}" \
+            --limit 50 \
+            --format="value(textPayload)"
+
+      - name: Fail deploy if backend deploy failed
+        if: ${{ steps.deploy_backend.outcome != 'success' }}
+        run: exit 1
 
       - name: Resolve Cloud Run URL
         id: cloud-run

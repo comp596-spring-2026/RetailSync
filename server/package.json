@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "start": "node dist/server/src/index.js",
     "seed:pos": "tsx src/scripts/seedPosSample.ts",
     "test": "pnpm run test:unit",
     "test:unit": "vitest run --exclude src/**/*.e2e.test.ts --exclude src/**/*.integration.test.ts --exclude src/tenantIsolation.test.ts --exclude src/auth.refresh.test.ts --exclude src/inventoryLedger.immutability.test.ts",
