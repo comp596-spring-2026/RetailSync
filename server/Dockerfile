@@ -33,6 +33,6 @@ COPY --from=builder /app/server/src ./server/src
 
 USER nodeuser
 WORKDIR /app
-EXPOSE 4000
+EXPOSE 8080
 
-CMD ["node", "--import", "./server/node_modules/tsx/dist/esm/index.mjs", "server/src/index.ts"]
+CMD ["node", "server/dist/index.js"]

@@ -155,19 +155,15 @@ jobs:
 
       - name: Deploy backend to Cloud Run
         run: |
+          CLIENT_URL="https://${{ steps.cfg.outputs.project_id }}.web.app"
           gcloud run deploy "${{ steps.cfg.outputs.service }}" \
             --image "${{ steps.img.outputs.image }}" \
             --region "${{ steps.cfg.outputs.region }}" \
             --project "${{ steps.cfg.outputs.project_id }}" \
             --platform managed \
+            --set-env-vars "CLIENT_URL=${CLIENT_URL}" \
+            --update-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest" \
             --allow-unauthenticated
-
-      - name: Update Cloud Run secrets
-        run: |
-          gcloud run services update "${{ steps.cfg.outputs.service }}" \
-            --region "${{ steps.cfg.outputs.region }}" \
-            --project "${{ steps.cfg.outputs.project_id }}" \
-            --update-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest"
 
       - name: Resolve Cloud Run URL
         id: cloud-run
