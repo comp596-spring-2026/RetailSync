@@ -40,6 +40,7 @@ const App = () => {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/auth/google/success" element={<GoogleAuthSuccessPage />} />
+      <Route path="/playground" element={<PlaygroundPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/data-deletion" element={<DataDeletionPage />} />

@@ -51,6 +51,23 @@ const getHealthUrl = (apiBase: string) => {
   return `${withoutApi}/health`;
 };
 
+const getEnvReadinessUrl = (apiBase: string) => {
+  if (!apiBase) return '/health/env-readiness';
+  const withoutApi = apiBase.replace(/\/api\/?$/, '');
+  return `${withoutApi}/health/env-readiness`;
+};
+
+const FRONTEND_REQUIRED_KEYS = ['VITE_API_URL'] as const;
+
+type EnvReadinessResponse = {
+  status: 'ok';
+  data: {
+    allRequiredPresent: boolean;
+    required: Record<string, boolean>;
+    optional: Record<string, boolean>;
+  };
+};
+
 const statusChip = (status: CheckStatus) => {
   if (status === 'ok') return <Chip size="small" color="success" icon={<CheckCircleOutlineIcon />} label="OK" />;
   if (status === 'error') return <Chip size="small" color="error" icon={<ErrorOutlineIcon />} label="Failed" />;
@@ -66,9 +83,25 @@ export const PlaygroundPage = () => {
     detail: 'Auth check has not run yet.'
   });
   const [dbCheck, setDbCheck] = useState<CheckResult>({ status: 'idle', detail: 'DB check has not run yet.' });
+  const [backendEnvCheck, setBackendEnvCheck] = useState<CheckResult>({
+    status: 'idle',
+    detail: 'Backend env readiness check has not run yet.'
+  });
+  const [backendRequiredEnv, setBackendRequiredEnv] = useState<Record<string, boolean>>({});
+  const [backendOptionalEnv, setBackendOptionalEnv] = useState<Record<string, boolean>>({});
 
   const apiBase = import.meta.env.VITE_API_URL ?? '';
   const healthUrl = useMemo(() => getHealthUrl(apiBase), [apiBase]);
+  const envReadinessUrl = useMemo(() => getEnvReadinessUrl(apiBase), [apiBase]);
+  const frontendRequiredStatus = useMemo(
+    () =>
+      FRONTEND_REQUIRED_KEYS.map((key) => ({
+        key,
+        present: Boolean(import.meta.env[key])
+      })),
+    []
+  );
+  const frontendAllRequiredPresent = frontendRequiredStatus.every((item) => item.present);
 
   const runApiHealth = async () => {
     setApiHealth({ status: 'running', detail: 'Checking /health...' });
@@ -106,6 +139,28 @@ export const PlaygroundPage = () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'DB check failed';
       setDbCheck({ status: 'error', detail: message });
+    }
+  };
+
+  const runBackendEnvCheck = async () => {
+    setBackendEnvCheck({ status: 'running', detail: 'Checking backend environment readiness...' });
+    try {
+      const res = await fetch(envReadinessUrl, { credentials: 'include' });
+      if (!res.ok) {
+        setBackendEnvCheck({ status: 'error', detail: `Env readiness endpoint returned ${res.status}` });
+        return;
+      }
+      const payload = (await res.json()) as EnvReadinessResponse;
+      setBackendRequiredEnv(payload.data.required ?? {});
+      setBackendOptionalEnv(payload.data.optional ?? {});
+      if (payload.data.allRequiredPresent) {
+        setBackendEnvCheck({ status: 'ok', detail: 'All required backend env vars are present.' });
+      } else {
+        setBackendEnvCheck({ status: 'error', detail: 'One or more required backend env vars are missing.' });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Backend env check failed';
+      setBackendEnvCheck({ status: 'error', detail: message });
     }
   };
 
@@ -199,6 +254,26 @@ export const PlaygroundPage = () => {
               </Stack>
               <Divider />
               <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                Frontend Required Variables
+              </Typography>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                {frontendRequiredStatus.map((item) => (
+                  <Chip
+                    key={item.key}
+                    label={`${item.key}: ${item.present ? 'present' : 'missing'}`}
+                    color={item.present ? 'success' : 'error'}
+                    variant={item.present ? 'filled' : 'outlined'}
+                  />
+                ))}
+              </Stack>
+              {!frontendAllRequiredPresent && (
+                <Alert severity="error">Frontend required env is incomplete. Set missing VITE_* keys and rebuild the client.</Alert>
+              )}
+              {frontendAllRequiredPresent && (
+                <Alert severity="success">Frontend required env is present.</Alert>
+              )}
+              <Divider />
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                 Server Variables (expected)
               </Typography>
               <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
@@ -206,6 +281,49 @@ export const PlaygroundPage = () => {
                   <Chip key={name} label={name} variant="outlined" />
                 ))}
               </Stack>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                <Button variant="contained" onClick={runBackendEnvCheck}>
+                  Run Backend Env Check
+                </Button>
+                {statusChip(backendEnvCheck.status)}
+                <Typography variant="body2" color="text.secondary">
+                  {backendEnvCheck.detail}
+                </Typography>
+              </Stack>
+              {Object.keys(backendRequiredEnv).length > 0 && (
+                <>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Backend Required Status
+                  </Typography>
+                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                    {Object.entries(backendRequiredEnv).map(([name, present]) => (
+                      <Chip
+                        key={name}
+                        label={`${name}: ${present ? 'present' : 'missing'}`}
+                        color={present ? 'success' : 'error'}
+                        variant={present ? 'filled' : 'outlined'}
+                      />
+                    ))}
+                  </Stack>
+                </>
+              )}
+              {Object.keys(backendOptionalEnv).length > 0 && (
+                <>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Backend Optional Status
+                  </Typography>
+                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                    {Object.entries(backendOptionalEnv).map(([name, present]) => (
+                      <Chip
+                        key={name}
+                        label={`${name}: ${present ? 'present' : 'not set'}`}
+                        color={present ? 'success' : 'default'}
+                        variant={present ? 'filled' : 'outlined'}
+                      />
+                    ))}
+                  </Stack>
+                </>
+              )}
             </Stack>
           </CardContent>
         </Card>
@@ -255,7 +373,10 @@ export const PlaygroundPage = () => {
             </CardContent>
           </Card>
 
-          {(apiHealth.status === 'error' || authCheck.status === 'error' || dbCheck.status === 'error') && (
+          {(apiHealth.status === 'error' ||
+            authCheck.status === 'error' ||
+            dbCheck.status === 'error' ||
+            backendEnvCheck.status === 'error') && (
             <Alert severity="error">
               One or more checks failed. Review server logs and confirm Mongo and env setup before retrying.
             </Alert>

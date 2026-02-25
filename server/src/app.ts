@@ -94,6 +94,33 @@ export const createApp = () => {
     res.json({ status: 'ok', data: { uptime: process.uptime() } });
   });
 
+  app.get('/health/env-readiness', (_req, res) => {
+    const required = {
+      PORT: Boolean(env.port),
+      MONGO_URI: Boolean(env.mongoUri),
+      JWT_ACCESS_SECRET: Boolean(env.accessSecret),
+      JWT_REFRESH_SECRET: Boolean(env.refreshSecret),
+      CLIENT_URL: Boolean(env.clientUrl)
+    };
+
+    const optional = {
+      GOOGLE_OAUTH_CLIENT_ID: Boolean(env.googleOAuthClientId),
+      GOOGLE_OAUTH_CLIENT_SECRET: Boolean(env.googleOAuthClientSecret),
+      GOOGLE_AUTH_REDIRECT_URI: Boolean(env.googleAuthRedirectUri),
+      GOOGLE_SERVICE_ACCOUNT_JSON: Boolean(env.googleServiceAccountJson),
+      RESEND_API_KEY: Boolean(env.resendApiKey)
+    };
+
+    res.json({
+      status: 'ok',
+      data: {
+        allRequiredPresent: Object.values(required).every(Boolean),
+        required,
+        optional
+      }
+    });
+  });
+
   app.use('/api/auth', authRoutes);
   app.use('/api/company', companyRoutes);
   app.use('/api/roles', roleRoutes);
