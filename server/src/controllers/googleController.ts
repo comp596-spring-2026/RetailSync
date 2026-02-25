@@ -13,7 +13,7 @@ const getOAuthClient = () => {
   if (
     !env.googleOAuthClientId ||
     !env.googleOAuthClientSecret ||
-    !env.googleOAuthRedirectUri
+    !env.googleAuthRedirectUri
   ) {
     return null;
   }
@@ -21,7 +21,7 @@ const getOAuthClient = () => {
   return new google.auth.OAuth2(
     env.googleOAuthClientId,
     env.googleOAuthClientSecret,
-    env.googleOAuthRedirectUri,
+    env.googleAuthRedirectUri,
   );
 };
 
@@ -34,7 +34,7 @@ export const connectGoogle = async (req: Request, res: Response) => {
   if (!oauthClient) {
     return fail(
       res,
-      "Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REDIRECT_URI.",
+      "Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_AUTH_REDIRECT_URI.",
       501,
     );
   }
@@ -65,7 +65,7 @@ export const connectGoogleUrl = async (req: Request, res: Response) => {
   if (!oauthClient) {
     return fail(
       res,
-      "Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REDIRECT_URI.",
+      "Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_AUTH_REDIRECT_URI.",
       501,
     );
   }

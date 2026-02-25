@@ -54,14 +54,14 @@ const readWithOAuth = async (spreadsheetId: string, range: string, req: Request)
     throw new Error('Google OAuth tokens not found. Use Connect Google first.');
   }
 
-  if (!env.googleOAuthClientId || !env.googleOAuthClientSecret || !env.googleOAuthRedirectUri) {
+  if (!env.googleOAuthClientId || !env.googleOAuthClientSecret || !env.googleAuthRedirectUri) {
     throw new Error('Google OAuth is not configured on server');
   }
 
   const oauthClient = new google.auth.OAuth2(
     env.googleOAuthClientId,
     env.googleOAuthClientSecret,
-    env.googleOAuthRedirectUri
+    env.googleAuthRedirectUri
   );
 
   const tokenPayload = decryptJson<GoogleOAuthSecret>(tokenDoc.encryptedPayload, env.encryptionKey);

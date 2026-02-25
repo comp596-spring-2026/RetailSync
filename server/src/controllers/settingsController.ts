@@ -120,7 +120,7 @@ const loadGoogleAuthClient = async (
   if (
     !env.googleOAuthClientId ||
     !env.googleOAuthClientSecret ||
-    !env.googleOAuthRedirectUri
+    !env.googleAuthRedirectUri
   ) {
     throw new Error("Google OAuth is not configured on server");
   }
@@ -142,7 +142,7 @@ const loadGoogleAuthClient = async (
   const oauthClient = new google.auth.OAuth2(
     env.googleOAuthClientId,
     env.googleOAuthClientSecret,
-    env.googleOAuthRedirectUri,
+    env.googleAuthRedirectUri,
   );
   oauthClient.setCredentials({
     access_token: tokenPayload.accessToken,

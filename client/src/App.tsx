@@ -7,6 +7,7 @@ import { LoginPage } from './pages/LoginPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
+import { GoogleAuthSuccessPage } from './pages/GoogleAuthSuccessPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { CreateCompanyPage } from './pages/CreateCompanyPage';
 import { JoinCompanyPage } from './pages/JoinCompanyPage';
@@ -33,6 +34,7 @@ const App = () => {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <Route path="/auth/google/success" element={<GoogleAuthSuccessPage />} />
 
       <Route element={<OnboardingGuard />}>
         <Route path="/onboarding" element={<OnboardingPage />} />

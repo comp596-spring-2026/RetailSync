@@ -2,6 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Button, Stack, TextField } from '@mui/material';
 import LoginIcon from '@mui/icons-material/Login';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
+import GoogleIcon from '@mui/icons-material/Google';
 import type { AxiosError } from 'axios';
 import { loginSchema } from '@retailsync/shared';
 import { useForm } from 'react-hook-form';
@@ -84,6 +85,17 @@ export const LoginPage = () => {
         />
         <Button variant="contained" startIcon={<LoginIcon />} type="submit" disabled={isSubmitting}>
           {isSubmitting ? 'Loading...' : 'Login'}
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<GoogleIcon />}
+          onClick={() => {
+            const apiBase = import.meta.env.VITE_API_URL;
+            const origin = apiBase.endsWith('/api') ? apiBase.slice(0, -4) : apiBase;
+            window.location.href = `${origin}/api/auth/google/start`;
+          }}
+        >
+          Continue with Google
         </Button>
         <Button component={Link} to="/forgot-password">
           Forgot password?

@@ -10,6 +10,7 @@ import {
   resetPassword,
   verifyEmail
 } from '../controllers/authController';
+import { googleAuthCallback, googleAuthStart } from '../controllers/authGoogleController';
 import { requireAuth } from '../middleware/requireAuth';
 
 const router = Router();
@@ -20,6 +21,8 @@ router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
 router.post('/verify-email', verifyEmail);
 router.post('/resend-verification', resendVerification);
+router.get('/google/start', googleAuthStart);
+router.get('/google/callback', googleAuthCallback);
 router.post('/refresh', refresh);
 router.post('/logout', logout);
 router.get('/me', requireAuth, me);
