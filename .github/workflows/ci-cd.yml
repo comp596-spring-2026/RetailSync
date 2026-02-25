@@ -6,6 +6,21 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      deploy_backend:
+        description: Deploy backend
+        required: false
+        default: true
+        type: boolean
+      deploy_frontend:
+        description: Deploy frontend
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -16,11 +31,44 @@ env:
   CI: 'true'
 
 jobs:
-  ci:
-    name: CI
+  changes:
+    name: Detect Changes
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'server/**'
+              - 'shared/**'
+              - 'pnpm-lock.yaml'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - '.github/workflows/ci-cd.yml'
+            frontend:
+              - 'client/**'
+              - 'shared/**'
+              - 'firebase.json'
+              - '.firebaserc'
+              - 'pnpm-lock.yaml'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - '.github/workflows/ci-cd.yml'
+
+  ci_backend:
+    name: CI Backend
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,60 +84,96 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - name: Resolve pnpm store path
-        id: pnpm-store
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+      - name: Typecheck shared/server
+        run: |
+          pnpm --filter @retailsync/shared --if-present typecheck
+          pnpm --filter @retailsync/server --if-present typecheck
 
-      - name: Cache workspace node_modules
-        uses: actions/cache@v4
+      - name: Lint shared/server
+        run: |
+          pnpm --filter @retailsync/shared --if-present lint
+          pnpm --filter @retailsync/server --if-present lint
+
+      - name: Test server (unit/default)
+        run: pnpm --filter @retailsync/server --if-present test
+
+      - name: Test server (integration, opt-in)
+        if: ${{ vars.CI_INTEGRATION == 'true' }}
+        run: pnpm --filter @retailsync/server --if-present test:integration
+
+      - name: Build shared/server
+        run: |
+          pnpm --filter @retailsync/shared --if-present build
+          pnpm --filter @retailsync/server --if-present build
+
+  ci_frontend:
+    name: CI Frontend
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          path: |
-            node_modules
-            client/node_modules
-            server/node_modules
-            shared/node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-node-modules-
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck (if present)
-        run: pnpm -r --if-present typecheck
-
-      - name: Lint (if present)
-        run: pnpm -r --if-present lint
-
-      - name: Test (unit/default)
-        run: pnpm -r --if-present test
-
-      - name: Test (integration, opt-in)
-        if: ${{ vars.CI_INTEGRATION == 'true' }}
-        run: pnpm -r --if-present test:integration
-
-      - name: Build (if present)
-        run: pnpm -r --if-present build
-
-      - name: Integration test hint
+      - name: Typecheck shared/client
         run: |
-          echo "Integration tests are disabled by default." >> "$GITHUB_STEP_SUMMARY"
-          echo "Set repository variable CI_INTEGRATION=true to run pnpm -r --if-present test:integration in CI." >> "$GITHUB_STEP_SUMMARY"
+          pnpm --filter @retailsync/shared --if-present typecheck
+          pnpm --filter @retailsync/client --if-present typecheck
 
-  deploy:
-    name: Deploy
+      - name: Lint shared/client
+        run: |
+          pnpm --filter @retailsync/shared --if-present lint
+          pnpm --filter @retailsync/client --if-present lint
+
+      - name: Test client
+        run: pnpm --filter @retailsync/client --if-present test
+
+      - name: Build shared/client
+        run: |
+          pnpm --filter @retailsync/shared --if-present build
+          pnpm --filter @retailsync/client --if-present build
+
+  ci_gate:
+    name: CI Gate
     runs-on: ubuntu-latest
+    needs: [ci_backend, ci_frontend]
+    if: ${{ always() }}
+    steps:
+      - name: Validate CI job results
+        run: |
+          backend_result='${{ needs.ci_backend.result }}'
+          frontend_result='${{ needs.ci_frontend.result }}'
+
+          echo "ci_backend: $backend_result"
+          echo "ci_frontend: $frontend_result"
+
+          case "$backend_result" in success|skipped) ;; *) exit 1 ;; esac
+          case "$frontend_result" in success|skipped) ;; *) exit 1 ;; esac
+
+  deploy_backend:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    needs: [changes, ci_gate]
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.backend == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy_backend == true) }}
     timeout-minutes: 45
-    needs: ci
-    if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
     permissions:
       contents: read
       id-token: write
@@ -148,7 +232,6 @@ jobs:
           echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
           echo "region=$REGION" >> "$GITHUB_OUTPUT"
           echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
-          echo "auth_service_account=$AUTH_SA" >> "$GITHUB_OUTPUT"
           echo "runtime_service_account=$RUNTIME_SA" >> "$GITHUB_OUTPUT"
           echo "gar_location=$GAR_LOC" >> "$GITHUB_OUTPUT"
           echo "gar_repository=$GAR_REPO" >> "$GITHUB_OUTPUT"
@@ -161,8 +244,7 @@ jobs:
           echo "image=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
 
       - name: Configure Docker auth for Artifact Registry
-        run: |
-          gcloud auth configure-docker "${{ steps.cfg.outputs.gar_location }}-docker.pkg.dev" --quiet
+        run: gcloud auth configure-docker "${{ steps.cfg.outputs.gar_location }}-docker.pkg.dev" --quiet
 
       - name: Build and push backend image
         run: |
@@ -204,6 +286,57 @@ jobs:
         if: ${{ steps.deploy_backend.outcome != 'success' }}
         run: exit 1
 
+  deploy_frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    needs: [changes, ci_gate]
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.frontend == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy_frontend == true) }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Normalize frontend deploy variables
+        id: cfg
+        run: |
+          PROJECT_ID="$(printf '%s' "$GCP_PROJECT_ID" | tr -d '\r\n')"
+          REGION="$(printf '%s' "$GCP_REGION" | tr -d '\r\n')"
+          SERVICE="$(printf '%s' "$CLOUD_RUN_SERVICE" | tr -d '\r\n')"
+
+          missing=()
+          [ -z "$PROJECT_ID" ] && missing+=("GCP_PROJECT_ID")
+          [ -z "$REGION" ] && missing+=("GCP_REGION")
+          [ -z "$SERVICE" ] && missing+=("CLOUD_RUN_SERVICE")
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing required frontend deploy variables after normalization: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+          echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
+          echo "region=$REGION" >> "$GITHUB_OUTPUT"
+          echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
+
       - name: Resolve Cloud Run URL
         id: cloud-run
         run: |
@@ -212,7 +345,6 @@ jobs:
             --project "${{ steps.cfg.outputs.project_id }}" \
             --format='value(status.url)')"
           echo "url=$CLOUD_RUN_URL" >> "$GITHUB_OUTPUT"
-          echo "CLOUD_RUN_URL=$CLOUD_RUN_URL" >> "$GITHUB_ENV"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -244,12 +376,10 @@ jobs:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: firebase deploy --only hosting --project "${{ steps.cfg.outputs.project_id }}" --token "$FIREBASE_TOKEN"
 
-      - name: Output deployed URLs
+      - name: Output frontend URL
         run: |
-          echo "Backend URL: $CLOUD_RUN_URL"
           echo "Frontend URL: https://${{ steps.cfg.outputs.project_id }}.web.app"
           {
-            echo "## Deployment URLs"
-            echo "- Backend: $CLOUD_RUN_URL"
+            echo "## Frontend Deployment URL"
             echo "- Frontend: https://${{ steps.cfg.outputs.project_id }}.web.app"
           } >> "$GITHUB_STEP_SUMMARY"
