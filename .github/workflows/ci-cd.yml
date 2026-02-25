@@ -116,42 +116,64 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
+      - name: Normalize deploy variables
+        id: cfg
+        run: |
+          PROJECT_ID="$(printf '%s' "$GCP_PROJECT_ID" | tr -d '\r\n')"
+          REGION="$(printf '%s' "$GCP_REGION" | tr -d '\r\n')"
+          SERVICE="$(printf '%s' "$CLOUD_RUN_SERVICE" | tr -d '\r\n')"
+          GAR_LOC="$(printf '%s' "$GAR_LOCATION" | tr -d '\r\n')"
+          GAR_REPO="$(printf '%s' "$GAR_REPOSITORY" | tr -d '\r\n')"
+          IMAGE_NAME="$(printf '%s' "$GAR_IMAGE_NAME" | tr -d '\r\n')"
+
+          if [ -z "$PROJECT_ID" ] || [ -z "$REGION" ] || [ -z "$SERVICE" ] || [ -z "$GAR_LOC" ] || [ -z "$GAR_REPO" ] || [ -z "$IMAGE_NAME" ]; then
+            echo "One or more required deploy variables are empty after normalization." >&2
+            exit 1
+          fi
+
+          echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
+          echo "region=$REGION" >> "$GITHUB_OUTPUT"
+          echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
+          echo "gar_location=$GAR_LOC" >> "$GITHUB_OUTPUT"
+          echo "gar_repository=$GAR_REPO" >> "$GITHUB_OUTPUT"
+          echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Set image URI
         id: img
         run: |
-          IMAGE_URI="${GAR_LOCATION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/${GAR_IMAGE_NAME}:${GITHUB_SHA}"
+          IMAGE_URI="${{ steps.cfg.outputs.gar_location }}-docker.pkg.dev/${{ steps.cfg.outputs.project_id }}/${{ steps.cfg.outputs.gar_repository }}/${{ steps.cfg.outputs.image_name }}:${GITHUB_SHA}"
           echo "image=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
         run: |
           gcloud builds submit \
-            --project="$GCP_PROJECT_ID" \
+            --project="${{ steps.cfg.outputs.project_id }}" \
             --tag="${{ steps.img.outputs.image }}" \
             --file=server/Dockerfile \
             .
 
       - name: Deploy backend to Cloud Run
         run: |
-          gcloud run deploy "$CLOUD_RUN_SERVICE" \
+          gcloud run deploy "${{ steps.cfg.outputs.service }}" \
             --image "${{ steps.img.outputs.image }}" \
-            --region "$GCP_REGION" \
-            --project "$GCP_PROJECT_ID" \
+            --region "${{ steps.cfg.outputs.region }}" \
+            --project "${{ steps.cfg.outputs.project_id }}" \
             --platform managed \
             --allow-unauthenticated
 
       - name: Update Cloud Run secrets
         run: |
-          gcloud run services update "$CLOUD_RUN_SERVICE" \
-            --region "$GCP_REGION" \
-            --project "$GCP_PROJECT_ID" \
+          gcloud run services update "${{ steps.cfg.outputs.service }}" \
+            --region "${{ steps.cfg.outputs.region }}" \
+            --project "${{ steps.cfg.outputs.project_id }}" \
             --update-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest"
 
       - name: Resolve Cloud Run URL
         id: cloud-run
         run: |
-          CLOUD_RUN_URL="$(gcloud run services describe "$CLOUD_RUN_SERVICE" \
-            --region "$GCP_REGION" \
-            --project "$GCP_PROJECT_ID" \
+          CLOUD_RUN_URL="$(gcloud run services describe "${{ steps.cfg.outputs.service }}" \
+            --region "${{ steps.cfg.outputs.region }}" \
+            --project "${{ steps.cfg.outputs.project_id }}" \
             --format='value(status.url)')"
           echo "url=$CLOUD_RUN_URL" >> "$GITHUB_OUTPUT"
           echo "CLOUD_RUN_URL=$CLOUD_RUN_URL" >> "$GITHUB_ENV"
@@ -184,14 +206,14 @@ jobs:
       - name: Deploy frontend to Firebase Hosting
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-        run: firebase deploy --only hosting --project "$GCP_PROJECT_ID" --token "$FIREBASE_TOKEN"
+        run: firebase deploy --only hosting --project "${{ steps.cfg.outputs.project_id }}" --token "$FIREBASE_TOKEN"
 
       - name: Output deployed URLs
         run: |
           echo "Backend URL: $CLOUD_RUN_URL"
-          echo "Frontend URL: https://${GCP_PROJECT_ID}.web.app"
+          echo "Frontend URL: https://${{ steps.cfg.outputs.project_id }}.web.app"
           {
             echo "## Deployment URLs"
             echo "- Backend: $CLOUD_RUN_URL"
-            echo "- Frontend: https://${GCP_PROJECT_ID}.web.app"
+            echo "- Frontend: https://${{ steps.cfg.outputs.project_id }}.web.app"
           } >> "$GITHUB_STEP_SUMMARY"
