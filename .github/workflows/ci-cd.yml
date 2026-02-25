@@ -97,7 +97,8 @@ jobs:
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
       CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
-      GAR_REPOSITORY: retailsync
+      GAR_LOCATION: ${{ vars.GAR_LOCATION }}
+      GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
       GAR_IMAGE_NAME: retailsync-api
 
     steps:
@@ -115,33 +116,24 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Ensure Artifact Registry repo exists
+      - name: Set image URI
+        id: img
         run: |
-          gcloud artifacts repositories describe "$GAR_REPOSITORY" \
-            --location="$GCP_REGION" >/dev/null 2>&1 || \
-          gcloud artifacts repositories create "$GAR_REPOSITORY" \
-            --repository-format=docker \
-            --location="$GCP_REGION" \
-            --description="RetailSync container images"
-
-      - name: Configure Docker auth for Artifact Registry
-        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+          IMAGE_URI="${GAR_LOCATION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/${GAR_IMAGE_NAME}:${GITHUB_SHA}"
+          echo "image=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
-        env:
-          IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.GAR_IMAGE_NAME }}:${{ github.sha }}
         run: |
           gcloud builds submit \
             --project="$GCP_PROJECT_ID" \
-            --tag="$IMAGE_URI" \
+            --tag="${{ steps.img.outputs.image }}" \
             --file=server/Dockerfile \
             .
-          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
 
       - name: Deploy backend to Cloud Run
         run: |
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
-            --image "$IMAGE_URI" \
+            --image "${{ steps.img.outputs.image }}" \
             --region "$GCP_REGION" \
             --project "$GCP_PROJECT_ID" \
             --platform managed \
