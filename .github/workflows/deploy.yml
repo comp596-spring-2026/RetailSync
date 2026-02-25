@@ -1,0 +1,130 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: lively-infinity-488304-m9
+  GCP_REGION: us-central1
+  CLOUD_RUN_SERVICE: retailsync-api
+  WIF_PROVIDER: projects/1039263569810/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  WIF_SERVICE_ACCOUNT: retailsync-ci-sa@lively-infinity-488304-m9.iam.gserviceaccount.com
+  GAR_REPOSITORY: retailsync
+  GAR_IMAGE_NAME: retailsync-api
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Ensure Artifact Registry repo exists
+        run: |
+          gcloud artifacts repositories describe "$GAR_REPOSITORY" \
+            --location="$GCP_REGION" >/dev/null 2>&1 || \
+          gcloud artifacts repositories create "$GAR_REPOSITORY" \
+            --repository-format=docker \
+            --location="$GCP_REGION" \
+            --description="RetailSync container images"
+
+      - name: Configure Docker auth for Artifact Registry
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push backend image
+        env:
+          IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.GAR_IMAGE_NAME }}:${{ github.sha }}
+        run: |
+          gcloud builds submit \
+            --project="$GCP_PROJECT_ID" \
+            --tag="$IMAGE_URI" \
+            --file=server/Dockerfile \
+            .
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+      - name: Deploy backend to Cloud Run
+        run: |
+          gcloud run deploy "$CLOUD_RUN_SERVICE" \
+            --image "$IMAGE_URI" \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --platform managed \
+            --allow-unauthenticated
+
+      - name: Update Cloud Run secrets
+        run: |
+          gcloud run services update "$CLOUD_RUN_SERVICE" \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --update-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest"
+
+      - name: Resolve Cloud Run URL
+        id: cloud-run
+        run: |
+          CLOUD_RUN_URL="$(gcloud run services describe "$CLOUD_RUN_SERVICE" \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --format='value(status.url)')"
+          echo "url=$CLOUD_RUN_URL" >> "$GITHUB_OUTPUT"
+          echo "CLOUD_RUN_URL=$CLOUD_RUN_URL" >> "$GITHUB_ENV"
+
+      - name: Setup Node 20 + pnpm 10 for frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+
+      - name: Write frontend production env
+        run: |
+          cat > client/.env.production <<EOF
+          VITE_API_URL=${{ steps.cloud-run.outputs.url }}/api
+          EOF
+
+      - name: Install frontend dependencies
+        run: pnpm --dir client install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm --dir client build
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy frontend to Firebase Hosting
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: firebase deploy --only hosting --project "$GCP_PROJECT_ID" --token "$FIREBASE_TOKEN"
+
+      - name: Output deployed URLs
+        run: |
+          echo "Backend URL: $CLOUD_RUN_URL"
+          echo "Frontend URL: https://${GCP_PROJECT_ID}.web.app"
+          {
+            echo "## Deployment URLs"
+            echo "- Backend: $CLOUD_RUN_URL"
+            echo "- Frontend: https://${GCP_PROJECT_ID}.web.app"
+          } >> "$GITHUB_STEP_SUMMARY"

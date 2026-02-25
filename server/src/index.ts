@@ -5,8 +5,8 @@ import { env } from './config/env';
 const start = async () => {
   await connectDb();
   const app = createApp();
-  app.listen(env.port, () => {
-    console.log(`Server listening on http://localhost:${env.port}`);
+  app.listen(env.port, '0.0.0.0', () => {
+    console.log(`Server listening on http://0.0.0.0:${env.port}`);
   });
 };
 

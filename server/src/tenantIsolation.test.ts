@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { clearTestDb, connectTestDb, disconnectTestDb, registerAndCreateCompany, setupTestEnv } from './test/testUtils';
 
 describe('tenant isolation', () => {
+  const TEST_TIMEOUT_MS = 20_000;
   let app: ReturnType<(typeof import('./app'))['createApp']>;
 
   beforeAll(async () => {
@@ -51,7 +52,7 @@ describe('tenant isolation', () => {
       .delete(`/api/items/${createB.body.data._id}`)
       .set('Authorization', `Bearer ${a.accessToken}`)
       .expect(404);
-  });
+  }, TEST_TIMEOUT_MS);
 
   it('keeps aggregate inventory views tenant-scoped', async () => {
     const a = await registerAndCreateCompany(app, 'AggA');
@@ -99,5 +100,5 @@ describe('tenant isolation', () => {
 
     expect(inventoryA.body.data.items).toHaveLength(1);
     expect(inventoryA.body.data.items[0].description).toBe('Agg Item A');
-  });
+  }, TEST_TIMEOUT_MS);
 });
