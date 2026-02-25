@@ -13,7 +13,7 @@ const getOAuthClient = () => {
   if (
     !env.googleOAuthClientId ||
     !env.googleOAuthClientSecret ||
-    !env.googleAuthRedirectUri
+    !env.googleIntegrationRedirectUri
   ) {
     return null;
   }
@@ -21,7 +21,7 @@ const getOAuthClient = () => {
   return new google.auth.OAuth2(
     env.googleOAuthClientId,
     env.googleOAuthClientSecret,
-    env.googleAuthRedirectUri,
+    env.googleIntegrationRedirectUri,
   );
 };
 
