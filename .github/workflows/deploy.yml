@@ -17,6 +17,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    env:
+      GCP_PROJECT_ID: lively-infinity-488304-m9
+      GCP_REGION: us-west1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,37 +48,54 @@ jobs:
         working-directory: ./client
         run: pnpm build
 
+      - name: Validate required deployment inputs
+        run: |
+          missing=0
+          for name in GCP_PROJECT_NUMBER FIREBASE_TOKEN WIF_PROVIDER; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required Actions secret/variable: $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+        env:
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+
       - name: Authenticate to GCP (OIDC)
         uses: google-github-actions/auth@v1
         with:
-          workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ secrets.WORKLOAD_IDENTITY_POOL }}/providers/${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: retailsync-run-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: retailsync-run-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com
 
       - name: Configure gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Set gcloud defaults
         run: |
-          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
-          gcloud config set run/region us-west1
+          gcloud config set project ${{ env.GCP_PROJECT_ID }}
+          gcloud config set run/region ${{ env.GCP_REGION }}
 
       - name: Build and push container
         run: |
-          IMAGE="gcr.io/${{ secrets.GCP_PROJECT_ID }}/retailsync-api:${{ github.sha }}"
+          IMAGE="gcr.io/${{ env.GCP_PROJECT_ID }}/retailsync-api:${{ github.sha }}"
           docker build -t "$IMAGE" ./server
           docker push "$IMAGE"
 
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy retailsync-api \
-            --image "gcr.io/${{ secrets.GCP_PROJECT_ID }}/retailsync-api:${{ github.sha }}" \
-            --region us-west1 \
+            --image "gcr.io/${{ env.GCP_PROJECT_ID }}/retailsync-api:${{ github.sha }}" \
+            --region ${{ env.GCP_REGION }} \
             --platform managed \
-            --service-account "retailsync-run-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --service-account "retailsync-run-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --set-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,GOOGLE_OAUTH_CLIENT_ID=GOOGLE_OAUTH_CLIENT_ID:latest,GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest,GOOGLE_AUTH_REDIRECT_URI=GOOGLE_AUTH_REDIRECT_URI:latest,GOOGLE_INTEGRATION_REDIRECT_URI=GOOGLE_INTEGRATION_REDIRECT_URI:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest" \
-            --set-env-vars "NODE_ENV=production,CLIENT_URL=https://${{ secrets.GCP_PROJECT_ID }}.web.app" \
+            --set-env-vars "NODE_ENV=production,CLIENT_URL=https://${{ env.GCP_PROJECT_ID }}.web.app" \
             --allow-unauthenticated
 
       - name: Deploy client to Firebase
