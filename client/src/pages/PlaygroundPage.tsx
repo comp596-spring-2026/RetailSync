@@ -30,10 +30,7 @@ type CheckResult = {
 };
 
 const CLIENT_ENV_ITEMS = [
-  { key: 'VITE_API_URL', value: import.meta.env.VITE_API_URL ?? 'TBD' },
-  { key: 'VITE_GOOGLE_OAUTH_ENABLED', value: import.meta.env.VITE_GOOGLE_OAUTH_ENABLED ?? 'false' },
-  { key: 'VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED', value: import.meta.env.VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED ?? 'false' },
-  { key: 'VITE_QUICKBOOKS_ENABLED', value: import.meta.env.VITE_QUICKBOOKS_ENABLED ?? 'false' }
+  { key: 'VITE_API_URL', value: import.meta.env.VITE_API_URL ?? 'TBD' }
 ];
 
 const SERVER_ENV_ITEMS = [

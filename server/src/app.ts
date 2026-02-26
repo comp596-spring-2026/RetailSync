@@ -107,8 +107,7 @@ export const createApp = () => {
       GOOGLE_OAUTH_CLIENT_ID: Boolean(env.googleOAuthClientId),
       GOOGLE_OAUTH_CLIENT_SECRET: Boolean(env.googleOAuthClientSecret),
       GOOGLE_AUTH_REDIRECT_URI: Boolean(env.googleAuthRedirectUri),
-      GOOGLE_SERVICE_ACCOUNT_JSON: Boolean(env.googleServiceAccountJson),
-      RESEND_API_KEY: Boolean(env.resendApiKey)
+      GOOGLE_SERVICE_ACCOUNT_JSON: Boolean(env.googleServiceAccountJson)
     };
 
     res.json({

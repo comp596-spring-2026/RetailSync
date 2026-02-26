@@ -1,20 +1,20 @@
 # Routing and Permission Gates
 
-## Route Guard Layers
+## Route Behavior
 
 ```mermaid
 flowchart TD
-  Start[Route Request] --> Token{Has access token?}
-  Token -- No --> Login[/login]
-  Token -- Yes --> Onboard{User has companyId?}
-  Onboard -- No --> Onboarding[/onboarding]
-  Onboard -- Yes --> Dashboard[/dashboard/*]
+  Start["Route Request"] --> Token{Has access token?}
+  Token -- "no" --> Login["/login"]
+  Token -- "yes" --> Onboard{Has company?}
+  Onboard -- "no" --> Onboarding["/onboarding"]
+  Onboard -- "yes" --> Dashboard["/dashboard/*"]
 ```
 
-## UI Gating Components
+## Active Gate Components
 
 - `ProtectedRoute`: blocks unauthenticated access
-- `OnboardingGuard`: routes pre-company users to onboarding
+- `OnboardingGuard`: routes users without company to onboarding
 - `PermissionGate`: module/action-level element control
 - `NoAccess`: module page fallback screen
 

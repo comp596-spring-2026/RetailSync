@@ -38,9 +38,12 @@ sequenceDiagram
 
 ## Routing Structure
 
-- public: `/login`, `/register`
-- onboarding guarded: `/onboarding/*`
+- default route: `/` -> `/login`
+- login route: `/login`
+- onboarding guarded routes: `/onboarding/*`
 - protected app shell: `/dashboard/*`
+- Google callback route: `/auth/google/success`
+- informational routes remain public: `/playground`, `/privacy`, `/terms`, `/data-deletion`, `/home-demo`
 
 Main dashboard pages currently:
 - `/dashboard/pos`

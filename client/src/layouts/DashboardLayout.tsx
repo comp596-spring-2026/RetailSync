@@ -65,7 +65,7 @@ export const DashboardLayout = () => {
     } finally {
       dispatch(logout());
       dispatch(clearCompany());
-      navigate('/login', { replace: true });
+      navigate('/dashboard', { replace: true });
     }
   };
 

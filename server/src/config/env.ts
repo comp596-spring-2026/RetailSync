@@ -53,8 +53,5 @@ export const env = {
   googleOAuthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
   googleAuthRedirectUri: process.env.GOOGLE_AUTH_REDIRECT_URI,
   googleIntegrationRedirectUri:
-    process.env.GOOGLE_INTEGRATION_REDIRECT_URI ?? process.env.GOOGLE_AUTH_REDIRECT_URI,
-  resendApiKey: process.env.RESEND_API_KEY,
-  resendFrom: process.env.RESEND_FROM,
-  resendBrandIconUrl: process.env.RESEND_BRAND_ICON_URL
+    process.env.GOOGLE_INTEGRATION_REDIRECT_URI ?? process.env.GOOGLE_AUTH_REDIRECT_URI
 };

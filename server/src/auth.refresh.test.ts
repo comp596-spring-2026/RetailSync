@@ -1,10 +1,10 @@
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  createGoogleAuthSession,
   clearTestDb,
   connectTestDb,
   disconnectTestDb,
-  registerVerifyAndLogin,
   setupTestEnv
 } from './test/testUtils';
 
@@ -27,8 +27,8 @@ describe('auth refresh rotation', () => {
   });
 
   it('rejects reuse of old refresh token after rotation', async () => {
-    const { loginRes } = await registerVerifyAndLogin(app, 'Rotate');
-    const firstCookie = loginRes.headers['set-cookie']?.[0];
+    const session = await createGoogleAuthSession('Rotate');
+    const firstCookie = session.refreshCookie;
     expect(firstCookie).toBeDefined();
 
     const refreshRes = await request(app).post('/api/auth/refresh').set('Cookie', firstCookie).expect(200);
@@ -39,8 +39,8 @@ describe('auth refresh rotation', () => {
   });
 
   it('revokes refresh token on logout', async () => {
-    const { loginRes } = await registerVerifyAndLogin(app, 'Logout');
-    const cookie = loginRes.headers['set-cookie']?.[0];
+    const session = await createGoogleAuthSession('Logout');
+    const cookie = session.refreshCookie;
     expect(cookie).toBeDefined();
 
     await request(app).post('/api/auth/logout').set('Cookie', cookie).expect(200);

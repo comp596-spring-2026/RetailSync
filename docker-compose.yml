@@ -44,9 +44,6 @@ services:
       dockerfile: client/Dockerfile
       args:
         VITE_API_URL: /api
-        VITE_GOOGLE_OAUTH_ENABLED: "true"
-        VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED: "true"
-        VITE_QUICKBOOKS_ENABLED: "true"
     container_name: retailsync-client
     restart: unless-stopped
     depends_on:

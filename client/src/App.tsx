@@ -2,11 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { OnboardingGuard } from "./components/OnboardingGuard";
 import { DashboardLayout } from "./layouts/DashboardLayout";
-import { RegisterPage } from "./pages/RegisterPage";
 import { LoginPage } from "./pages/LoginPage";
-import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
-import { ResetPasswordPage } from "./pages/ResetPasswordPage";
-import { VerifyEmailPage } from "./pages/VerifyEmailPage";
 import { GoogleAuthSuccessPage } from "./pages/GoogleAuthSuccessPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { CreateCompanyPage } from "./pages/CreateCompanyPage";
@@ -33,12 +29,9 @@ import { HomeDemoPage } from "./pages/HomeDemoPage";
 const App = () => {
   return (
     <Routes>
+      <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/home-demo" element={<HomeDemoPage />} />
-      <Route path="/register" element={<RegisterPage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/auth/google/success" element={<GoogleAuthSuccessPage />} />
       <Route path="/playground" element={<PlaygroundPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
@@ -64,10 +57,7 @@ const App = () => {
           <Route path="access" element={<AccessHubPage />} />
           <Route path="pos" element={<PosPage />} />
           <Route path="items" element={<ItemsPage />} />
-          <Route
-            path="invoices"
-            element={<ModuleShellPage module="invoices" />}
-          />
+          <Route path="invoices" element={<ModuleShellPage module="invoices" />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="locations" element={<LocationsPage />} />
           <Route
@@ -78,10 +68,7 @@ const App = () => {
             path="bankStatements"
             element={<ModuleShellPage module="bankStatements" />}
           />
-          <Route
-            path="suppliers"
-            element={<ModuleShellPage module="suppliers" />}
-          />
+          <Route path="suppliers" element={<ModuleShellPage module="suppliers" />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="playground" element={<PlaygroundPage />} />
           <Route
@@ -91,7 +78,6 @@ const App = () => {
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Route>
-
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );

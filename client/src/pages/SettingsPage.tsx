@@ -14,19 +14,17 @@ import {
   Select,
   Stack,
   TextField,
-  Tooltip,
   Typography,
 } from "@mui/material";
 import SettingsSuggestIcon from "@mui/icons-material/SettingsSuggest";
 import LinkIcon from "@mui/icons-material/Link";
-import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import SyncAltIcon from "@mui/icons-material/SyncAlt";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import GoogleIcon from "@mui/icons-material/Google";
 import TableChartIcon from "@mui/icons-material/TableChart";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { AxiosError } from "axios";
 import { PageHeader } from "../components/PageHeader";
 import { settingsApi, type GoogleSheetMode } from "../api/settingsApi";
@@ -87,26 +85,6 @@ export const SettingsPage = () => {
   const [preview, setPreview] = useState<string[][]>([]);
   const [isBusy, setIsBusy] = useState(false);
   const [integrationsExpanded, setIntegrationsExpanded] = useState(true);
-
-  const googleOauthEnabled =
-    import.meta.env.VITE_GOOGLE_OAUTH_ENABLED === "true";
-  const googleServiceEnabled =
-    import.meta.env.VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED === "true";
-  const quickbooksEnabled = import.meta.env.VITE_QUICKBOOKS_ENABLED === "true";
-
-  const modeLockedReason = useMemo(() => {
-    if (!settings) return "";
-    if (settings.googleSheets.mode === "oauth" && !googleOauthEnabled) {
-      return "OAuth mode locked: set VITE_GOOGLE_OAUTH_ENABLED=true";
-    }
-    if (
-      settings.googleSheets.mode === "service_account" &&
-      !googleServiceEnabled
-    ) {
-      return "Service account mode locked: set VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED=true";
-    }
-    return "";
-  }, [googleOauthEnabled, googleServiceEnabled, settings]);
 
   const loadSettings = async () => {
     try {
@@ -466,11 +444,6 @@ export const SettingsPage = () => {
                       </Select>
                     </FormControl>
 
-                    {modeLockedReason && (
-                      <Alert severity="warning" icon={<LockOutlinedIcon />}>
-                        {modeLockedReason}
-                      </Alert>
-                    )}
                     <Alert severity="info">
                       OAuth: click Connect Google and approve access. Service
                       Account: share your sheet with the service email, then use
@@ -483,26 +456,14 @@ export const SettingsPage = () => {
                         spacing={1}
                         alignItems={{ md: "center" }}
                       >
-                        <Tooltip
-                          title={
-                            googleOauthEnabled
-                              ? ""
-                              : "Set VITE_GOOGLE_OAUTH_ENABLED=true to unlock OAuth actions"
-                          }
+                        <Button
+                          variant="outlined"
+                          startIcon={<LinkIcon />}
+                          onClick={onConnectGoogle}
+                          disabled={isBusy || !canEdit}
                         >
-                          <span>
-                            <Button
-                              variant="outlined"
-                              startIcon={<LinkIcon />}
-                              onClick={onConnectGoogle}
-                              disabled={
-                                !googleOauthEnabled || isBusy || !canEdit
-                              }
-                            >
-                              Connect Google
-                            </Button>
-                          </span>
-                        </Tooltip>
+                          Connect Google
+                        </Button>
                         <Typography variant="body2" color="text.secondary">
                           {settings.googleSheets.connectedEmail
                             ? `Connected as ${settings.googleSheets.connectedEmail}`
@@ -569,35 +530,13 @@ export const SettingsPage = () => {
                       fullWidth
                     />
                     <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
-                      <Tooltip
-                        title={
-                          settings.googleSheets.mode === "oauth" &&
-                          !googleOauthEnabled
-                            ? "Set VITE_GOOGLE_OAUTH_ENABLED=true"
-                            : settings.googleSheets.mode ===
-                                  "service_account" && !googleServiceEnabled
-                              ? "Set VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED=true"
-                              : ""
-                        }
+                      <Button
+                        variant="outlined"
+                        onClick={onTestAccess}
+                        disabled={isBusy || !canEdit}
                       >
-                        <span>
-                          <Button
-                            variant="outlined"
-                            onClick={onTestAccess}
-                            disabled={
-                              isBusy ||
-                              !canEdit ||
-                              (settings.googleSheets.mode === "oauth" &&
-                                !googleOauthEnabled) ||
-                              (settings.googleSheets.mode ===
-                                "service_account" &&
-                                !googleServiceEnabled)
-                            }
-                          >
-                            Test Access
-                          </Button>
-                        </span>
-                      </Tooltip>
+                        Test Access
+                      </Button>
                       <Button
                         variant="contained"
                         onClick={onSaveSource}
@@ -688,24 +627,14 @@ export const SettingsPage = () => {
                     </FormControl>
 
                     <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
-                      <Tooltip
-                        title={
-                          quickbooksEnabled
-                            ? ""
-                            : "Set VITE_QUICKBOOKS_ENABLED=true to unlock QuickBooks connect"
-                        }
+                      <Button
+                        variant="outlined"
+                        startIcon={<SyncAltIcon />}
+                        onClick={onConnectQuickbooks}
+                        disabled={isBusy || !canEdit}
                       >
-                        <span>
-                          <Button
-                            variant="outlined"
-                            startIcon={<SyncAltIcon />}
-                            onClick={onConnectQuickbooks}
-                            disabled={isBusy || !canEdit || !quickbooksEnabled}
-                          >
-                            Connect QuickBooks
-                          </Button>
-                        </span>
-                      </Tooltip>
+                        Connect QuickBooks
+                      </Button>
                       <Button
                         color="error"
                         onClick={onDisconnectQuickbooks}

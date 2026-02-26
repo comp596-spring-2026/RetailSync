@@ -17,7 +17,6 @@
 [![Vitest](https://img.shields.io/badge/Vitest-2.x-6E9F18?logo=vitest&logoColor=white)](https://vitest.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Google APIs](https://img.shields.io/badge/Google%20APIs-Sheets%20%2B%20OAuth-4285F4?logo=google&logoColor=white)](https://developers.google.com/sheets/api)
-[![Resend](https://img.shields.io/badge/Resend-Email%20Delivery-000000)](https://resend.com/)
 
 ## Overview
 
@@ -28,8 +27,7 @@ It solves:
 - fragmented POS and stock workflows
 - inconsistent permission enforcement
 - weak traceability for inventory changes
-- missing secure auth recovery and verification flows
-- need for integrations (Google Sheets and email delivery)
+- need for integrations (Google Sheets)
 
 ## Tech Stack
 
@@ -39,18 +37,19 @@ RetailSync is a TypeScript monorepo with React/Vite on the client and Express/Mo
 - Backend: Express, Mongoose, Zod, JWT
 - Data: MongoDB
 - Testing: Vitest, Supertest, mongodb-memory-server
-- Integrations: Google APIs (Sheets + OAuth), Resend (transactional email)
+- Integrations: Google APIs (Sheets + OAuth)
 - DevOps/Tooling: pnpm workspaces, Docker Compose, Makefile
 
 ## Major Features
 
 | Area | Capabilities |
 |---|---|
-| Auth | Register/login/refresh/logout, OTP email verification, OTP reset password |
+| Frontend access | Login + Google login, onboarding (create/join company), protected dashboard |
+| Auth API (server) | Google OAuth start/callback, refresh/logout, current-user context (`me`) |
 | Tenant and RBAC | `companyId`-scoped data, server-side permission checks |
 | POS | CSV import, daily views, monthly reporting |
 | Inventory | Items, locations, immutable `InventoryLedger` movements |
-| Integrations | Google Sheets (service account + OAuth connect scaffolding), Resend email delivery |
+| Integrations | Google Sheets (service account + OAuth connect), QuickBooks settings UI |
 | Quality | Vitest test suites, Docker workflows, CI quality gates |
 
 ## External Product Dependencies
@@ -58,17 +57,10 @@ RetailSync is a TypeScript monorepo with React/Vite on the client and Express/Mo
 | Product | Used For | Required Env |
 |---|---|---|
 | Google APIs (`googleapis`) | Sheets read and OAuth connect/callback flow | `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_AUTH_REDIRECT_URI` |
-| Resend | Transactional email delivery (verification/reset OTP) | `RESEND_API_KEY`, `RESEND_FROM`, `RESEND_BRAND_ICON_URL` |
-
-### Resend Sandbox Restriction
-
-- If `RESEND_FROM` uses `resend.dev` (for example `onboarding@resend.dev`), Resend only allows delivery to the account owner's email.
-- Sending to other recipients requires verified custom domain setup in Resend and a matching `from` address on that domain.
-- Localhost image URLs (for example `http://localhost:4630/...`) are not reachable by external inbox clients; use a public URL for production email branding.
 
 ## Brand Assets
 
-Client brand assets are served from `/client/public/brand` and used across auth UI and email templates.
+Client brand assets are served from `/client/public/brand` and used across auth UI.
 
 | Asset | Purpose |
 |---|---|
@@ -97,31 +89,23 @@ flowchart LR
 
   POS["POS CSV"] --> API
   GS["Google Sheets API"] --> API
-  RESEND["Resend Email API"] --> API
 ```
 
-## Auth OTP Workflow
+## Current Frontend Routing
 
 ```mermaid
-sequenceDiagram
-  participant U as User
-  participant UI as Client
-  participant API as Server
-  participant M as MongoDB
-  participant E as Resend
-
-  U->>UI: Register
-  UI->>API: POST /api/auth/register
-  API->>M: Store user + hashed verification token
-  API->>E: Send verification OTP email
-  API-->>UI: Account created
-
-  U->>UI: Enter OTP
-  UI->>API: POST /api/auth/verify-email
-  API->>M: Match hashed token + expiry + consumedAt
-  API->>M: Set emailVerifiedAt
-  API-->>UI: Verified
+flowchart TD
+  Start["Any Route"] --> Root{Path}
+  Root -- "/" --> Login["/login"]
+  Root -- "/login" --> Login
+  Root -- "/onboarding/*" --> Onboarding["Onboarding flow"]
+  Root -- "/dashboard/*" --> Dashboard["Protected dashboard"]
+  Root -- "unknown path" --> Login
 ```
+
+Notes:
+- Login and onboarding pages are active.
+- Email/password recovery and verification flows are removed.
 
 ## Integration Workflow (POS Sources)
 
@@ -199,9 +183,6 @@ make check
 | `JWT_REFRESH_SECRET` | Yes | Refresh token signing secret |
 | `CLIENT_URL` | Yes | Allowed CORS origin |
 | `NODE_ENV` | Yes | `development` / `test` / `production` |
-| `RESEND_API_KEY` | No* | Required for real email delivery |
-| `RESEND_FROM` | No* | Must match Resend sending policy/domain |
-| `RESEND_BRAND_ICON_URL` | No | Logo URL in HTML email templates |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | No | Service account auth for Sheets read |
 | `GOOGLE_OAUTH_CLIENT_ID` | No | Google OAuth |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | No | Google OAuth |
@@ -211,13 +192,19 @@ make check
 
 | Variable | Required | Notes |
 |---|---|---|
-| `VITE_API_URL` | Yes | API base URL (for local: `http://localhost:4000/api`) |
+| `VITE_API_URL` | Yes | API base URL (local: `http://localhost:4000/api`, deployed: `https://retailsync-api-qbdqiyjkbq-uw.a.run.app/api`) |
+
+## Deployment Snapshot
+
+- Current deployed API URL: `https://retailsync-api-qbdqiyjkbq-uw.a.run.app`
+- Current client build expects: `VITE_API_URL=https://retailsync-api-qbdqiyjkbq-uw.a.run.app/api`
+- Docker Compose build arg for client: `VITE_API_URL=/api` (when reverse-proxying API from same host)
 
 ## Testing
 
 | Layer | Tooling | Notes |
 |---|---|---|
-| Unit | Vitest | utility, schema, email transport tests |
+| Unit | Vitest | utility and schema tests |
 | Integration | Vitest + mongodb-memory-server | DB-backed auth and domain tests |
 | UI | Vitest + RTL | component-level behavior |
 | E2E | Planned | Playwright roadmap |
@@ -225,7 +212,6 @@ make check
 ## API and Docs
 
 - API reference: `/Users/trupal/Projects/RetailSync/docs/backend/api-reference.md`
-- Email system guide: `/Users/trupal/Projects/RetailSync/docs/email-system.md`
 - System architecture: `/Users/trupal/Projects/RetailSync/docs/architecture/system-overview.md`
 - Local runbook: `/Users/trupal/Projects/RetailSync/docs/operations/local-development.md`
 - Testing strategy: `/Users/trupal/Projects/RetailSync/docs/testing/testing-strategy.md`
@@ -250,7 +236,6 @@ Services:
 - Tenant isolation is enforced with `companyId` on protected domains.
 - Role permission checks are server-authoritative.
 - Inventory is append-only ledger based.
-- OTP tokens are stored hashed, with expiry and one-time consumption.
 - Refresh token rotation and revocation are implemented.
 
 ## License

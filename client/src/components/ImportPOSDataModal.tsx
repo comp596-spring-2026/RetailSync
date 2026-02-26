@@ -20,15 +20,13 @@ import {
   TableHead,
   TableRow,
   TextField,
-  Tooltip,
   Typography,
 } from "@mui/material";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import LinkIcon from "@mui/icons-material/Link";
 import SecurityIcon from "@mui/icons-material/Security";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { posApi } from "../api/posApi";
 import { useAppDispatch } from "../app/hooks";
 import { showSnackbar } from "../features/ui/uiSlice";
@@ -61,10 +59,6 @@ export const ImportPOSDataModal = ({
   onImported,
 }: ImportPOSDataModalProps) => {
   const dispatch = useAppDispatch();
-  const googleOauthEnabled =
-    import.meta.env.VITE_GOOGLE_OAUTH_ENABLED === "true";
-  const googleServiceEnabled =
-    import.meta.env.VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED === "true";
   const [mode, setMode] = useState<SourceMode>("upload");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,37 +77,6 @@ export const ImportPOSDataModal = ({
   const [selectedRowIds, setSelectedRowIds] = useState<Record<string, boolean>>(
     {},
   );
-
-  const optionState: Record<SourceMode, { locked: boolean; reason: string }> =
-    useMemo(
-      () => ({
-        upload: {
-          locked: !import.meta.env.VITE_API_URL,
-          reason: !import.meta.env.VITE_API_URL ? "Missing VITE_API_URL" : "",
-        },
-        google: {
-          locked: !googleOauthEnabled,
-          reason:
-            "Google OAuth is disabled. Set VITE_GOOGLE_OAUTH_ENABLED=true",
-        },
-        service: {
-          locked: !googleServiceEnabled,
-          reason:
-            "Service account mode is disabled. Set VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED=true",
-        },
-      }),
-      [googleOauthEnabled, googleServiceEnabled],
-    );
-  const firstUnlockedMode = useMemo<SourceMode>(() => {
-    if (!optionState.upload.locked) return "upload";
-    if (!optionState.google.locked) return "google";
-    return "service";
-  }, [optionState]);
-
-  useEffect(() => {
-    if (!optionState[mode].locked) return;
-    setMode(firstUnlockedMode);
-  }, [firstUnlockedMode, mode, optionState]);
 
   const clearState = () => {
     setError(null);
@@ -136,7 +99,6 @@ export const ImportPOSDataModal = ({
   };
 
   const selectMode = (nextMode: SourceMode) => {
-    if (optionState[nextMode].locked) return;
     setMode(nextMode);
   };
 
@@ -339,10 +301,7 @@ export const ImportPOSDataModal = ({
         <Grid container spacing={2}>
           <Grid size={{ xs: 12, md: 4 }}>
             <Card variant={mode === "upload" ? "elevation" : "outlined"}>
-              <CardActionArea
-                onClick={() => selectMode("upload")}
-                disabled={optionState.upload.locked}
-              >
+              <CardActionArea onClick={() => selectMode("upload")}>
                 <CardContent>
                   <Stack spacing={1}>
                     <UploadFileIcon color="primary" />
@@ -350,20 +309,6 @@ export const ImportPOSDataModal = ({
                     <Typography variant="body2" color="text.secondary">
                       Import .csv or .xlsx files.
                     </Typography>
-                    {optionState.upload.locked && (
-                      <Tooltip title={optionState.upload.reason}>
-                        <Stack
-                          direction="row"
-                          spacing={0.5}
-                          alignItems="center"
-                        >
-                          <LockOutlinedIcon color="warning" fontSize="small" />
-                          <Typography variant="caption" color="warning.main">
-                            Locked: {optionState.upload.reason}
-                          </Typography>
-                        </Stack>
-                      </Tooltip>
-                    )}
                   </Stack>
                 </CardContent>
               </CardActionArea>
@@ -371,10 +316,7 @@ export const ImportPOSDataModal = ({
           </Grid>
           <Grid size={{ xs: 12, md: 4 }}>
             <Card variant={mode === "google" ? "elevation" : "outlined"}>
-              <CardActionArea
-                onClick={() => selectMode("google")}
-                disabled={optionState.google.locked}
-              >
+              <CardActionArea onClick={() => selectMode("google")}>
                 <CardContent>
                   <Stack spacing={1}>
                     <LinkIcon color="primary" />
@@ -382,20 +324,6 @@ export const ImportPOSDataModal = ({
                     <Typography variant="body2" color="text.secondary">
                       Use OAuth and fetch spreadsheet data.
                     </Typography>
-                    {optionState.google.locked && (
-                      <Tooltip title={optionState.google.reason}>
-                        <Stack
-                          direction="row"
-                          spacing={0.5}
-                          alignItems="center"
-                        >
-                          <LockOutlinedIcon color="warning" fontSize="small" />
-                          <Typography variant="caption" color="warning.main">
-                            Locked: {optionState.google.reason}
-                          </Typography>
-                        </Stack>
-                      </Tooltip>
-                    )}
                   </Stack>
                 </CardContent>
               </CardActionArea>
@@ -403,10 +331,7 @@ export const ImportPOSDataModal = ({
           </Grid>
           <Grid size={{ xs: 12, md: 4 }}>
             <Card variant={mode === "service" ? "elevation" : "outlined"}>
-              <CardActionArea
-                onClick={() => selectMode("service")}
-                disabled={optionState.service.locked}
-              >
+              <CardActionArea onClick={() => selectMode("service")}>
                 <CardContent>
                   <Stack spacing={1}>
                     <SecurityIcon color="primary" />
@@ -416,20 +341,6 @@ export const ImportPOSDataModal = ({
                     <Typography variant="body2" color="text.secondary">
                       Share sheet with service account and import.
                     </Typography>
-                    {optionState.service.locked && (
-                      <Tooltip title={optionState.service.reason}>
-                        <Stack
-                          direction="row"
-                          spacing={0.5}
-                          alignItems="center"
-                        >
-                          <LockOutlinedIcon color="warning" fontSize="small" />
-                          <Typography variant="caption" color="warning.main">
-                            Locked: {optionState.service.reason}
-                          </Typography>
-                        </Stack>
-                      </Tooltip>
-                    )}
                   </Stack>
                 </CardContent>
               </CardActionArea>
@@ -443,7 +354,7 @@ export const ImportPOSDataModal = ({
           </Alert>
         )}
 
-        {mode === "upload" && !optionState.upload.locked && (
+        {mode === "upload" && (
           <Stack spacing={2} sx={{ mt: 2 }}>
             <Button
               component="label"
@@ -473,13 +384,7 @@ export const ImportPOSDataModal = ({
           </Stack>
         )}
 
-        {optionState[mode].locked && (
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            {optionState[mode].reason}
-          </Alert>
-        )}
-
-        {mode === "google" && !optionState.google.locked && (
+        {mode === "google" && (
           <Stack spacing={2} sx={{ mt: 2 }}>
             <Box>
               <Button variant="outlined" onClick={handleConnectGoogle}>
@@ -536,7 +441,7 @@ export const ImportPOSDataModal = ({
           </Stack>
         )}
 
-        {mode === "service" && !optionState.service.locked && (
+        {mode === "service" && (
           <Stack spacing={2} sx={{ mt: 2 }}>
             <Stack direction="row" spacing={1} alignItems="center">
               <TextField

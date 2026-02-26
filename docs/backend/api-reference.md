@@ -9,101 +9,11 @@ Base URL: `http://localhost:4000/api`
 
 ## Auth Endpoints
 
-### `POST /auth/register`
+### `GET /auth/google/start`
+Starts Google OAuth authorization.
 
-Creates account and triggers verification OTP email.
-
-Request:
-
-```json
-{
-  "firstName": "Jane",
-  "lastName": "Doe",
-  "email": "jane@example.com",
-  "password": "Password123",
-  "confirmPassword": "Password123"
-}
-```
-
-Response (dev):
-
-```json
-{
-  "status": "ok",
-  "data": {
-    "verificationSent": true,
-    "message": "Account created. Verify your email with the OTP code before login.",
-    "verifyCode": "123-456"
-  }
-}
-```
-
-### `POST /auth/verify-email`
-
-Verifies email by OTP code (`123-456`).
-
-Request:
-
-```json
-{
-  "token": "123-456"
-}
-```
-
-### `POST /auth/resend-verification`
-
-Regenerates and sends verification OTP.
-
-Request:
-
-```json
-{
-  "email": "jane@example.com"
-}
-```
-
-### `POST /auth/login`
-
-Requires email verification to be completed.
-
-### `POST /auth/forgot-password`
-
-Generates reset OTP and emails it.
-
-Request:
-
-```json
-{
-  "email": "jane@example.com"
-}
-```
-
-Response:
-
-```json
-{
-  "status": "ok",
-  "data": {
-    "message": "Password reset code generated."
-  }
-}
-```
-
-If email delivery fails in non-production, response includes `emailDebug`.
-
-### `POST /auth/reset-password`
-
-Consumes reset OTP and sets new password.
-
-Request:
-
-```json
-{
-  "token": "123-456",
-  "password": "NewPassword123",
-  "confirmPassword": "NewPassword123"
-}
-```
+### `GET /auth/google/callback`
+Handles Google OAuth callback and redirects client with `accessToken`.
 
 ### `POST /auth/refresh`
 ### `POST /auth/logout`
@@ -182,19 +92,15 @@ Also available under `/api/<module>` for generic module shells:
 - `PUT /<module>/:id`
 - `DELETE /<module>/:id`
 
-## Workflow: Auth Recovery and Verification
+## Workflow: Auth and Session
 
 ```mermaid
 flowchart TD
-  A["Register"] --> B["Create user + verification token"]
-  B --> C["Send OTP email"]
-  C --> D["Verify Email OTP"]
-  D --> E["Login allowed"]
-
-  F["Forgot Password"] --> G["Create reset token"]
-  G --> H["Send reset OTP email"]
-  H --> I["Reset Password OTP"]
-  I --> J["Revoke refresh tokens + set new password"]
+  A["Login with Google"] --> B["/auth/google/start"]
+  B --> C["Google consent + callback"]
+  C --> D["Issue access + refresh tokens"]
+  D --> E["Refresh rotates token"]
+  E --> F["Logout revokes token"]
 ```
 
 ## Workflow: Google Sheets Import

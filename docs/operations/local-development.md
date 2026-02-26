@@ -24,6 +24,7 @@ make dev
 - Client: `http://localhost:4630`
 - Server: `http://localhost:4000`
 - Health: `http://localhost:4000/health`
+- Client API base env: `VITE_API_URL` in `/client/.env`
 
 `make dev` behavior:
 
@@ -46,6 +47,12 @@ make start
 - Client: `http://localhost:8080`
 - API health: `http://localhost:4000/health`
 - MongoDB: `localhost:27017`
+- Client build-time API base: Docker `client` build arg `VITE_API_URL` (currently `/api` in `docker-compose.yml`)
+
+## Current Deployment Snapshot
+
+- Deployed API health: `https://retailsync-api-qbdqiyjkbq-uw.a.run.app/health`
+- Deployed API base for client env: `https://retailsync-api-qbdqiyjkbq-uw.a.run.app/api`
 
 Useful Docker commands:
 
@@ -54,18 +61,6 @@ make ps
 make logs
 make stop
 ```
-
-## Email Integration (Resend)
-
-Required for real OTP delivery:
-
-- `RESEND_API_KEY`
-- `RESEND_FROM`
-
-Development note:
-
-- If your Resend account is in testing mode, you can only send to your own verified inbox.
-- API returns `emailDebug` in non-production when delivery fails.
 
 ## Google Integration
 
@@ -105,8 +100,5 @@ make reset-hard
 3. Docker daemon unavailable:
 - Start Docker Desktop and verify `docker info`.
 
-4. Email API returns 403 validation error:
-- Verify Resend domain/sender policy and `RESEND_FROM` value.
-
-5. OAuth connect returns 401:
+4. OAuth connect returns 401:
 - Use connect-url flow and ensure auth/cookie strategy is configured.

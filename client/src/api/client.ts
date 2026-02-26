@@ -39,7 +39,6 @@ api.interceptors.response.use(
       } catch {
         store.dispatch(logout());
         store.dispatch(clearCompany());
-        window.location.href = '/login';
       }
     }
 

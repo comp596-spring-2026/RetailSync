@@ -1,7 +1,10 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import request from 'supertest';
-import { clearTestEmailOutbox, testEmailOutbox } from '../services/emailService';
+import { randomUUID, createHash } from 'node:crypto';
+import { UserModel } from '../models/User';
+import { RefreshTokenModel } from '../models/RefreshToken';
+import { signAccessToken, signRefreshToken } from '../utils/jwt';
 
 let mongo: MongoMemoryServer | null = null;
 
@@ -22,7 +25,6 @@ export const connectTestDb = async () => {
 };
 
 export const clearTestDb = async () => {
-  clearTestEmailOutbox();
   const collections = mongoose.connection.collections;
   await Promise.all(
     Object.values(collections).map(async (collection) => {
@@ -40,7 +42,7 @@ export const disconnectTestDb = async () => {
 };
 
 export const registerAndCreateCompany = async (app: any, userSeed: string) => {
-  const { email, accessToken, registerRes, loginRes } = await registerVerifyAndLogin(app, userSeed);
+  const { email, accessToken } = await createGoogleAuthSession(userSeed);
 
   await request(app)
     .post('/api/company/create')
@@ -56,45 +58,40 @@ export const registerAndCreateCompany = async (app: any, userSeed: string) => {
     })
     .expect(201);
 
-  return { email, accessToken, registerRes, loginRes };
+  return { email, accessToken };
 };
 
-export const registerVerifyAndLogin = async (app: any, userSeed: string) => {
+export const createGoogleAuthSession = async (userSeed: string) => {
   const email = `user.${userSeed}@example.com`;
-  const normalizedEmail = email.toLowerCase();
-  const registerRes = await request(app).post('/api/auth/register').send({
+  const user = await UserModel.create({
     firstName: 'Test',
     lastName: userSeed,
     email,
-    password: 'Password123',
-    confirmPassword: 'Password123'
+    googleId: `google-${userSeed.toLowerCase()}-${Date.now()}`,
+    passwordHash: randomUUID(),
+    emailVerifiedAt: new Date(),
+    companyId: null,
+    roleId: null
   });
 
-  const extractCodeFromHtml = (html: string) => {
-    const match = html.match(/\b\d{3}-\d{3}\b/);
-    return match?.[0];
-  };
+  const accessToken = signAccessToken({
+    sub: user._id.toString(),
+    email: user.email,
+    companyId: null,
+    roleId: null
+  });
+  const jti = randomUUID();
+  const refreshToken = signRefreshToken({ sub: user._id.toString(), email: user.email, jti });
+  const jtiHash = createHash('sha256').update(jti).digest('hex');
+  await RefreshTokenModel.create({
+    userId: user._id,
+    jtiHash,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  });
 
-  const verifyCodeFromResponse = registerRes.body?.data?.verifyCode as string | undefined;
-  const latestVerificationEmail = [...testEmailOutbox]
-    .reverse()
-    .find((entry) => entry.to.toLowerCase() === normalizedEmail && entry.subject.includes('Verify'));
-  const verifyCode =
-    verifyCodeFromResponse || (latestVerificationEmail ? extractCodeFromHtml(latestVerificationEmail.html) : undefined);
-  if (!verifyCode) {
-    throw new Error(`Verification code not available for ${email}`);
-  }
-
-  await request(app).post('/api/auth/verify-email').send({ token: verifyCode }).expect(200);
-
-  const loginRes = await request(app).post('/api/auth/login').send({
+  return {
     email,
-    password: 'Password123'
-  });
-  const accessToken = loginRes.body.data.accessToken as string;
-  if (!accessToken) {
-    throw new Error(`Login access token missing for ${email}`);
-  }
-
-  return { email, accessToken, registerRes, loginRes };
+    accessToken,
+    refreshCookie: `refreshToken=${refreshToken}; Path=/; HttpOnly`
+  };
 };

@@ -4,24 +4,6 @@ import { permissionSetSchema, permissionsSchema } from './permissions';
 
 export const emailSchema = z.string().trim().toLowerCase().email();
 
-export const registerSchema = z
-  .object({
-    firstName: z.string().trim().min(1),
-    lastName: z.string().trim().min(1),
-    email: emailSchema,
-    password: z.string().min(8),
-    confirmPassword: z.string().min(8)
-  })
-  .refine((v) => v.password === v.confirmPassword, {
-    path: ['confirmPassword'],
-    message: 'Passwords do not match'
-  });
-
-export const loginSchema = z.object({
-  email: emailSchema,
-  password: z.string().min(8)
-});
-
 export const companyCreateSchema = z.object({
   name: z.string().trim().min(2),
   businessType: z.string().trim().min(2),
@@ -126,8 +108,6 @@ export const barcodeSearchSchema = z.object({
 
 export const modulePermissionInputSchema = z.record(z.enum(moduleKeys), permissionSetSchema);
 
-export type RegisterInput = z.infer<typeof registerSchema>;
-export type LoginInput = z.infer<typeof loginSchema>;
 export type CompanyCreateInput = z.infer<typeof companyCreateSchema>;
 export type CompanyJoinInput = z.infer<typeof companyJoinSchema>;
 export type RoleInput = z.infer<typeof roleSchema>;

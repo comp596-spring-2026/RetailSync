@@ -5,7 +5,7 @@ export const hasPermission = (
   moduleKey: ModuleKey,
   action: 'view' | 'create' | 'edit' | 'delete' | `actions:${string}`
 ) => {
-  if (!permissions) return false;
+  if (!permissions) return true;
 
   const modulePermissions = permissions[moduleKey];
   if (!modulePermissions) return false;

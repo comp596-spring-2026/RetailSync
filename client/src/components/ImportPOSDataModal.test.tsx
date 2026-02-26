@@ -53,26 +53,19 @@ describe('ImportPOSDataModal', () => {
   });
 
   it('locks google and service options when env flags are disabled', async () => {
-    vi.stubEnv('VITE_API_URL', 'http://localhost:4000/api');
-    vi.stubEnv('VITE_GOOGLE_OAUTH_ENABLED', 'false');
-    vi.stubEnv('VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED', 'false');
     vi.resetModules();
 
     await renderModal();
 
-    expect(screen.getByText(/Locked: Google OAuth is disabled/i)).toBeInTheDocument();
-    expect(screen.getByText(/Locked: Service account mode is disabled/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Locked:/i)).not.toBeInTheDocument();
 
     const connectCardTrigger = screen.getAllByText('Connect Google')[0];
     fireEvent.click(connectCardTrigger);
 
-    expect(screen.queryByRole('button', { name: 'Connect Google' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect Google' })).toBeInTheDocument();
   });
 
-  it('enables google option when oauth env flag is enabled', async () => {
-    vi.stubEnv('VITE_API_URL', 'http://localhost:4000/api');
-    vi.stubEnv('VITE_GOOGLE_OAUTH_ENABLED', 'true');
-    vi.stubEnv('VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED', 'false');
+  it('shows google connect option by default', async () => {
     vi.resetModules();
 
     await renderModal();
@@ -84,9 +77,6 @@ describe('ImportPOSDataModal', () => {
   });
 
   it('imports selected file with upload mode', async () => {
-    vi.stubEnv('VITE_API_URL', 'http://localhost:4000/api');
-    vi.stubEnv('VITE_GOOGLE_OAUTH_ENABLED', 'false');
-    vi.stubEnv('VITE_GOOGLE_SERVICE_ACCOUNT_ENABLED', 'false');
     vi.resetModules();
 
     mockImportFile.mockResolvedValue({ data: { status: 'ok' } });
