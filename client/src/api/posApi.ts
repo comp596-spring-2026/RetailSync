@@ -21,7 +21,23 @@ export const posApi = {
   },
   importRows: (rows: string[][], hasHeader = true) => api.post('/pos/import-rows', { rows, hasHeader }),
   previewSharedSheetImport: () => api.post('/pos/import/sheets/preview'),
-  commitSharedSheetImport: () => api.post('/pos/import/sheets/commit'),
+  previewSheet: (payload: { source?: 'service' | 'oauth' | 'file'; tab?: string; maxRows?: number }) =>
+    api.post('/pos/import/sheets/preview', payload),
+  validateMapping: (payload: {
+    mapping: Record<string, string>;
+    transforms?: Record<string, unknown>;
+    validateSample?: boolean;
+  }) => api.post('/pos/import/sheets/match', payload),
+  commitSharedSheetImport: (payload: {
+    mapping: Record<string, string>;
+    transforms?: Record<string, unknown>;
+    options?: Record<string, unknown>;
+  }) => api.post('/pos/import/sheets/commit', payload),
+  commitImport: (payload: {
+    mapping: Record<string, string>;
+    transforms?: Record<string, unknown>;
+    options?: Record<string, unknown>;
+  }) => api.post('/pos/import/sheets/commit', payload),
   readSheet: (spreadsheetId: string, range: string, authMode: 'service' | 'oauth') =>
     api.get('/sheets/read', { params: { spreadsheetId, range, authMode } }),
   getGoogleConnectUrl: () => api.get('/integrations/google/sheets/start-url'),

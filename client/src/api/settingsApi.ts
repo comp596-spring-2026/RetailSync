@@ -16,6 +16,7 @@ export type GoogleSheetSource = {
 export const settingsApi = {
   get: () => api.get('/settings'),
   getGoogleConnectUrl: () => api.get('/integrations/google/sheets/start-url'),
+  listTabs: () => api.get('/integrations/sheets/tabs'),
   configureSharedSheet: (payload: {
     spreadsheetId?: string;
     spreadsheetUrl?: string;

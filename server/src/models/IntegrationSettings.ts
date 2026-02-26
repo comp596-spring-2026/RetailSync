@@ -18,9 +18,22 @@ const googleSharedSheetConfigSchema = new Schema(
   {
     spreadsheetId: { type: String, default: null },
     sheetName: { type: String, default: 'Sheet1' },
+    sheetId: { type: Number, default: null },
     headerRow: { type: Number, default: 1, min: 1 },
     columnsMap: { type: Map, of: String, default: {} },
     enabled: { type: Boolean, default: false },
+    shareStatus: {
+      type: String,
+      enum: ['unknown', 'not_shared', 'shared', 'no_permission', 'not_found'],
+      default: 'unknown'
+    },
+    oauthConnectedAccount: { type: String, default: null },
+    lastMapping: {
+      columnsMap: { type: Map, of: String, default: {} },
+      transformations: { type: Map, of: Schema.Types.Mixed, default: {} },
+      createdAt: { type: Date, default: null },
+      createdBy: { type: String, default: null }
+    },
     lastVerifiedAt: { type: Date, default: null },
     lastImportAt: { type: Date, default: null }
   },

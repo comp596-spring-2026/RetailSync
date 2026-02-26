@@ -2,12 +2,36 @@ import { PosDailySummaryInput, posDailyQuerySchema, posDailySummarySchema } from
 import { parse } from 'csv-parse/sync';
 import { Request, Response } from 'express';
 import XLSX from 'xlsx';
+import { z } from 'zod';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
+import { ImportJobModel } from '../models/ImportJob';
 import { POSDailySummaryModel } from '../models/POSDailySummary';
 import { getSheetsClient } from '../integrations/google/sheets.client';
 import { fail, ok } from '../utils/apiResponse';
+import { suggestMappings } from '../utils/matching';
+import { buildRange, normalizeRows } from '../utils/sheetsRange';
 
 type CsvRow = Record<string, string | undefined>;
+
+const previewRequestSchema = z.object({
+  source: z.enum(['service', 'oauth', 'file']).default('service'),
+  tab: z.string().min(1).optional(),
+  maxRows: z.coerce.number().int().min(1).max(100).default(20)
+});
+
+const matchMappingSchema = z.object({
+  mapping: z.record(z.string(), z.string()).default({}),
+  transforms: z.record(z.string(), z.any()).optional(),
+  validateSample: z.boolean().optional()
+});
+
+const commitImportSchema = z.object({
+  mapping: z.record(z.string(), z.string()),
+  transforms: z.record(z.string(), z.any()).optional(),
+  options: z.record(z.string(), z.any()).optional()
+});
+
+const TARGET_FIELDS = ['date', 'sku', 'qty', 'price', 'name', 'barcode'];
 
 const toNumber = (value: string | undefined) => {
   if (!value) return 0;
@@ -123,6 +147,17 @@ const parseRowsWithHeaderRow = (rows: string[][], headerRow: number) => {
     });
 };
 
+const toSheetsErrorStatus = (message: string) => {
+  const normalized = message.toLowerCase();
+  if (normalized.includes('permission') || normalized.includes('forbidden') || normalized.includes('403')) {
+    return 403;
+  }
+  if (normalized.includes('not found') || normalized.includes('404')) {
+    return 404;
+  }
+  return 400;
+};
+
 const parseCsvFileRows = (buffer: Buffer) => {
   const csv = buffer.toString('utf-8');
   return parse(csv, {
@@ -173,21 +208,85 @@ const getSharedSheetsSourceForCompany = async (companyId: string) => {
     spreadsheetId,
     sheetName,
     headerRow,
-    settingsId: settings?._id?.toString() ?? null
+    settingsId: settings?._id?.toString() ?? null,
+    mode: settings?.googleSheets?.mode ?? 'service_account'
   };
 };
 
-const readSharedSheetRows = async (companyId: string) => {
+const readSharedSheetRows = async (
+  companyId: string,
+  opts?: { tab?: string; maxRows?: number }
+) => {
   const source = await getSharedSheetsSourceForCompany(companyId);
   const sheets = getSheetsClient();
+  const selectedTab = opts?.tab?.trim() || source.sheetName;
+
+  const metadata = await sheets.spreadsheets.get({
+    spreadsheetId: source.spreadsheetId,
+    fields: 'sheets(properties(title))'
+  });
+  const tabs = (metadata.data.sheets ?? [])
+    .map((sheet) => sheet.properties?.title)
+    .filter((tab): tab is string => Boolean(tab));
+  if (!tabs.includes(selectedTab)) {
+    throw new Error('tab_not_found');
+  }
+
+  const maxRows = Math.min(Math.max(Number(opts?.maxRows ?? 20), 1), 100);
+  const range = buildRange(selectedTab, source.headerRow, maxRows);
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: source.spreadsheetId,
-    range: `${source.sheetName}!A:Z`
+    range
   });
-  const rawRows = (response.data.values ?? []).map((row) =>
-    row.map((cell) => String(cell ?? ''))
-  );
-  return { source, rawRows };
+  const rawRows = normalizeRows(response.data.values as unknown[][] | undefined);
+  return {
+    source: { ...source, sheetName: selectedTab },
+    rawRows,
+    rowCount: rawRows.length
+  };
+};
+
+const applyMappingAndTransforms = (
+  header: string[],
+  sampleRows: string[][],
+  mapping: Record<string, string>,
+  transforms?: Record<string, unknown>
+) => {
+  const rowErrors: Array<{ rowIndex: number; errors: Array<{ col: string; message: string }> }> = [];
+  const correctedPreview = sampleRows.slice(0, 3).map((row, rowIndex) => {
+    const out: Record<string, string> = {};
+    for (const [sourceHeader, targetField] of Object.entries(mapping)) {
+      const colIndex = header.findIndex((item) => item.trim() === sourceHeader.trim());
+      if (colIndex < 0) {
+        rowErrors.push({
+          rowIndex,
+          errors: [{ col: sourceHeader, message: 'source header not found in preview header' }]
+        });
+        continue;
+      }
+      let value = String(row[colIndex] ?? '');
+      const transform = transforms?.[targetField];
+      if (transform && typeof transform === 'object') {
+        const typed = transform as Record<string, unknown>;
+        if (typed.trim === true) value = value.trim();
+        if (typed.type === 'number') {
+          const normalized = Number(value.replace(/,/g, ''));
+          if (Number.isNaN(normalized)) {
+            rowErrors.push({
+              rowIndex,
+              errors: [{ col: sourceHeader, message: 'value is not numeric' }]
+            });
+          } else {
+            value = String(normalized);
+          }
+        }
+      }
+      out[targetField] = value;
+    }
+    return out;
+  });
+
+  return { rowErrors, correctedPreview };
 };
 
 const importRowsForCompany = async (companyId: string, rawRows: CsvRow[]) => {
@@ -320,29 +419,87 @@ export const previewPosImportFromSharedSheet = async (req: Request, res: Respons
     return fail(res, 'Company onboarding required', 403);
   }
 
+  const parsed = previewRequestSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  if (parsed.data.source !== 'service') {
+    return fail(res, 'Only service source is enabled in current deployment', 400);
+  }
+
   try {
-    const { source, rawRows } = await readSharedSheetRows(req.companyId);
-    const parsedRows = parseRowsWithHeaderRow(rawRows, source.headerRow);
+    const { source, rawRows, rowCount } = await readSharedSheetRows(req.companyId, {
+      tab: parsed.data.tab,
+      maxRows: parsed.data.maxRows
+    });
+    const header = rawRows[0] ?? [];
+    const sampleRows = rawRows.slice(1, 11);
+    const suggestions = suggestMappings(header, sampleRows, TARGET_FIELDS).map((entry, index) => ({
+      col: String.fromCharCode(65 + index),
+      header: entry.sourceHeader,
+      suggestion: entry.targetField,
+      score: entry.score
+    }));
 
     return ok(res, {
       spreadsheetId: source.spreadsheetId,
       sheetName: source.sheetName,
       headerRow: source.headerRow,
-      rawRowCount: rawRows.length,
-      parsedRowCount: parsedRows.length,
-      preview: rawRows.slice(0, 10)
+      header,
+      sampleRows,
+      rowCount,
+      suggestions
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Shared Sheets preview failed';
-    const statusCode =
-      /permission|forbidden|insufficient|not found|access/i.test(message) ? 403 : 400;
+    const statusCode = toSheetsErrorStatus(message);
     return fail(res, message, statusCode);
   }
 };
 
-export const commitPosImportFromSharedSheet = async (req: Request, res: Response) => {
+export const matchPosImportMapping = async (req: Request, res: Response) => {
   if (!req.companyId) {
     return fail(res, 'Company onboarding required', 403);
+  }
+
+  const parsed = matchMappingSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  try {
+    const { source, rawRows } = await readSharedSheetRows(req.companyId, { maxRows: 20 });
+    const header = rawRows[0] ?? [];
+    const sampleRows = rawRows.slice(1, 11);
+    const { rowErrors, correctedPreview } = applyMappingAndTransforms(
+      header,
+      sampleRows,
+      parsed.data.mapping,
+      parsed.data.transforms
+    );
+
+    return ok(res, {
+      spreadsheetId: source.spreadsheetId,
+      sheetName: source.sheetName,
+      valid: rowErrors.length === 0,
+      rowErrors,
+      correctedPreview
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Shared Sheets match failed';
+    return fail(res, message, toSheetsErrorStatus(message));
+  }
+};
+
+export const commitPosImportFromSharedSheet = async (req: Request, res: Response) => {
+  if (!req.companyId || !req.user?.id) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  const parsedCommit = commitImportSchema.safeParse(req.body ?? {});
+  if (!parsedCommit.success) {
+    return fail(res, 'Validation failed', 422, parsedCommit.error.flatten());
   }
 
   try {
@@ -363,6 +520,12 @@ export const commitPosImportFromSharedSheet = async (req: Request, res: Response
         {
           $set: {
             'googleSheets.sharedConfig.lastImportAt': new Date(),
+            'googleSheets.sharedConfig.lastMapping': {
+              columnsMap: parsedCommit.data.mapping,
+              transformations: parsedCommit.data.transforms ?? {},
+              createdAt: new Date(),
+              createdBy: req.user.id
+            },
             'googleSheets.connected': true,
             'googleSheets.updatedAt': new Date()
           }
@@ -370,16 +533,27 @@ export const commitPosImportFromSharedSheet = async (req: Request, res: Response
       );
     }
 
+    const importJob = await ImportJobModel.create({
+      companyId: req.companyId,
+      createdBy: req.user.id,
+      source: 'service',
+      status: 'queued',
+      mapping: parsedCommit.data.mapping,
+      transforms: parsedCommit.data.transforms ?? {},
+      options: parsedCommit.data.options ?? {}
+    });
+
     return ok(res, {
-      ...result.data,
-      spreadsheetId: source.spreadsheetId,
-      sheetName: source.sheetName
+      jobId: importJob._id.toString(),
+      result: {
+        ...result.data,
+        spreadsheetId: source.spreadsheetId,
+        sheetName: source.sheetName
+      }
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Shared Sheets commit failed';
-    const statusCode =
-      /permission|forbidden|insufficient|not found|access/i.test(message) ? 403 : 400;
-    return fail(res, message, statusCode);
+    return fail(res, message, toSheetsErrorStatus(message));
   }
 };
 

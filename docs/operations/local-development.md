@@ -70,6 +70,14 @@ For Sheets/service-account and OAuth flows:
 - `GOOGLE_OAUTH_CLIENT_SECRET`
 - `GOOGLE_AUTH_REDIRECT_URI`
 
+For local service-account Sheets tests, authenticate ADC locally:
+
+```bash
+gcloud auth application-default login
+```
+
+Production Cloud Run uses ADC from attached service account and does not require JSON key env variables.
+
 ## Quality and Validation
 
 ```bash
