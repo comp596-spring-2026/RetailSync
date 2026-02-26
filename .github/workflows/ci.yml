@@ -51,7 +51,7 @@ jobs:
       - name: Lint and typecheck
         run: |
           pnpm lint
-          pnpm -w -s tsc --noEmit
+          pnpm typecheck
 
       - name: Ensure no JSON key env fallback
         run: |
