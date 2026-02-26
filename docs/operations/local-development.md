@@ -66,7 +66,6 @@ make stop
 
 For Sheets/service-account and OAuth flows:
 
-- `GOOGLE_SERVICE_ACCOUNT_JSON`
 - `GOOGLE_OAUTH_CLIENT_ID`
 - `GOOGLE_OAUTH_CLIENT_SECRET`
 - `GOOGLE_AUTH_REDIRECT_URI`

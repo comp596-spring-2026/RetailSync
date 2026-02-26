@@ -56,7 +56,7 @@ RetailSync is a TypeScript monorepo with React/Vite on the client and Express/Mo
 
 | Product | Used For | Required Env |
 |---|---|---|
-| Google APIs (`googleapis`) | Sheets read and OAuth connect/callback flow | `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_AUTH_REDIRECT_URI` |
+| Google APIs (`googleapis`) | Sheets read and OAuth connect/callback flow | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_AUTH_REDIRECT_URI` |
 
 ## Brand Assets
 
@@ -183,7 +183,6 @@ make check
 | `JWT_REFRESH_SECRET` | Yes | Refresh token signing secret |
 | `CLIENT_URL` | Yes | Allowed CORS origin |
 | `NODE_ENV` | Yes | `development` / `test` / `production` |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | No | Service account auth for Sheets read |
 | `GOOGLE_OAUTH_CLIENT_ID` | No | Google OAuth |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | No | Google OAuth |
 | `GOOGLE_AUTH_REDIRECT_URI` | No | Google OAuth callback |

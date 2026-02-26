@@ -38,8 +38,7 @@ const SERVER_ENV_ITEMS = [
   'MONGO_URI',
   'CLIENT_URL',
   'JWT_ACCESS_SECRET',
-  'JWT_REFRESH_SECRET',
-  'GOOGLE_SERVICE_ACCOUNT_JSON'
+  'JWT_REFRESH_SECRET'
 ];
 
 const getHealthUrl = (apiBase: string) => {

@@ -20,19 +20,7 @@ const normalizeRows = (values: unknown[][] | undefined) => {
 };
 
 const readWithServiceAccount = async (spreadsheetId: string, range: string) => {
-  if (!env.googleServiceAccountJson) {
-    throw new Error('Missing GOOGLE_SERVICE_ACCOUNT_JSON in environment');
-  }
-
-  let credentials: Record<string, unknown>;
-  try {
-    credentials = JSON.parse(env.googleServiceAccountJson) as Record<string, unknown>;
-  } catch {
-    throw new Error('Invalid GOOGLE_SERVICE_ACCOUNT_JSON format');
-  }
-
   const auth = new google.auth.GoogleAuth({
-    credentials,
     scopes: [SHEETS_READ_SCOPE]
   });
 

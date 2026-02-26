@@ -135,15 +135,7 @@ const loadGoogleAuthClient = async (
   companyId: string,
 ) => {
   if (authMode === "service_account") {
-    if (!env.googleServiceAccountJson) {
-      throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON on server");
-    }
-    const credentials = JSON.parse(env.googleServiceAccountJson) as Record<
-      string,
-      unknown
-    >;
     return new google.auth.GoogleAuth({
-      credentials,
       scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
     });
   }
