@@ -111,16 +111,11 @@ Notes:
 
 ```mermaid
 flowchart TD
-  A["POS Source Modal"] --> B["Upload CSV/XLSX"]
-  A --> C["Google OAuth Connect"]
-  A --> D["Service Account Access"]
-
-  B --> E["/api/pos/import-file"]
-  C --> F["/api/google/connect-url and callback"]
-  C --> G["/api/sheets/read"]
-  D --> G
-  G --> H["Preview Rows"]
-  H --> I["/api/pos/import-rows"]
+  A["POS Import Modal"] --> B["Source (service-account sheet)"]
+  B --> C["Select Tab (/api/integrations/sheets/tabs)"]
+  C --> D["Preview (/api/pos/import/sheets/preview)"]
+  D --> E["Match (/api/pos/import/sheets/match)"]
+  E --> F["Commit (/api/pos/import/sheets/commit)"]
 ```
 
 ## Monorepo Structure
@@ -171,6 +166,14 @@ make build
 make check
 ```
 
+### Local ADC for Sheets
+
+Cloud Run uses ADC automatically. For local Sheets calls, run:
+
+```bash
+gcloud auth application-default login
+```
+
 ## Environment Variables
 
 ### Server (`/server/.env`)
@@ -198,6 +201,15 @@ make check
 - Current deployed API URL: `https://retailsync-api-qbdqiyjkbq-uw.a.run.app`
 - Current client build expects: `VITE_API_URL=https://retailsync-api-qbdqiyjkbq-uw.a.run.app/api`
 - Docker Compose build arg for client: `VITE_API_URL=/api` (when reverse-proxying API from same host)
+
+## Branching and Release
+
+- `development`: active feature branch target.
+- `production`: protected release branch.
+- PR flow: feature -> `development`, then `development` -> `production`.
+- GitHub Actions:
+  - `.github/workflows/ci.yml` runs on PRs to `development` and `production`.
+  - `.github/workflows/deploy.yml` runs on pushes to `production`.
 
 ## Testing
 

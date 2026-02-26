@@ -6,6 +6,7 @@ import {
   importPosFile,
   importPosRows,
   listPosDaily,
+  matchPosImportMapping,
   previewPosImportFromSharedSheet
 } from '../controllers/posController';
 import { requireAuth } from '../middleware/requireAuth';
@@ -46,6 +47,12 @@ router.post(
   requirePermission('pos', 'create'),
   requirePermission('pos', 'import'),
   commitPosImportFromSharedSheet
+);
+router.post(
+  '/import/sheets/match',
+  requirePermission('pos', 'create'),
+  requirePermission('pos', 'import'),
+  matchPosImportMapping
 );
 router.get('/daily', requirePermission('pos', 'view'), listPosDaily);
 

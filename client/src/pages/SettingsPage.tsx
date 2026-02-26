@@ -48,6 +48,14 @@ type IntegrationSettings = {
       mapping: Record<string, string>;
       active: boolean;
     }>;
+    sharedConfig?: {
+      spreadsheetId: string | null;
+      sheetName: string;
+      headerRow: number;
+      enabled: boolean;
+      shareStatus?: 'unknown' | 'not_shared' | 'shared' | 'no_permission' | 'not_found';
+      lastVerifiedAt?: string | null;
+    };
   };
   quickbooks: {
     connected: boolean;
@@ -83,6 +91,9 @@ export const SettingsPage = () => {
     '{\n  "date": "Date",\n  "amount": "Amount"\n}',
   );
   const [preview, setPreview] = useState<string[][]>([]);
+  const [sharedSpreadsheetId, setSharedSpreadsheetId] = useState('');
+  const [sharedSheetName, setSharedSheetName] = useState('Sheet1');
+  const [sharedHeaderRow, setSharedHeaderRow] = useState(1);
   const [isBusy, setIsBusy] = useState(false);
   const [integrationsExpanded, setIntegrationsExpanded] = useState(true);
 
@@ -101,6 +112,11 @@ export const SettingsPage = () => {
         setSpreadsheetId(activeSource.spreadsheetId);
         setRange(activeSource.range);
         setMappingJson(JSON.stringify(activeSource.mapping ?? {}, null, 2));
+      }
+      if (data.googleSheets.sharedConfig) {
+        setSharedSpreadsheetId(data.googleSheets.sharedConfig.spreadsheetId ?? '');
+        setSharedSheetName(data.googleSheets.sharedConfig.sheetName || 'Sheet1');
+        setSharedHeaderRow(data.googleSheets.sharedConfig.headerRow || 1);
       }
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load settings"));
@@ -267,6 +283,54 @@ export const SettingsPage = () => {
           severity: "error",
         }),
       );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const onSaveSharedConfig = async () => {
+    if (!canEdit) return;
+    if (!sharedSpreadsheetId.trim()) {
+      dispatch(showSnackbar({ message: 'Spreadsheet ID is required', severity: 'error' }));
+      return;
+    }
+    try {
+      setIsBusy(true);
+      await settingsApi.configureSharedSheet({
+        spreadsheetId: sharedSpreadsheetId.trim(),
+        sheetName: sharedSheetName.trim() || 'Sheet1',
+        headerRow: sharedHeaderRow,
+        enabled: true
+      });
+      dispatch(showSnackbar({ message: 'Shared sheet config saved', severity: 'success' }));
+      await loadSettings();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, 'Failed to save shared sheet config'),
+          severity: 'error'
+        })
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const onVerifySharedConfig = async () => {
+    if (!canEdit) return;
+    try {
+      setIsBusy(true);
+      await settingsApi.verifySharedSheet();
+      dispatch(showSnackbar({ message: 'Shared sheet verified', severity: 'success' }));
+      await loadSettings();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, 'Shared sheet verify failed'),
+          severity: 'error'
+        })
+      );
+      await loadSettings();
     } finally {
       setIsBusy(false);
     }
@@ -495,6 +559,49 @@ export const SettingsPage = () => {
                           Share your sheet with this email as Viewer/Editor,
                           then save Spreadsheet ID and Range.
                         </Alert>
+                        <TextField
+                          label="Shared Spreadsheet ID"
+                          size="small"
+                          value={sharedSpreadsheetId}
+                          onChange={(e) => setSharedSpreadsheetId(e.target.value)}
+                          fullWidth
+                        />
+                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
+                          <TextField
+                            label="Sheet Tab"
+                            size="small"
+                            value={sharedSheetName}
+                            onChange={(e) => setSharedSheetName(e.target.value)}
+                            fullWidth
+                          />
+                          <TextField
+                            label="Header Row"
+                            type="number"
+                            size="small"
+                            value={sharedHeaderRow}
+                            onChange={(e) => setSharedHeaderRow(Number(e.target.value || 1))}
+                            sx={{ width: { xs: '100%', md: 160 } }}
+                          />
+                        </Stack>
+                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
+                          <Button
+                            variant="outlined"
+                            onClick={onSaveSharedConfig}
+                            disabled={isBusy || !canEdit}
+                          >
+                            Save Shared Config
+                          </Button>
+                          <Button
+                            variant="contained"
+                            onClick={onVerifySharedConfig}
+                            disabled={isBusy || !canEdit}
+                          >
+                            Verify Shared Sheet
+                          </Button>
+                        </Stack>
+                        <Typography variant="body2" color="text.secondary">
+                          Share status: {settings.googleSheets.sharedConfig?.shareStatus ?? 'unknown'}
+                        </Typography>
                       </Stack>
                     )}
 

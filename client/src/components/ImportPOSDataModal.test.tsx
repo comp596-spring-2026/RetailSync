@@ -1,23 +1,26 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
-import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import authReducer from '../features/auth/authSlice';
 import companyReducer from '../features/company/companySlice';
 import rbacReducer from '../features/rbac/rbacSlice';
 import uiReducer from '../features/ui/uiSlice';
 
-const mockImportFile = vi.fn();
-const mockImportRows = vi.fn();
-const mockReadSheet = vi.fn();
-const mockGetGoogleConnectUrl = vi.fn();
+const mockListTabs = vi.fn();
+const mockPreviewSheet = vi.fn();
+
+vi.mock('../api/settingsApi', () => ({
+  settingsApi: {
+    listTabs: (...args: unknown[]) => mockListTabs(...args)
+  }
+}));
 
 vi.mock('../api/posApi', () => ({
   posApi: {
-    importFile: (...args: unknown[]) => mockImportFile(...args),
-    importRows: (...args: unknown[]) => mockImportRows(...args),
-    readSheet: (...args: unknown[]) => mockReadSheet(...args),
-    getGoogleConnectUrl: (...args: unknown[]) => mockGetGoogleConnectUrl(...args)
+    previewSheet: (...args: unknown[]) => mockPreviewSheet(...args),
+    validateMapping: vi.fn(),
+    commitImport: vi.fn()
   }
 }));
 
@@ -44,54 +47,24 @@ const renderModal = async () => {
 describe('ImportPOSDataModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv('VITE_API_URL', 'http://localhost:4000/api');
-    mockGetGoogleConnectUrl.mockResolvedValue({ data: { data: { url: 'http://localhost:4000/api/google/connect' } } });
+    mockListTabs.mockResolvedValue({
+      data: { data: { tabs: [{ title: 'Sheet1', rowCount: 100, columnCount: 8 }] } }
+    });
+    mockPreviewSheet.mockResolvedValue({
+      data: { data: { header: ['Date'], sampleRows: [['2026-01-01']], suggestions: [] } }
+    });
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it('locks google and service options when env flags are disabled', async () => {
-    vi.resetModules();
-
+  it('loads tabs from settings API', async () => {
     await renderModal();
 
-    expect(screen.queryByText(/Locked:/i)).not.toBeInTheDocument();
-
-    const connectCardTrigger = screen.getAllByText('Connect Google')[0];
-    fireEvent.click(connectCardTrigger);
-
-    expect(screen.getByRole('button', { name: 'Connect Google' })).toBeInTheDocument();
-  });
-
-  it('shows google connect option by default', async () => {
-    vi.resetModules();
-
-    await renderModal();
-
-    const connectCardButton = screen.getByRole('button', { name: /Connect Google Use OAuth/i });
-    fireEvent.click(connectCardButton);
-
-    expect(screen.getByRole('button', { name: 'Connect Google' })).toBeInTheDocument();
-  });
-
-  it('imports selected file with upload mode', async () => {
-    vi.resetModules();
-
-    mockImportFile.mockResolvedValue({ data: { status: 'ok' } });
-
-    await renderModal();
-
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-    expect(fileInput).toBeTruthy();
-    const file = new File(['DATE,HIGH TAX\n2026-01-01,10'], 'pos.csv', { type: 'text/csv' });
-    fireEvent.change(fileInput, { target: { files: [file] } });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-
-    await waitFor(() => {
-      expect(mockImportFile).toHaveBeenCalledTimes(1);
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'Select Tab' }));
+    await waitFor(() => expect(mockListTabs).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: /Sheet1 rows:/i }));
+    expect(screen.getByText('Select Sheet Tab')).toBeInTheDocument();
   });
 });

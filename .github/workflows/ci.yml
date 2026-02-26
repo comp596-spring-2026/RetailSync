@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - development
+      - production
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'pnpm'
+
+      - name: Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build server
+        working-directory: ./server
+        run: pnpm build
+
+      - name: Build client
+        working-directory: ./client
+        run: pnpm build
+
+      - name: Run server tests
+        working-directory: ./server
+        run: pnpm test
+
+      - name: Run client tests
+        working-directory: ./client
+        run: pnpm test
+
+      - name: Lint and typecheck
+        run: |
+          pnpm lint
+          pnpm -w -s tsc --noEmit
+
+      - name: Ensure no JSON key env fallback
+        run: |
+          if rg -n "GOOGLE_SERVICE_ACCOUNT_JSON|googleServiceAccountJson" .; then
+            echo "Found forbidden GOOGLE_SERVICE_ACCOUNT_JSON reference."
+            exit 1
+          fi
