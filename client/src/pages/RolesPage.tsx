@@ -21,7 +21,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { ModuleKey, PermissionsMap, moduleKeys } from '@retailsync/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { rbacApi } from '../api/rbacApi';
-import { useAppDispatch, useAppSelector } from '../app/hooks';
+import { useAppDispatch, useAppSelector } from '../app/store/hooks';
 import { setRoles } from '../features/rbac/rbacSlice';
 import { showSnackbar } from '../features/ui/uiSlice';
 import { PageHeader } from '../components/PageHeader';

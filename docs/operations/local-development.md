@@ -78,6 +78,12 @@ gcloud auth application-default login
 
 Production Cloud Run uses ADC from attached service account and does not require JSON key env variables.
 
+Local convenience fallback is also supported for Sheets calls:
+
+- `/Users/trupal/Projects/RetailSync/credentials/gcp-service-account-retailsync-run-sa.json`
+
+In non-production mode, if this file exists, the server uses it automatically for Google Sheets API auth.
+
 ## Quality and Validation
 
 ```bash
@@ -87,6 +93,21 @@ make test
 make build
 make check
 ```
+
+For frontend-only verification of the latest UI foundation changes:
+
+```bash
+pnpm --filter @retailsync/client lint
+pnpm --filter @retailsync/client test
+pnpm --filter @retailsync/client build
+```
+
+Covered by these checks:
+
+- company onboarding dropdown UX (`CreateCompanyPage`)
+- reusable searchable CRUD table + edit/delete dialogs
+- shared async feedback flow (loading + toast)
+- shared date/table utility tests
 
 ## Reset and Cleanup
 

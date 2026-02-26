@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { moduleKeys } from './modules';
-import { permissionSetSchema, permissionsSchema } from './permissions';
+import { moduleKeys } from '../constants/modules';
+import { permissionSetSchema, permissionsSchema } from '../permissions/permissions';
 
 export const emailSchema = z.string().trim().toLowerCase().email();
 

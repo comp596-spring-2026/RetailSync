@@ -29,12 +29,12 @@ import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useAppDispatch, useAppSelector } from '../app/hooks';
-import { authApi } from '../api/authApi';
-import { clearCompany } from '../features/company/companySlice';
-import { logout } from '../features/auth/authSlice';
-import { hasPermission } from '../utils/permissions';
-import { BrandLogo } from '../components/BrandLogo';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { authApi } from '../../api/authApi';
+import { clearCompany } from '../../features/company/companySlice';
+import { logout } from '../../features/auth/authSlice';
+import { hasPermission } from '../../shared/utils/permissions';
+import { BrandLogo } from '../../components/BrandLogo';
 import { useMemo, useState } from 'react';
 
 const drawerWidth = 260;

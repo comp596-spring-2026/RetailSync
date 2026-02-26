@@ -4,10 +4,12 @@ import {
   InputAdornment,
   Paper,
   Stack,
+  TableContainer,
   Table,
   TableBody,
   TableCell,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography
@@ -19,12 +21,15 @@ import TableRowsIcon from '@mui/icons-material/TableRows';
 import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import { useEffect, useMemo, useState } from 'react';
 import { posApi } from '../api/posApi';
-import { useAppSelector } from '../app/hooks';
+import { useAppSelector } from '../app/store/hooks';
 import { ImportPOSDataModal } from '../components/ImportPOSDataModal';
 import { NoAccess } from '../components/NoAccess';
 import { PermissionGate } from '../components/PermissionGate';
 import { PageHeader } from '../components/PageHeader';
-import { hasPermission } from '../utils/permissions';
+import { hasPermission } from '../shared/utils/permissions';
+import { useTablePagination } from '../shared/hooks/useTablePagination';
+import { formatDate } from '../shared/utils/date';
+import { TABLE_PAGE_SIZE_OPTIONS } from '../shared/constants/pagination';
 
 type PosRow = {
   _id: string;
@@ -65,6 +70,14 @@ export const PosPage = () => {
   const [error, setError] = useState<string | null>(null);
 
   const range = useMemo(() => monthToRange(month), [month]);
+  const {
+    page,
+    rowsPerPage,
+    rowCount,
+    pagedRows,
+    onChangePage,
+    onChangeRowsPerPage
+  } = useTablePagination({ rows, initialRowsPerPage: 10 });
 
   const loadDaily = async () => {
     setLoading(true);
@@ -137,38 +150,49 @@ export const PosPage = () => {
           <TableRowsIcon fontSize="small" color="primary" />
           Daily POS Summary
         </Typography>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Date</TableCell>
-              <TableCell>Day</TableCell>
-              <TableCell>High Tax</TableCell>
-              <TableCell>Low Tax</TableCell>
-              <TableCell>Total Sales</TableCell>
-              <TableCell>Credit Card</TableCell>
-              <TableCell>Cash</TableCell>
-              <TableCell>Gas</TableCell>
-              <TableCell>Lottery</TableCell>
-              <TableCell>Cash Expenses</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row._id}>
-                <TableCell>{new Date(row.date).toISOString().slice(0, 10)}</TableCell>
-                <TableCell>{row.day}</TableCell>
-                <TableCell>{row.highTax.toFixed(2)}</TableCell>
-                <TableCell>{row.lowTax.toFixed(2)}</TableCell>
-                <TableCell>{row.totalSales.toFixed(2)}</TableCell>
-                <TableCell>{row.creditCard.toFixed(2)}</TableCell>
-                <TableCell>{row.cash.toFixed(2)}</TableCell>
-                <TableCell>{row.gas.toFixed(2)}</TableCell>
-                <TableCell>{row.lottery.toFixed(2)}</TableCell>
-                <TableCell>{row.cashExpenses.toFixed(2)}</TableCell>
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Date</TableCell>
+                <TableCell>Day</TableCell>
+                <TableCell>High Tax</TableCell>
+                <TableCell>Low Tax</TableCell>
+                <TableCell>Total Sales</TableCell>
+                <TableCell>Credit Card</TableCell>
+                <TableCell>Cash</TableCell>
+                <TableCell>Gas</TableCell>
+                <TableCell>Lottery</TableCell>
+                <TableCell>Cash Expenses</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {pagedRows.map((row) => (
+                <TableRow key={row._id}>
+                  <TableCell>{formatDate(row.date, 'iso')}</TableCell>
+                  <TableCell>{row.day}</TableCell>
+                  <TableCell>{row.highTax.toFixed(2)}</TableCell>
+                  <TableCell>{row.lowTax.toFixed(2)}</TableCell>
+                  <TableCell>{row.totalSales.toFixed(2)}</TableCell>
+                  <TableCell>{row.creditCard.toFixed(2)}</TableCell>
+                  <TableCell>{row.cash.toFixed(2)}</TableCell>
+                  <TableCell>{row.gas.toFixed(2)}</TableCell>
+                  <TableCell>{row.lottery.toFixed(2)}</TableCell>
+                  <TableCell>{row.cashExpenses.toFixed(2)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <TablePagination
+          component="div"
+          count={rowCount}
+          page={page}
+          onPageChange={onChangePage}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(event) => onChangeRowsPerPage(Number(event.target.value))}
+          rowsPerPageOptions={[...TABLE_PAGE_SIZE_OPTIONS]}
+        />
       </Paper>
       <ImportPOSDataModal
         open={openImportModal}

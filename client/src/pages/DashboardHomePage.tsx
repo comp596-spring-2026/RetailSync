@@ -3,7 +3,7 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import ApartmentIcon from '@mui/icons-material/Apartment';
 import BadgeIcon from '@mui/icons-material/Badge';
 import DashboardIcon from '@mui/icons-material/Dashboard';
-import { useAppSelector } from '../app/hooks';
+import { useAppSelector } from '../app/store/hooks';
 import { PageHeader } from '../components/PageHeader';
 
 export const DashboardHomePage = () => {

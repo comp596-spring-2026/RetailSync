@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authApi } from '../api/authApi';
-import { useAppDispatch } from '../app/hooks';
+import { useAppDispatch } from '../app/store/hooks';
 import { setAccessToken, setAuthContext } from '../features/auth/authSlice';
 import { setCompany } from '../features/company/companySlice';
 import { showSnackbar } from '../features/ui/uiSlice';

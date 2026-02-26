@@ -28,10 +28,10 @@ import { useEffect, useState } from "react";
 import { AxiosError } from "axios";
 import { PageHeader } from "../components/PageHeader";
 import { settingsApi, type GoogleSheetMode } from "../api/settingsApi";
-import { useAppDispatch, useAppSelector } from "../app/hooks";
+import { useAppDispatch, useAppSelector } from "../app/store/hooks";
 import { showSnackbar } from "../features/ui/uiSlice";
 import { NoAccess } from "../components/NoAccess";
-import { hasPermission } from "../utils/permissions";
+import { hasPermission } from "../shared/utils/permissions";
 
 type IntegrationSettings = {
   googleSheets: {

@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { env } from './env';
+import { env } from '../config/env';
 
 export const connectDb = async () => {
   const maxAttempts = 10;

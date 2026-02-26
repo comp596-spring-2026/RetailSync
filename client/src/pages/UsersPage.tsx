@@ -20,7 +20,7 @@ import BadgeIcon from '@mui/icons-material/Badge';
 import { useEffect, useState } from 'react';
 import { rbacApi } from '../api/rbacApi';
 import { userApi } from '../api/userApi';
-import { useAppDispatch } from '../app/hooks';
+import { useAppDispatch } from '../app/store/hooks';
 import { showSnackbar } from '../features/ui/uiSlice';
 import { PageHeader } from '../components/PageHeader';
 

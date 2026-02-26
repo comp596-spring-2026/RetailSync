@@ -4,8 +4,8 @@ import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { useEffect, useState } from 'react';
 import { reportsApi } from '../api/reportsApi';
 import { NoAccess } from '../components/NoAccess';
-import { useAppSelector } from '../app/hooks';
-import { hasPermission } from '../utils/permissions';
+import { useAppSelector } from '../app/store/hooks';
+import { hasPermission } from '../shared/utils/permissions';
 import { PageHeader } from '../components/PageHeader';
 
 type Summary = {
