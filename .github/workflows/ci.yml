@@ -15,19 +15,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.4.1
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 18
           cache: 'pnpm'
 
-      - name: Setup pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build shared
+        run: pnpm --filter @retailsync/shared build
 
       - name: Build server
         working-directory: ./server
@@ -48,7 +51,7 @@ jobs:
       - name: Lint and typecheck
         run: |
           pnpm lint
-          pnpm -w -s tsc --noEmit
+          pnpm typecheck
 
       - name: Ensure no JSON key env fallback
         run: |
