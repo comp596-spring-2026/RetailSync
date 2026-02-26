@@ -1,5 +1,5 @@
 import { createApp } from './app';
-import { connectDb } from './config/db';
+import { connectDb } from './db/connect';
 import { env } from './config/env';
 
 const start = async () => {

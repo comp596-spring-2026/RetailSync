@@ -20,12 +20,12 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import { useEffect, useState } from 'react';
 import { itemsApi } from '../api/itemsApi';
-import { useAppDispatch, useAppSelector } from '../app/hooks';
+import { useAppDispatch, useAppSelector } from '../app/store/hooks';
 import { NoAccess } from '../components/NoAccess';
 import { PermissionGate } from '../components/PermissionGate';
 import { PageHeader } from '../components/PageHeader';
 import { showSnackbar } from '../features/ui/uiSlice';
-import { hasPermission } from '../utils/permissions';
+import { hasPermission } from '../shared/utils/permissions';
 
 type Item = {
   _id: string;

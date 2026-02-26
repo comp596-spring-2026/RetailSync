@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { moduleKeys } from './modules';
+import { moduleKeys } from '../constants/modules';
 
 export const permissionSetSchema = z.object({
   view: z.boolean(),

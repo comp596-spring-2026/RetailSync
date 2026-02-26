@@ -1,7 +1,7 @@
 import { Button, Stack, Typography } from '@mui/material';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
 import GoogleIcon from '@mui/icons-material/Google';
-import { useAppDispatch } from '../app/hooks';
+import { useAppDispatch } from '../app/store/hooks';
 import { showSnackbar } from '../features/ui/uiSlice';
 import { AuthShell } from '../components/AuthShell';
 

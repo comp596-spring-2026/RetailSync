@@ -52,6 +52,24 @@ RetailSync is a TypeScript monorepo with React/Vite on the client and Express/Mo
 | Integrations | Google Sheets (service account + OAuth connect), QuickBooks settings UI |
 | Quality | Vitest test suites, Docker workflows, CI quality gates |
 
+## Frontend UX System Updates
+
+Recent UI foundation upgrades now ship in the client:
+
+- Onboarding company setup:
+  - `Timezone` uses searchable `Autocomplete`.
+  - `Currency` uses searchable `Autocomplete` with `CODE (SYMBOL) - Name` labels.
+- Reusable CRUD building blocks for module shells:
+  - `SearchableCrudTable`
+  - `CrudEntityDialog` (create/edit)
+  - `ConfirmDeleteDialog`
+- Consistent feedback pattern for async flows:
+  - `useAsyncAction` for loading + success/error toast dispatch
+  - centralized API error-code mapping in `client/src/shared/constants/errorCodes.ts`
+- Shared utility layer expanded:
+  - table pagination hook + helpers
+  - date formatter (`moment`-based) in `client/src/shared/utils/date.ts`
+
 ## External Product Dependencies
 
 | Product | Used For | Required Env |
@@ -174,6 +192,10 @@ Cloud Run uses ADC automatically. For local Sheets calls, run:
 gcloud auth application-default login
 ```
 
+Local fallback is also supported in non-production:
+
+- if `/Users/trupal/Projects/RetailSync/credentials/gcp-service-account-retailsync-run-sa.json` exists, Sheets client auth uses it automatically.
+
 ## Environment Variables
 
 ### Server (`/server/.env`)
@@ -241,6 +263,11 @@ Services:
 - `mongo` -> `27017`
 - `server` -> `4000`
 - `client` -> `8080`
+
+Notes:
+
+- No Dockerfile changes are required for the new timezone/currency UI and CRUD component system.
+- The existing Docker builds already install workspace dependencies from `pnpm-lock.yaml`, including new frontend packages like `moment`.
 
 ## Security Notes
 

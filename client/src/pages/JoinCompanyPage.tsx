@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { authApi } from '../api/authApi';
 import { companyApi } from '../api/companyApi';
-import { useAppDispatch } from '../app/hooks';
+import { useAppDispatch } from '../app/store/hooks';
 import { setAuthContext } from '../features/auth/authSlice';
 import { setCompany } from '../features/company/companySlice';
 import { showSnackbar } from '../features/ui/uiSlice';

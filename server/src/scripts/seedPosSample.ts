@@ -26,7 +26,7 @@ const run = async () => {
   }
   const companyObjectId = new mongoose.Types.ObjectId(companyId);
 
-  const filePath = path.resolve(process.cwd(), 'src/data/pos-sample.csv');
+  const filePath = path.resolve(process.cwd(), 'src/scripts/fixtures/pos-sample.csv');
   const content = fs.readFileSync(filePath, 'utf8');
   const rows = parse(content, { columns: true, skip_empty_lines: true, trim: true }) as Record<string, string>[];
 

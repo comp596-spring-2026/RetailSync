@@ -1,10 +1,10 @@
 import { combineReducers, configureStore } from '@reduxjs/toolkit';
 import storage from 'redux-persist/lib/storage';
 import { persistReducer, persistStore } from 'redux-persist';
-import authReducer from '../features/auth/authSlice';
-import companyReducer from '../features/company/companySlice';
-import rbacReducer from '../features/rbac/rbacSlice';
-import uiReducer from '../features/ui/uiSlice';
+import authReducer from '../../features/auth/authSlice';
+import companyReducer from '../../features/company/companySlice';
+import rbacReducer from '../../features/rbac/rbacSlice';
+import uiReducer from '../../features/ui/uiSlice';
 
 const rootReducer = combineReducers({
   auth: authReducer,

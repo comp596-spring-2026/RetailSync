@@ -6,16 +6,20 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
   Stack,
   Step,
   StepLabel,
   Stepper,
   Typography
 } from '@mui/material';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { posApi } from '../api/posApi';
 import { settingsApi } from '../api/settingsApi';
-import { useAppDispatch } from '../app/hooks';
+import { useAppDispatch } from '../app/store/hooks';
 import { showSnackbar } from '../features/ui/uiSlice';
 import { MatchingWizard } from './MatchingWizard';
 import { TabSelectorDialog } from './TabSelectorDialog';
@@ -81,7 +85,7 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
 
   const mappedCount = useMemo(() => Object.values(mapping).filter(Boolean).length, [mapping]);
 
-  const loadTabs = async () => {
+  const loadTabs = async (openPicker = false) => {
     try {
       setBusy(true);
       setError(null);
@@ -91,13 +95,20 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
       if (!selectedTab && result.tabs?.[0]) {
         setSelectedTab(result.tabs[0].title);
       }
-      setTabDialogOpen(true);
+      setTabDialogOpen(openPicker);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Unable to fetch spreadsheet tabs');
     } finally {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!open) return;
+    if (activeStep !== 0) return;
+    if (tabs.length > 0) return;
+    void loadTabs(false);
+  }, [open, activeStep]);
 
   const preview = async () => {
     try {
@@ -164,12 +175,45 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
     if (activeStep === 0) {
       return (
         <Stack spacing={2}>
-          <Typography variant="body2" color="text.secondary">
-            Source mode is configured to shared Google Sheets via service account.
-          </Typography>
-          <Button variant="outlined" onClick={loadTabs} disabled={busy}>
-            Select Tab
-          </Button>
+          <Alert severity="info">Source type: Google Sheets (Service Account).</Alert>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
+            <Button variant="outlined" onClick={() => void loadTabs(false)} disabled={busy}>
+              Reload Tabs
+            </Button>
+            <Button
+              variant="text"
+              onClick={() => {
+                if (tabs.length > 0) {
+                  setTabDialogOpen(true);
+                  return;
+                }
+                void loadTabs(true);
+              }}
+              disabled={busy}
+            >
+              Open Tab Picker
+            </Button>
+          </Stack>
+          <FormControl fullWidth size="small">
+            <InputLabel id="sheet-tab-select-label">Sheet Tab</InputLabel>
+            <Select
+              labelId="sheet-tab-select-label"
+              label="Sheet Tab"
+              value={selectedTab}
+              onChange={(event) => setSelectedTab(String(event.target.value))}
+            >
+              {tabs.map((tab) => (
+                <MenuItem key={tab.title} value={tab.title}>
+                  {tab.title}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {tabs.length === 0 && (
+            <Alert severity="warning">
+              No tabs found. Configure and verify your shared spreadsheet in Settings first.
+            </Alert>
+          )}
           {selectedTab ? (
             <Alert severity="info">Selected tab: {selectedTab}</Alert>
           ) : (

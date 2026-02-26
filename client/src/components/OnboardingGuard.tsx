@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAppSelector } from '../app/hooks';
+import { useAppSelector } from '../app/store/hooks';
 
 export const OnboardingGuard = () => {
   const user = useAppSelector((state) => state.auth.user);
