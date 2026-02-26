@@ -20,6 +20,9 @@ jobs:
     env:
       GCP_PROJECT_ID: lively-infinity-488304-m9
       GCP_REGION: us-west1
+      GAR_LOCATION: us-west1
+      GAR_REPOSITORY: retailsync
+      GAR_IMAGE_NAME: retailsync-api
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -80,16 +83,21 @@ jobs:
           gcloud config set project ${{ env.GCP_PROJECT_ID }}
           gcloud config set run/region ${{ env.GCP_REGION }}
 
+      - name: Configure Docker auth for Artifact Registry
+        run: |
+          gcloud auth configure-docker "${{ env.GAR_LOCATION }}-docker.pkg.dev" --quiet
+
       - name: Build and push container
         run: |
-          IMAGE="gcr.io/${{ env.GCP_PROJECT_ID }}/retailsync-api:${{ github.sha }}"
+          IMAGE="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.GAR_IMAGE_NAME }}:${{ github.sha }}"
           docker build -f server/Dockerfile -t "$IMAGE" .
           docker push "$IMAGE"
 
       - name: Deploy to Cloud Run
         run: |
+          IMAGE="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.GAR_IMAGE_NAME }}:${{ github.sha }}"
           gcloud run deploy retailsync-api \
-            --image "gcr.io/${{ env.GCP_PROJECT_ID }}/retailsync-api:${{ github.sha }}" \
+            --image "$IMAGE" \
             --region ${{ env.GCP_REGION }} \
             --platform managed \
             --service-account "retailsync-run-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
