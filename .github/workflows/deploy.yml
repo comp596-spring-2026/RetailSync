@@ -68,7 +68,7 @@ jobs:
         uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          service_account: retailsync-run-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          service_account: retailsync-ci-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com
 
       - name: Configure gcloud
         uses: google-github-actions/setup-gcloud@v2
