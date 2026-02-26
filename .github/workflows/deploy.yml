@@ -51,7 +51,7 @@ jobs:
       - name: Validate required deployment inputs
         run: |
           missing=0
-          for name in GCP_PROJECT_NUMBER FIREBASE_TOKEN WIF_PROVIDER; do
+          for name in FIREBASE_TOKEN WIF_PROVIDER; do
             if [ -z "${!name}" ]; then
               echo "Missing required Actions secret/variable: $name"
               missing=1
@@ -61,7 +61,6 @@ jobs:
             exit 1
           fi
         env:
-          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
 
