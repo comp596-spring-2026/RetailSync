@@ -2,7 +2,9 @@ import { PosDailySummaryInput, posDailyQuerySchema, posDailySummarySchema } from
 import { parse } from 'csv-parse/sync';
 import { Request, Response } from 'express';
 import XLSX from 'xlsx';
+import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { POSDailySummaryModel } from '../models/POSDailySummary';
+import { getSheetsClient } from '../integrations/google/sheets.client';
 import { fail, ok } from '../utils/apiResponse';
 
 type CsvRow = Record<string, string | undefined>;
@@ -104,6 +106,23 @@ const parseRowsWithHeader = (rows: string[][]) => {
     });
 };
 
+const parseRowsWithHeaderRow = (rows: string[][], headerRow: number) => {
+  if (rows.length < headerRow + 1) return [] as CsvRow[];
+  const headerIndex = Math.max(0, headerRow - 1);
+  const header = rows[headerIndex];
+  const body = rows.slice(headerIndex + 1);
+  const normalizedHeader = header.map((cell) => String(cell ?? '').trim());
+  return body
+    .filter((row) => row.some((cell) => String(cell ?? '').trim().length > 0))
+    .map((row) => {
+      const obj: CsvRow = {};
+      normalizedHeader.forEach((column, index) => {
+        obj[column] = String(row[index] ?? '');
+      });
+      return obj;
+    });
+};
+
 const parseCsvFileRows = (buffer: Buffer) => {
   const csv = buffer.toString('utf-8');
   return parse(csv, {
@@ -122,6 +141,53 @@ const parseXlsxRows = (buffer: Buffer) => {
     defval: '',
     raw: false
   }) as CsvRow[];
+};
+
+const getSharedSheetsSourceForCompany = async (companyId: string) => {
+  const settings = await IntegrationSettingsModel.findOne({ companyId }).lean();
+  const sharedConfig = settings?.googleSheets?.sharedConfig as
+    | {
+        spreadsheetId?: string | null;
+        sheetName?: string | null;
+        headerRow?: number | null;
+        enabled?: boolean | null;
+      }
+    | undefined;
+
+  const spreadsheetId = sharedConfig?.spreadsheetId?.trim() ?? '';
+  const sheetName = sharedConfig?.sheetName?.trim() || 'Sheet1';
+  const headerRow = Number(sharedConfig?.headerRow ?? 1);
+  const enabled = Boolean(sharedConfig?.enabled);
+
+  if (!enabled) {
+    throw new Error('Shared Sheets integration is disabled for this company');
+  }
+  if (!spreadsheetId) {
+    throw new Error('Shared Sheets integration is missing spreadsheetId');
+  }
+  if (!Number.isFinite(headerRow) || headerRow < 1) {
+    throw new Error('Shared Sheets integration has invalid headerRow');
+  }
+
+  return {
+    spreadsheetId,
+    sheetName,
+    headerRow,
+    settingsId: settings?._id?.toString() ?? null
+  };
+};
+
+const readSharedSheetRows = async (companyId: string) => {
+  const source = await getSharedSheetsSourceForCompany(companyId);
+  const sheets = getSheetsClient();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: source.spreadsheetId,
+    range: `${source.sheetName}!A:Z`
+  });
+  const rawRows = (response.data.values ?? []).map((row) =>
+    row.map((cell) => String(cell ?? ''))
+  );
+  return { source, rawRows };
 };
 
 const importRowsForCompany = async (companyId: string, rawRows: CsvRow[]) => {
@@ -247,6 +313,74 @@ export const importPosRows = async (req: Request, res: Response) => {
   }
 
   return ok(res, result.data);
+};
+
+export const previewPosImportFromSharedSheet = async (req: Request, res: Response) => {
+  if (!req.companyId) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  try {
+    const { source, rawRows } = await readSharedSheetRows(req.companyId);
+    const parsedRows = parseRowsWithHeaderRow(rawRows, source.headerRow);
+
+    return ok(res, {
+      spreadsheetId: source.spreadsheetId,
+      sheetName: source.sheetName,
+      headerRow: source.headerRow,
+      rawRowCount: rawRows.length,
+      parsedRowCount: parsedRows.length,
+      preview: rawRows.slice(0, 10)
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Shared Sheets preview failed';
+    const statusCode =
+      /permission|forbidden|insufficient|not found|access/i.test(message) ? 403 : 400;
+    return fail(res, message, statusCode);
+  }
+};
+
+export const commitPosImportFromSharedSheet = async (req: Request, res: Response) => {
+  if (!req.companyId) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  try {
+    const { source, rawRows } = await readSharedSheetRows(req.companyId);
+    const parsedRows = parseRowsWithHeaderRow(rawRows, source.headerRow);
+    if (parsedRows.length === 0) {
+      return fail(res, 'No data rows found in shared sheet', 400);
+    }
+
+    const result = await importRowsForCompany(req.companyId, parsedRows);
+    if (!result.ok) {
+      return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
+    }
+
+    if (source.settingsId) {
+      await IntegrationSettingsModel.updateOne(
+        { _id: source.settingsId },
+        {
+          $set: {
+            'googleSheets.sharedConfig.lastImportAt': new Date(),
+            'googleSheets.connected': true,
+            'googleSheets.updatedAt': new Date()
+          }
+        }
+      );
+    }
+
+    return ok(res, {
+      ...result.data,
+      spreadsheetId: source.spreadsheetId,
+      sheetName: source.sheetName
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Shared Sheets commit failed';
+    const statusCode =
+      /permission|forbidden|insufficient|not found|access/i.test(message) ? 403 : 400;
+    return fail(res, message, statusCode);
+  }
 };
 
 export const listPosDaily = async (req: Request, res: Response) => {

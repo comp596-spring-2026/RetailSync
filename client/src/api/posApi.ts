@@ -20,8 +20,10 @@ export const posApi = {
     });
   },
   importRows: (rows: string[][], hasHeader = true) => api.post('/pos/import-rows', { rows, hasHeader }),
+  previewSharedSheetImport: () => api.post('/pos/import/sheets/preview'),
+  commitSharedSheetImport: () => api.post('/pos/import/sheets/commit'),
   readSheet: (spreadsheetId: string, range: string, authMode: 'service' | 'oauth') =>
     api.get('/sheets/read', { params: { spreadsheetId, range, authMode } }),
-  getGoogleConnectUrl: () => api.get('/google/connect-url'),
+  getGoogleConnectUrl: () => api.get('/integrations/google/sheets/start-url'),
   daily: (start: string, end: string) => api.get('/pos/daily', { params: { start, end } })
 };

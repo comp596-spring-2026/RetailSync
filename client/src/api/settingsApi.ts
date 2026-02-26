@@ -15,7 +15,16 @@ export type GoogleSheetSource = {
 
 export const settingsApi = {
   get: () => api.get('/settings'),
-  getGoogleConnectUrl: () => api.get('/google/connect-url'),
+  getGoogleConnectUrl: () => api.get('/integrations/google/sheets/start-url'),
+  configureSharedSheet: (payload: {
+    spreadsheetId?: string;
+    spreadsheetUrl?: string;
+    sheetName?: string;
+    headerRow?: number;
+    columnsMap?: Record<string, string>;
+    enabled?: boolean;
+  }) => api.post('/integrations/sheets/config', payload),
+  verifySharedSheet: () => api.post('/integrations/sheets/verify'),
   setGoogleMode: (mode: GoogleSheetMode) => api.put('/settings/google-sheets/mode', { mode }),
   saveGoogleSource: (payload: GoogleSheetSource) => api.put('/settings/google-sheets/source', payload),
   testGoogleSheet: (payload: { spreadsheetId: string; range: string; authMode: GoogleSheetMode }) =>

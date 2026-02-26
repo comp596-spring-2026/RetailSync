@@ -59,7 +59,7 @@ type IntegrationSettings = {
 
 const DEFAULT_RANGE = "Sheet1!A1:Z";
 const DEFAULT_EMAIL =
-  "retialsync@lively-infinity-488304-m9.iam.gserviceaccount.com";
+  "retailsync-run-sa@lively-infinity-488304-m9.iam.gserviceaccount.com";
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   const axiosError = error as AxiosError<{ message?: string }>;

@@ -1,6 +1,13 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { importPosCsv, importPosFile, importPosRows, listPosDaily } from '../controllers/posController';
+import {
+  commitPosImportFromSharedSheet,
+  importPosCsv,
+  importPosFile,
+  importPosRows,
+  listPosDaily,
+  previewPosImportFromSharedSheet
+} from '../controllers/posController';
 import { requireAuth } from '../middleware/requireAuth';
 import { requirePermission } from '../middleware/requirePermission';
 
@@ -27,6 +34,18 @@ router.post(
   requirePermission('pos', 'create'),
   requirePermission('pos', 'import'),
   importPosRows
+);
+router.post(
+  '/import/sheets/preview',
+  requirePermission('pos', 'create'),
+  requirePermission('pos', 'import'),
+  previewPosImportFromSharedSheet
+);
+router.post(
+  '/import/sheets/commit',
+  requirePermission('pos', 'create'),
+  requirePermission('pos', 'import'),
+  commitPosImportFromSharedSheet
 );
 router.get('/daily', requirePermission('pos', 'view'), listPosDaily);
 

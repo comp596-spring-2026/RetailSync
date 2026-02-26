@@ -9,7 +9,7 @@ import { fail, ok } from "../utils/apiResponse";
 
 const DEFAULT_RANGE = "Sheet1!A1:Z";
 const SERVICE_ACCOUNT_EMAIL =
-  "retialsync@lively-infinity-488304-m9.iam.gserviceaccount.com";
+  "retailsync-run-sa@lively-infinity-488304-m9.iam.gserviceaccount.com";
 
 type GoogleOAuthSecret = {
   accessToken: string;
@@ -31,6 +31,7 @@ const toSafeSettings = (doc: any) => ({
     serviceAccountEmail: doc.googleSheets.serviceAccountEmail,
     connected: doc.googleSheets.connected,
     connectedEmail: doc.googleSheets.connectedEmail,
+    sharedConfig: doc.googleSheets.sharedConfig,
     updatedAt: doc.googleSheets.updatedAt,
     sources: doc.googleSheets.sources,
   },
@@ -46,8 +47,29 @@ const ensureSubdocs = (settings: any) => {
       serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
       connected: false,
       connectedEmail: null,
+      sharedConfig: {
+        spreadsheetId: null,
+        sheetName: "Sheet1",
+        headerRow: 1,
+        columnsMap: {},
+        enabled: false,
+        lastVerifiedAt: null,
+        lastImportAt: null,
+      },
       sources: [],
       updatedAt: new Date(),
+    };
+  }
+
+  if (!settings.googleSheets.sharedConfig) {
+    settings.googleSheets.sharedConfig = {
+      spreadsheetId: null,
+      sheetName: "Sheet1",
+      headerRow: 1,
+      columnsMap: {},
+      enabled: false,
+      lastVerifiedAt: null,
+      lastImportAt: null,
     };
   }
 
@@ -81,6 +103,15 @@ const getOrCreateSettings = async (req: Request) => {
           connected: false,
           connectedEmail: null,
           serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
+          sharedConfig: {
+            spreadsheetId: null,
+            sheetName: "Sheet1",
+            headerRow: 1,
+            columnsMap: {},
+            enabled: false,
+            lastVerifiedAt: null,
+            lastImportAt: null,
+          },
           sources: [],
           updatedAt: new Date(),
         },

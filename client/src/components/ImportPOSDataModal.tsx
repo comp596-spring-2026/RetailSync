@@ -46,7 +46,7 @@ type SheetResponse = {
 
 const DEFAULT_RANGE = "Sheet1!A1:Z";
 const SERVICE_ACCOUNT_EMAIL =
-  "retailsync@lively-infinity-488304-m9.iam.gserviceaccount.com";
+  "retailsync-run-sa@lively-infinity-488304-m9.iam.gserviceaccount.com";
 
 const buildRowId = (row: string[], index: number) =>
   `${index}-${row.join("||")}`;
