@@ -398,6 +398,37 @@ export const disconnectGoogle = async (req: Request, res: Response) => {
   }
 };
 
+export const resetGoogleSheetsIntegration = async (req: Request, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) {
+    return fail(res, "Company onboarding required", 403);
+  }
+
+  try {
+    const settings = ensureSubdocs(await getOrCreateSettings(req));
+    settings.googleSheets.connected = false;
+    settings.googleSheets.connectedEmail = null;
+    if (settings.googleSheets.sharedConfig) {
+      settings.googleSheets.sharedConfig.enabled = false;
+      settings.googleSheets.sharedConfig.spreadsheetId = null;
+      settings.googleSheets.sharedConfig.sheetName = "Sheet1";
+      settings.googleSheets.sharedConfig.headerRow = 1;
+      settings.googleSheets.sharedConfig.columnsMap = {};
+      settings.googleSheets.sharedConfig.lastMapping = null;
+      settings.googleSheets.sharedConfig.lastVerifiedAt = null;
+      settings.googleSheets.sharedConfig.lastImportAt = null;
+    }
+    settings.googleSheets.sources = [];
+    settings.googleSheets.updatedAt = new Date();
+    await settings.save();
+    return ok(res, toSafeSettings(settings));
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to reset Google Sheets integration";
+    return fail(res, message, 400);
+  }
+};
+
 export const disconnectQuickbooks = async (req: Request, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) {

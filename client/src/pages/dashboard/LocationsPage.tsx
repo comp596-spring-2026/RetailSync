@@ -24,7 +24,7 @@ import { useAppDispatch, useAppSelector } from '../../app/store/hooks';
 import { PermissionGate } from '../../app/guards';
 import { LoadingEmptyStateWrapper, NoAccess, PageHeader } from '../../components';
 import { showSnackbar } from '../../slices/ui/uiSlice';
-import { hasPermission } from '../../lib/utils/permissions';
+import { hasPermission } from '../../utils/permissions';
 
 type LocationItem = {
   _id: string;

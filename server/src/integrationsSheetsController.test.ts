@@ -11,7 +11,7 @@ vi.mock('./models/IntegrationSettings', () => ({
 }));
 
 vi.mock('./integrations/google/sheets.client', () => ({
-  getSheetsClient: () => ({
+  getSheetsClientForCompany: async () => ({
     spreadsheets: {
       get: (...args: unknown[]) => getMock(...args),
       values: {

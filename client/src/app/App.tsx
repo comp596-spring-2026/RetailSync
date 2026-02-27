@@ -16,7 +16,7 @@ import { ItemsPage } from "../pages/dashboard/ItemsPage";
 import { LocationsPage } from "../pages/dashboard/LocationsPage";
 import { InventoryPage } from "../pages/dashboard/InventoryPage";
 import { SettingsPage } from "../pages/dashboard/SettingsPage";
-import { OperationsHubPage } from "../pages/dashboard/OperationsHubPage";
+import { InventoryWorkspacePage } from "../pages/dashboard/InventoryWorkspacePage";
 import { ProcurementHubPage } from "../pages/dashboard/ProcurementHubPage";
 import { AccessHubPage } from "../pages/dashboard/AccessHubPage";
 import { PlaygroundPage } from "../pages/dashboard/PlaygroundPage";
@@ -56,7 +56,7 @@ const App = () => {
           <Route index element={<DashboardHomePage />} />
           <Route path="roles" element={<RolesPage />} />
           <Route path="users" element={<UsersPage />} />
-          <Route path="operations" element={<OperationsHubPage />} />
+          <Route path="operations" element={<InventoryWorkspacePage />} />
           <Route path="procurement" element={<ProcurementHubPage />} />
           <Route path="access" element={<AccessHubPage />} />
           <Route path="pos" element={<PosPage />} />

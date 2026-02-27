@@ -19,7 +19,7 @@ router.post('/sync-sheets', async (req: Request, res: Response) => {
       dryRun
     });
 
-    return res.json({ ok: result.ok, ...result });
+    return res.json({ ...result });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('[cron] /api/cron/sync-sheets failed', error);

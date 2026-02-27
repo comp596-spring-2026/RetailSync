@@ -10,7 +10,6 @@ import {
   Paper,
   Select,
   Stack,
-  Switch,
   Table,
   TableBody,
   TableCell,
@@ -18,7 +17,8 @@ import {
   TableHead,
   TableRow,
   Tooltip,
-  Typography
+  Typography,
+  TextField
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -59,11 +59,15 @@ const getConfidence = (score: number) => {
 
 const TARGET_LABELS: Record<string, string> = {
   date: 'Date',
-  sku: 'SKU',
-  qty: 'Quantity',
-  price: 'Price',
-  name: 'Name',
-  barcode: 'Barcode'
+  highTax: 'High Tax',
+  lowTax: 'Low Tax',
+  saleTax: 'Sales Tax',
+  gas: 'Gas',
+  lottery: 'Lottery Sold',
+  creditCard: 'Credit Card',
+  lotteryPayout: 'Lottery Payout (Cash)',
+  cashExpenses: 'Cash Expenses',
+  notes: 'Notes / Description'
 };
 
 export const MatchingWizard = ({
@@ -80,10 +84,47 @@ export const MatchingWizard = ({
   const resolvedMapping = useMemo(() => {
     const next = { ...mapping };
     for (const s of suggestions) {
-      if (!next[s.header] && s.score >= 0.5) next[s.header] = s.suggestion;
+      if (!next[s.header] && s.score >= 0.75) next[s.header] = s.suggestion;
     }
     return next;
   }, [mapping, suggestions]);
+
+  const requiredTargets = useMemo(
+    () => [
+      'date',
+      'highTax',
+      'lowTax',
+      'saleTax',
+      'gas',
+      'lottery',
+      'creditCard',
+      'lotteryPayout',
+      'cashExpenses'
+    ],
+    []
+  );
+
+  const optionalTargets = useMemo(() => ['notes'], []);
+
+  const mappedTargets = useMemo(
+    () => new Set(Object.values(resolvedMapping).filter(Boolean)),
+    [resolvedMapping]
+  );
+
+  const missingRequired = useMemo(
+    () => requiredTargets.filter((t) => !mappedTargets.has(t)),
+    [requiredTargets, mappedTargets]
+  );
+
+  const calculatedFields = useMemo(
+    () => [
+      { key: 'day', label: 'Day' },
+      { key: 'totalSales', label: 'Total Sales (highTax + lowTax)' },
+      { key: 'cash', label: 'Cash (totalSales - creditCard)' },
+      { key: 'clTotal', label: 'CL Total (creditCard + lottery)' }
+    ],
+    []
+  );
 
   const mappedCount = useMemo(
     () => Object.values(resolvedMapping).filter(Boolean).length,
@@ -154,6 +195,64 @@ export const MatchingWizard = ({
         </Stack>
       </Paper>
 
+      {/* Required/optional + calculated */}
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack spacing={1.25}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }} justifyContent="space-between">
+            <Typography variant="subtitle2">Required fields</Typography>
+            <Chip
+              size="small"
+              variant="outlined"
+              color={missingRequired.length === 0 ? 'success' : 'warning'}
+              label={
+                missingRequired.length === 0
+                  ? 'All required fields mapped'
+                  : `Missing: ${missingRequired.map((t) => TARGET_LABELS[t] ?? t).join(', ')}`
+              }
+            />
+          </Stack>
+
+          <Stack direction="row" spacing={1} flexWrap="wrap">
+            {requiredTargets.map((t) => (
+              <Chip
+                key={t}
+                size="small"
+                variant={mappedTargets.has(t) ? 'filled' : 'outlined'}
+                color={mappedTargets.has(t) ? 'success' : 'default'}
+                label={TARGET_LABELS[t] ?? t}
+              />
+            ))}
+          </Stack>
+
+          <Typography variant="subtitle2" sx={{ mt: 0.5 }}>Optional fields</Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap">
+            {optionalTargets.map((t) => (
+              <Chip
+                key={t}
+                size="small"
+                variant={mappedTargets.has(t) ? 'filled' : 'outlined'}
+                color={mappedTargets.has(t) ? 'success' : 'default'}
+                label={TARGET_LABELS[t] ?? t}
+              />
+            ))}
+            <Chip size="small" variant="outlined" label="Custom fields allowed" />
+          </Stack>
+
+          <Typography variant="subtitle2" sx={{ mt: 0.5 }}>Calculated by RetailSync</Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap">
+            {calculatedFields.map((f) => (
+              <Chip
+                key={f.key}
+                size="small"
+                variant="outlined"
+                color={missingRequired.length === 0 ? 'success' : 'default'}
+                label={missingRequired.length === 0 ? f.label : `${f.label} (needs required fields)`}
+              />
+            ))}
+          </Stack>
+        </Stack>
+      </Paper>
+
       {/* Mapping table */}
       <TableContainer component={Paper} variant="outlined">
         <Table size="small">
@@ -165,7 +264,6 @@ export const MatchingWizard = ({
               <TableCell sx={{ fontWeight: 600, width: '5%', textAlign: 'center' }} />
               <TableCell sx={{ fontWeight: 600, width: '28%' }}>Map To</TableCell>
               <TableCell sx={{ fontWeight: 600, width: '18%' }}>Sample</TableCell>
-              <TableCell sx={{ fontWeight: 600, width: '10%', textAlign: 'center' }}>Trim</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -173,7 +271,6 @@ export const MatchingWizard = ({
               const target = resolvedMapping[header] ?? '';
               const suggestion = suggestions.find((s) => s.header === header);
               const confidence = suggestion ? getConfidence(suggestion.score) : null;
-              const transform = target ? (transforms[target] as Record<string, unknown> | undefined) : undefined;
               const isMapped = !!target;
               const hasError = flatErrors.has(header);
               const sampleVal = previewRows[0]?.[idx] ?? '';
@@ -230,7 +327,10 @@ export const MatchingWizard = ({
                         <MenuItem value="">
                           <em>Unmapped</em>
                         </MenuItem>
-                        {targetFields.map((field) => {
+                        <MenuItem disabled>
+                          <Typography variant="caption" color="text.secondary">Required</Typography>
+                        </MenuItem>
+                        {requiredTargets.map((field) => {
                           const taken = usedTargets.has(field) && target !== field;
                           return (
                             <MenuItem key={field} value={field} disabled={taken}>
@@ -243,8 +343,38 @@ export const MatchingWizard = ({
                             </MenuItem>
                           );
                         })}
+                        <MenuItem disabled>
+                          <Typography variant="caption" color="text.secondary">Optional</Typography>
+                        </MenuItem>
+                        {optionalTargets.map((field) => {
+                          const taken = usedTargets.has(field) && target !== field;
+                          return (
+                            <MenuItem key={field} value={field} disabled={taken}>
+                              {TARGET_LABELS[field] ?? field}
+                              {taken && (
+                                <Typography variant="caption" color="text.disabled" sx={{ ml: 1 }}>
+                                  (in use)
+                                </Typography>
+                              )}
+                            </MenuItem>
+                          );
+                        })}
+                        <MenuItem value="custom:">
+                          <em>Custom field…</em>
+                        </MenuItem>
                       </Select>
                     </FormControl>
+                    {target.startsWith('custom:') && (
+                      <TextField
+                        size="small"
+                        margin="dense"
+                        fullWidth
+                        label="Custom field name"
+                        placeholder="e.g. timestamp"
+                        value={target.replace(/^custom:/, '')}
+                        onChange={(e) => onChangeMapping({ ...resolvedMapping, [header]: `custom:${e.target.value}` })}
+                      />
+                    )}
                   </TableCell>
                   <TableCell>
                     <Tooltip title={sampleVal || '(empty)'}>
@@ -263,22 +393,6 @@ export const MatchingWizard = ({
                         {sampleVal || '—'}
                       </Typography>
                     </Tooltip>
-                  </TableCell>
-                  <TableCell sx={{ textAlign: 'center' }}>
-                    {isMapped ? (
-                      <Switch
-                        size="small"
-                        checked={Boolean(transform?.trim)}
-                        onChange={(e) =>
-                          onChangeTransforms({
-                            ...transforms,
-                            [target]: { ...(transform ?? {}), trim: e.target.checked }
-                          })
-                        }
-                      />
-                    ) : (
-                      <Typography variant="caption" color="text.disabled">—</Typography>
-                    )}
                   </TableCell>
                 </TableRow>
               );

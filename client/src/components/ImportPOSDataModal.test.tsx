@@ -40,7 +40,7 @@ const createStore = () =>
   });
 
 const renderModal = async () => {
-  const module = await import('./ImportPOSDataModal');
+  const module = await import('./pos/ImportPOSDataModal');
   const Component = module.ImportPOSDataModal;
   return render(
     <Provider store={createStore()}>
@@ -76,7 +76,7 @@ describe('ImportPOSDataModal', () => {
 
   it('renders three source options', async () => {
     await renderModal();
-    expect(screen.getByText('File Import')).toBeInTheDocument();
+    expect(await screen.findByText('File Import')).toBeInTheDocument();
     expect(screen.getByText('Google Sheets')).toBeInTheDocument();
     expect(screen.getByText('POS / Database')).toBeInTheDocument();
   });
@@ -87,25 +87,18 @@ describe('ImportPOSDataModal', () => {
     expect(chips.length).toBe(1);
   });
 
-  it('allows selecting Google Sheets and shows auth options after Next', async () => {
+  it('allows selecting Google Sheets and shows auth options', async () => {
     await renderModal();
     fireEvent.click(screen.getByText('Google Sheets'));
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
-    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+    expect(await screen.findByText('Sign in with Google')).toBeInTheDocument();
     expect(screen.getByText('Share with Service Account')).toBeInTheDocument();
   });
 
-  it('allows selecting File Import and shows upload after Next', async () => {
+  it('allows selecting File Import and shows upload', async () => {
     await renderModal();
     fireEvent.click(screen.getByText('File Import'));
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
-    expect(screen.getByText('Click to choose a file')).toBeInTheDocument();
-  });
-
-  it('disables Next when POS/DB (coming soon) is selected', async () => {
-    await renderModal();
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(await screen.findByText('Click to choose a file')).toBeInTheDocument();
   });
 });

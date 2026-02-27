@@ -5,11 +5,11 @@ import { ModuleKey } from '@retailsync/shared';
 import { useMemo, useState } from 'react';
 import { PermissionGate } from '../../app/guards';
 import { ConfirmDeleteDialog, CrudEntityDialog, CrudField, NoAccess, PageHeader, SearchableCrudTable } from '../../components';
-import { moduleActionsMap } from '../../lib/constants/modules';
+import { moduleActionsMap } from '../../constants/modules';
 import { useAppSelector } from '../../app/store/hooks';
-import { hasPermission } from '../../lib/utils/permissions';
-import { formatDate } from '../../lib/utils/date';
-import { useAsyncAction } from '../../lib/hooks/useAsyncAction';
+import { hasPermission } from '../../utils/permissions';
+import { formatDate } from '../../utils/date';
+import { useAsyncAction } from '../../hooks/useAsyncAction';
 
 type ModuleShellProps = {
   module: ModuleKey;

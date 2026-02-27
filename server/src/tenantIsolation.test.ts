@@ -26,30 +26,30 @@ describe('tenant isolation', () => {
     const b = await registerAndCreateCompany(app, 'B');
 
     const createA = await request(app)
-      .post('/api/items')
+      .post('/api/inventory/items')
       .set('Authorization', `Bearer ${a.accessToken}`)
       .send({ upc: '111', modifier: '', description: 'Item A', department: 'grocery', price: 5.5 })
       .expect(201);
 
     const createB = await request(app)
-      .post('/api/items')
+      .post('/api/inventory/items')
       .set('Authorization', `Bearer ${b.accessToken}`)
       .send({ upc: '222', modifier: '', description: 'Item B', department: 'grocery', price: 7.5 })
       .expect(201);
 
-    const listA = await request(app).get('/api/items').set('Authorization', `Bearer ${a.accessToken}`).expect(200);
+    const listA = await request(app).get('/api/inventory/items').set('Authorization', `Bearer ${a.accessToken}`).expect(200);
 
     expect(listA.body.data).toHaveLength(1);
     expect(listA.body.data[0]._id).toBe(createA.body.data._id);
 
-    await request(app)
-      .put(`/api/items/${createB.body.data._id}`)
+      await request(app)
+        .put(`/api/inventory/items/${createB.body.data._id}`)
       .set('Authorization', `Bearer ${a.accessToken}`)
       .send({ description: 'Illegal update' })
       .expect(404);
 
-    await request(app)
-      .delete(`/api/items/${createB.body.data._id}`)
+      await request(app)
+        .delete(`/api/inventory/items/${createB.body.data._id}`)
       .set('Authorization', `Bearer ${a.accessToken}`)
       .expect(404);
   }, TEST_TIMEOUT_MS);
@@ -60,19 +60,19 @@ describe('tenant isolation', () => {
 
     const createTenantData = async (token: string, codePrefix: string, itemCode: string, description: string) => {
       await request(app)
-        .post('/api/locations')
+        .post('/api/inventory/locations')
         .set('Authorization', `Bearer ${token}`)
         .send({ code: `${codePrefix}-FROM`, type: 'shelf', label: `${codePrefix} From` })
         .expect(201);
 
       await request(app)
-        .post('/api/locations')
+        .post('/api/inventory/locations')
         .set('Authorization', `Bearer ${token}`)
         .send({ code: `${codePrefix}-TO`, type: 'shelf', label: `${codePrefix} To` })
         .expect(201);
 
       const item = await request(app)
-        .post('/api/items')
+        .post('/api/inventory/items')
         .set('Authorization', `Bearer ${token}`)
         .send({ upc: itemCode, modifier: '', description, department: 'grocery', price: 10 })
         .expect(201);

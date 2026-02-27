@@ -35,10 +35,10 @@ import {
   firstOfMonthISO,
   todayISO
 } from '../../components';
-import { hasPermission } from '../../lib/utils/permissions';
-import { useTablePagination } from '../../lib/hooks/useTablePagination';
-import { formatDate } from '../../lib/utils/date';
-import { TABLE_PAGE_SIZE_OPTIONS } from '../../lib/constants/pagination';
+import { hasPermission } from '../../utils/permissions';
+import { useTablePagination } from '../../hooks/useTablePagination';
+import { formatDate } from '../../utils/date';
+import { TABLE_PAGE_SIZE_OPTIONS } from '../../constants/pagination';
 import { showSnackbar } from '../../slices/ui/uiSlice';
 
 type PosRow = {

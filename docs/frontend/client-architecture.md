@@ -18,6 +18,10 @@
   - module catalog, roles list
 - `uiSlice`
   - snackbar notifications
+- `itemsSlice`
+  - cached item list, loading/error state, lastLoadedAt (used by inventory workspace)
+- `locationsSlice`
+  - cached locations, loading/error state (used by inventory workspace + layout viewer)
 
 ## Token Flow
 
@@ -48,9 +52,7 @@ sequenceDiagram
 Main dashboard pages currently:
 - `/dashboard/pos`
 - `/dashboard/reports`
-- `/dashboard/items`
-- `/dashboard/locations`
-- `/dashboard/inventory`
+- `/dashboard/operations` (Inventory workspace: items, locations, layout)
 - `/dashboard/users`
 - `/dashboard/roles`
 

@@ -51,16 +51,16 @@ Handles Google OAuth callback and redirects client with `accessToken`.
 
 ## Items, Locations, Inventory
 
-- `GET /items`
-- `POST /items`
-- `PUT /items/:id`
-- `DELETE /items/:id`
-- `POST /items/import` (multipart `file`)
+- `GET /inventory/items`
+- `POST /inventory/items`
+- `PUT /inventory/items/:id`
+- `DELETE /inventory/items/:id`
+- `POST /inventory/items/import` (multipart `file`)
 
-- `GET /locations`
-- `POST /locations`
-- `PUT /locations/:id`
-- `DELETE /locations/:id`
+- `GET /inventory/locations`
+- `POST /inventory/locations`
+- `PUT /inventory/locations/:id`
+- `DELETE /inventory/locations/:id`
 
 - `POST /inventory/move`
 - `GET /inventory/location/:code`
@@ -107,11 +107,12 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A["Connect URL"] --> B["Google OAuth consent"]
-  B --> C["Callback token storage"]
-  C --> D["Read Sheet data"]
-  D --> E["Preview rows"]
-  E --> F["Import rows to POS"]
+  A["Import POS Data modal"] --> B["Select source (File / Google Sheets / POS DB)"]
+  B --> C["If Google Sheets: Connect (OAuth or Service Account)"]
+  C --> D["List tabs (/integrations/sheets/tabs or Drive files)"]
+  D --> E["Preview sheet (/pos/import/sheets/preview)"]
+  E --> F["Match columns (/pos/import/sheets/match)"]
+  F --> G["Commit import (/pos/import/sheets/commit)"]
 ```
 
 ## Permission Matrix by Endpoint (Current)
@@ -122,9 +123,9 @@ flowchart TD
   B[/pos/daily/] --> P2[pos:view]
   C[/reports/monthly-summary/] --> P3[reports:view]
 
-  D[/items/import/] --> P4[items:create + items:import]
-  E[/items CRUD/] --> P5[items:view/create/edit/delete]
-  F[/locations CRUD/] --> P6[locations:view/create/edit/delete]
+  D[/inventory/items/import/] --> P4[items:create + items:import]
+  E[/inventory/items CRUD/] --> P5[items:view/create/edit/delete]
+  F[/inventory/locations CRUD/] --> P6[locations:view/create/edit/delete]
   G[/inventory/move/] --> P7[inventory:edit + inventory:move]
   H[/inventory/location/:code/] --> P8[inventory:view]
 ```

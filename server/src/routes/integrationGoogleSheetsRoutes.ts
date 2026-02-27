@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   getGoogleSheetsConnectUrl,
   googleSheetsCallback,
+  listOAuthSpreadsheets,
   startGoogleSheetsConnect
 } from '../controllers/googleController';
 import { requireAuth } from '../middleware/requireAuth';
@@ -14,6 +15,12 @@ router.get(
   requireAuth,
   requirePermission('rolesSettings', 'view'),
   getGoogleSheetsConnectUrl
+);
+router.get(
+  '/files',
+  requireAuth,
+  requirePermission('rolesSettings', 'view'),
+  listOAuthSpreadsheets
 );
 router.get(
   '/start',

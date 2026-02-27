@@ -59,16 +59,16 @@ Recent UI foundation upgrades now ship in the client:
 - Onboarding company setup:
   - `Timezone` uses searchable `Autocomplete`.
   - `Currency` uses searchable `Autocomplete` with `CODE (SYMBOL) - Name` labels.
-- Reusable CRUD building blocks for module shells:
+-- Reusable CRUD building blocks for module shells:
   - `SearchableCrudTable`
   - `CrudEntityDialog` (create/edit)
   - `ConfirmDeleteDialog`
 - Consistent feedback pattern for async flows:
   - `useAsyncAction` for loading + success/error toast dispatch
-  - centralized API error-code mapping in `client/src/shared/constants/errorCodes.ts`
+  - centralized API error-code mapping in `client/src/constants/errorCodes.ts`
 - Shared utility layer expanded:
   - table pagination hook + helpers
-  - date formatter (`moment`-based) in `client/src/shared/utils/date.ts`
+  - date formatter (`moment`-based) in `client/src/utils/date.ts`
 
 ## External Product Dependencies
 
@@ -129,11 +129,12 @@ Notes:
 
 ```mermaid
 flowchart TD
-  A["POS Import Modal"] --> B["Source (service-account sheet)"]
-  B --> C["Select Tab (/api/integrations/sheets/tabs)"]
-  C --> D["Preview (/api/pos/import/sheets/preview)"]
-  D --> E["Match (/api/pos/import/sheets/match)"]
-  E --> F["Commit (/api/pos/import/sheets/commit)"]
+  A["Import POS Data modal"] --> B["Select source (File / Google Sheets / POS DB)"]
+  B --> C["If Google Sheets: Connect (OAuth or Service Account)"]
+  C --> D["Sheet/Tabs: list + select (/api/integrations/sheets/tabs or Drive files)"]
+  D --> E["Preview sample (/api/pos/import/sheets/preview)"]
+  E --> F["Match columns (/api/pos/import/sheets/match)"]
+  F --> G["Commit import (/api/pos/import/sheets/commit)"]
 ```
 
 ## Monorepo Structure

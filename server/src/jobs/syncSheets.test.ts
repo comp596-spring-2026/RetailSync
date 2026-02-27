@@ -88,7 +88,8 @@ describe('runSheetsSync', () => {
             spreadsheetId: 'sheet-1',
             sheetName: 'Sheet1',
             headerRow: 1,
-            enabled: true
+            enabled: true,
+            columnsMap: { Date: 'date' }
           }
         }
       }
@@ -135,7 +136,8 @@ describe('runSheetsSync', () => {
             spreadsheetId: 'sheet-1',
             sheetName: 'Sheet1',
             headerRow: 1,
-            enabled: true
+            enabled: true,
+            columnsMap: { Date: 'date' }
           }
         }
       }

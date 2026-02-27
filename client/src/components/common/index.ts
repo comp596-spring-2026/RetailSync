@@ -5,3 +5,5 @@ export { DateRangeControlPanel, firstOfMonthISO, todayISO, monthToRange, dateToM
 export type { DateRange } from './DateRangeControlPanel';
 export { SearchableCrudTable } from './SearchableCrudTable';
 export type { CrudColumn } from './SearchableCrudTable';
+export { SectionHeader } from './SectionHeader';
+export { ActionCard } from './ActionCard';

@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { ImportJobModel } from '../models/ImportJob';
 import { POSDailySummaryModel } from '../models/POSDailySummary';
-import { getSheetsClient } from '../integrations/google/sheets.client';
+import { getSheetsClientForCompany } from '../integrations/google/sheets.client';
 import { fail, ok } from '../utils/apiResponse';
 import { suggestMappings } from '../utils/matching';
 import { buildRange, escapeSheetName, normalizeRows } from '../utils/sheetsRange';
@@ -15,6 +15,8 @@ type CsvRow = Record<string, string | undefined>;
 
 const previewRequestSchema = z.object({
   source: z.enum(['service', 'oauth', 'file']).default('service'),
+  spreadsheetId: z.string().min(5).optional(),
+  headerRow: z.coerce.number().int().min(1).default(1),
   tab: z.string().min(1).optional(),
   maxRows: z.coerce.number().int().min(1).max(100).default(20)
 });
@@ -23,6 +25,8 @@ const matchMappingSchema = z.object({
   mapping: z.record(z.string(), z.string()).default({}),
   transforms: z.record(z.string(), z.any()).optional(),
   validateSample: z.boolean().optional(),
+  spreadsheetId: z.string().min(5).optional(),
+  headerRow: z.coerce.number().int().min(1).optional(),
   tab: z.string().min(1).optional()
 });
 
@@ -32,7 +36,18 @@ const commitImportSchema = z.object({
   options: z.record(z.string(), z.any()).optional()
 });
 
-const TARGET_FIELDS = ['date', 'sku', 'qty', 'price', 'name', 'barcode'];
+const TARGET_FIELDS = [
+  'date',
+  'highTax',
+  'lowTax',
+  'saleTax',
+  'gas',
+  'lottery',
+  'creditCard',
+  'lotteryPayout',
+  'cashExpenses',
+  'notes'
+];
 
 const toNumber = (value: string | undefined) => {
   if (!value) return 0;
@@ -187,6 +202,8 @@ const getSharedSheetsSourceForCompany = async (companyId: string) => {
         sheetName?: string | null;
         headerRow?: number | null;
         enabled?: boolean | null;
+        columnsMap?: unknown;
+        lastMapping?: unknown;
       }
     | undefined;
 
@@ -219,7 +236,8 @@ export const readSharedSheetRows = async (
   opts?: { tab?: string; maxRows?: number }
 ) => {
   const source = await getSharedSheetsSourceForCompany(companyId);
-  const sheets = getSheetsClient();
+  const authMode = source.mode === 'oauth' ? 'oauth' : 'service_account';
+  const sheets = await getSheetsClientForCompany(authMode, companyId);
   const selectedTab = opts?.tab?.trim() || source.sheetName;
 
   const metadata = await sheets.spreadsheets.get({
@@ -245,6 +263,51 @@ export const readSharedSheetRows = async (
   const rawRows = normalizeRows(response.data.values as unknown[][] | undefined);
   return {
     source: { ...source, sheetName: selectedTab },
+    rawRows,
+    rowCount: rawRows.length
+  };
+};
+
+const readSheetRowsDirect = async (
+  companyId: string,
+  opts: { spreadsheetId: string; tab?: string; headerRow: number; maxRows?: number; authMode: 'oauth' | 'service_account' }
+) => {
+  const spreadsheetId = opts.spreadsheetId.trim();
+  const headerRow = Number(opts.headerRow ?? 1);
+  if (!spreadsheetId) {
+    throw new Error('spreadsheet_id_missing');
+  }
+  if (!Number.isFinite(headerRow) || headerRow < 1) {
+    throw new Error('invalid_header_row');
+  }
+
+  const sheets = await getSheetsClientForCompany(opts.authMode, companyId);
+  const metadata = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets(properties(title))'
+  });
+  const tabs = (metadata.data.sheets ?? [])
+    .map((sheet) => sheet.properties?.title)
+    .filter((tab): tab is string => Boolean(tab));
+
+  const selectedTab = (opts.tab?.trim() || tabs[0] || '').trim();
+  if (!selectedTab) {
+    throw new Error('no_tabs_found');
+  }
+  if (!tabs.includes(selectedTab)) {
+    throw new Error('tab_not_found');
+  }
+
+  const hasMaxRows = opts.maxRows !== undefined;
+  const maxRows = hasMaxRows ? Math.min(Math.max(Number(opts.maxRows), 1), 100) : undefined;
+  const range = maxRows
+    ? buildRange(selectedTab, headerRow, maxRows)
+    : `${escapeSheetName(selectedTab)}!A${headerRow}:Z`;
+
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
+  const rawRows = normalizeRows(response.data.values as unknown[][] | undefined);
+  return {
+    source: { spreadsheetId, sheetName: selectedTab, headerRow, settingsId: null, mode: opts.authMode === 'oauth' ? 'oauth' : 'service_account' },
     rawRows,
     rowCount: rawRows.length
   };
@@ -438,11 +501,38 @@ export const previewPosImportFromSharedSheet = async (req: Request, res: Respons
     return fail(res, 'Validation failed', 422, parsed.error.flatten());
   }
 
-  if (parsed.data.source !== 'service') {
-    return fail(res, 'Only service source is enabled in current deployment', 400);
-  }
-
   try {
+    const spreadsheetIdOverride = parsed.data.spreadsheetId?.trim() ?? '';
+    const headerRow = Number(parsed.data.headerRow ?? 1);
+    if (spreadsheetIdOverride) {
+      const { source: sharedSource, rawRows, rowCount } = await readSheetRowsDirect(req.companyId, {
+        spreadsheetId: spreadsheetIdOverride,
+        tab: parsed.data.tab,
+        headerRow,
+        authMode: parsed.data.source === 'oauth' ? 'oauth' : 'service_account',
+        maxRows: parsed.data.maxRows
+      });
+
+      const header = rawRows[0] ?? [];
+      const sampleRows = rawRows.slice(1, 11);
+      const suggestions = suggestMappings(header, sampleRows, TARGET_FIELDS).map((entry, index) => ({
+        col: String.fromCharCode(65 + index),
+        header: entry.sourceHeader,
+        suggestion: entry.targetField,
+        score: entry.score
+      }));
+
+      return ok(res, {
+        spreadsheetId: sharedSource.spreadsheetId,
+        sheetName: sharedSource.sheetName,
+        headerRow: sharedSource.headerRow,
+        header,
+        sampleRows,
+        rowCount,
+        suggestions
+      });
+    }
+
     const { source, rawRows, rowCount } = await readSharedSheetRows(req.companyId, {
       tab: parsed.data.tab,
       maxRows: parsed.data.maxRows
@@ -483,6 +573,34 @@ export const matchPosImportMapping = async (req: Request, res: Response) => {
   }
 
   try {
+    const spreadsheetIdOverride = parsed.data.spreadsheetId?.trim() ?? '';
+    const headerRowOverride = parsed.data.headerRow;
+    if (spreadsheetIdOverride) {
+      const { source, rawRows } = await readSheetRowsDirect(req.companyId, {
+        spreadsheetId: spreadsheetIdOverride,
+        tab: parsed.data.tab,
+        headerRow: Number(headerRowOverride ?? 1),
+        authMode: 'oauth',
+        maxRows: 20
+      });
+      const header = rawRows[0] ?? [];
+      const sampleRows = rawRows.slice(1, 11);
+      const { rowErrors, correctedPreview } = applyMappingAndTransforms(
+        header,
+        sampleRows,
+        parsed.data.mapping,
+        parsed.data.transforms
+      );
+
+      return ok(res, {
+        spreadsheetId: source.spreadsheetId,
+        sheetName: source.sheetName,
+        valid: rowErrors.length === 0,
+        rowErrors,
+        correctedPreview
+      });
+    }
+
     const { source, rawRows } = await readSharedSheetRows(req.companyId, {
       tab: parsed.data.tab,
       maxRows: 20
@@ -521,31 +639,101 @@ export const commitPosImportFromSharedSheet = async (req: Request, res: Response
 
   try {
     const selectedTab = (parsedCommit.data.options?.tab as string) || undefined;
-    const { source, rawRows } = await readSharedSheetRows(req.companyId, {
-      tab: selectedTab
-    });
+    const selectedSpreadsheetId = String(parsedCommit.data.options?.spreadsheetId ?? '').trim() || undefined;
+    const selectedHeaderRowRaw = parsedCommit.data.options?.headerRow;
+    const selectedHeaderRow = selectedHeaderRowRaw !== undefined ? Number(selectedHeaderRowRaw) : undefined;
+
+    const readResult = selectedSpreadsheetId
+      ? await readSheetRowsDirect(req.companyId, {
+          spreadsheetId: selectedSpreadsheetId,
+          tab: selectedTab,
+          headerRow: Number(selectedHeaderRow ?? 1),
+          authMode: 'oauth'
+        })
+      : await readSharedSheetRows(req.companyId, { tab: selectedTab });
+
+    const { source, rawRows } = readResult;
     const parsedRows = parseRowsWithHeaderRow(rawRows, source.headerRow);
     if (parsedRows.length === 0) {
       return fail(res, 'No data rows found in shared sheet', 400);
     }
 
-    const result = await importRowsForCompany(req.companyId, parsedRows, 'google_sheets');
+    const normalizeStringRecord = (value: unknown): Record<string, string> => {
+      if (!value) return {};
+      if (value instanceof Map) return Object.fromEntries(Array.from(value.entries()).map(([k, v]) => [String(k), String(v)]));
+      if (typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
+      }
+      return {};
+    };
+
+    const isEmptyRecord = (obj: Record<string, unknown>) => Object.keys(obj).length === 0;
+
+    let effectiveMapping = parsedCommit.data.mapping;
+    let effectiveTransforms = parsedCommit.data.transforms ?? {};
+
+    if (isEmptyRecord(effectiveMapping) && source.settingsId) {
+      const settings = await IntegrationSettingsModel.findById(source.settingsId).lean();
+      const sharedConfig = settings?.googleSheets?.sharedConfig as any;
+      const columnsMap = normalizeStringRecord(sharedConfig?.columnsMap);
+      const lastMap = normalizeStringRecord(sharedConfig?.lastMapping?.columnsMap);
+      effectiveMapping = !isEmptyRecord(columnsMap) ? columnsMap : lastMap;
+      if (isEmptyRecord(effectiveTransforms)) {
+        effectiveTransforms =
+          (sharedConfig?.lastMapping?.transformations as Record<string, unknown> | undefined) ?? {};
+      }
+    }
+
+    if (isEmptyRecord(effectiveMapping)) {
+      return fail(res, 'No saved field mapping found. Map columns first, then import.', 400);
+    }
+
+    const mappedRows = parsedRows.map((row) => {
+      const out: Record<string, string | undefined> = { ...row };
+      for (const [sourceHeader, targetField] of Object.entries(effectiveMapping)) {
+        if (!targetField) continue;
+        const normalizedTargetField = targetField.startsWith('custom:') ? targetField.replace(/^custom:/, '').trim() : targetField;
+        if (!normalizedTargetField) continue;
+        const raw = row[sourceHeader];
+        if (raw === undefined) continue;
+        let value = String((raw ?? '')).trim();
+        out[normalizedTargetField] = value;
+      }
+      return out;
+    });
+
+    const result = await importRowsForCompany(req.companyId, mappedRows, 'google_sheets');
     if (!result.ok) {
       return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
     }
 
-    if (source.settingsId) {
+    const settingsIdToUpdate = source.settingsId
+      ? source.settingsId
+      : (await IntegrationSettingsModel.findOne({ companyId: req.companyId }).select('_id').lean())?._id?.toString() ?? null;
+
+    if (settingsIdToUpdate) {
+      const setSheetFromCommit = selectedSpreadsheetId
+        ? {
+            'googleSheets.sharedConfig.spreadsheetId': selectedSpreadsheetId,
+            'googleSheets.sharedConfig.sheetName': source.sheetName,
+            'googleSheets.sharedConfig.headerRow': source.headerRow,
+            'googleSheets.sharedConfig.enabled': true
+          }
+        : {};
+
       await IntegrationSettingsModel.updateOne(
-        { _id: source.settingsId },
+        { _id: settingsIdToUpdate },
         {
           $set: {
             'googleSheets.sharedConfig.lastImportAt': new Date(),
+            'googleSheets.sharedConfig.columnsMap': effectiveMapping,
             'googleSheets.sharedConfig.lastMapping': {
-              columnsMap: parsedCommit.data.mapping,
-              transformations: parsedCommit.data.transforms ?? {},
+              columnsMap: effectiveMapping,
+              transformations: effectiveTransforms,
               createdAt: new Date(),
               createdBy: req.user.id
             },
+            ...setSheetFromCommit,
             'googleSheets.connected': true,
             'googleSheets.updatedAt': new Date(),
             lastImportSource: 'google_sheets',
@@ -558,10 +746,10 @@ export const commitPosImportFromSharedSheet = async (req: Request, res: Response
     const importJob = await ImportJobModel.create({
       companyId: req.companyId,
       createdBy: req.user.id,
-      source: 'service',
+      source: source.mode === 'oauth' ? 'oauth' : 'service',
       status: 'queued',
-      mapping: parsedCommit.data.mapping,
-      transforms: parsedCommit.data.transforms ?? {},
+      mapping: effectiveMapping,
+      transforms: effectiveTransforms,
       options: parsedCommit.data.options ?? {}
     });
 

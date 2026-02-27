@@ -22,6 +22,10 @@ export class SettingsApi {
     return api.get('/integrations/google/sheets/start-url');
   }
 
+  listOAuthSpreadsheets() {
+    return api.get('/integrations/google/sheets/files');
+  }
+
   listTabs() {
     return api.get('/integrations/sheets/tabs');
   }
@@ -55,6 +59,10 @@ export class SettingsApi {
 
   disconnectGoogle() {
     return api.post('/settings/disconnect/google');
+  }
+
+  resetGoogleSheets() {
+    return api.post('/settings/google-sheets/reset');
   }
 
   setQuickbooks(payload: {

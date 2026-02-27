@@ -38,7 +38,6 @@ import {
   Typography
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import TableChartIcon from '@mui/icons-material/TableChart';
 import StorageIcon from '@mui/icons-material/Storage';
 import GoogleIcon from '@mui/icons-material/Google';
 import ShareIcon from '@mui/icons-material/Share';
@@ -59,6 +58,7 @@ type SourceType = 'file' | 'google_sheets' | 'pos_db';
 type GoogleAuthMode = 'oauth' | 'service_account';
 type Suggestion = { col: string; header: string; suggestion: string; score: number };
 type TabInfo = { title: string; rowCount: number | null; columnCount: number | null };
+type OAuthSheetFile = { id: string; name: string; modifiedTime: string | null; owner?: string | null; ownerEmail?: string | null };
 
 type ImportPOSDataModalProps = {
   open: boolean;
@@ -68,11 +68,47 @@ type ImportPOSDataModalProps = {
 
 const ACCEPTED_EXTENSIONS = ['csv', 'xlsx', 'xls'];
 const MAX_FILE_SIZE_MB = 10;
-const TARGET_FIELDS = ['date', 'sku', 'qty', 'price', 'name', 'barcode'];
+const TARGET_FIELDS = [
+  'date',
+  'highTax',
+  'lowTax',
+  'saleTax',
+  'gas',
+  'lottery',
+  'creditCard',
+  'lotteryPayout',
+  'cashExpenses',
+  'notes'
+];
+
+const REQUIRED_TARGET_FIELDS = [
+  'date',
+  'highTax',
+  'lowTax',
+  'saleTax',
+  'gas',
+  'lottery',
+  'creditCard',
+  'lotteryPayout',
+  'cashExpenses'
+];
 
 const SOURCE_OPTIONS: Array<{ id: SourceType; label: string; desc: string; icon: React.ReactNode; comingSoon: boolean }> = [
   { id: 'file', label: 'File Import', desc: 'Upload CSV or Excel', icon: <CloudUploadIcon sx={{ fontSize: 32 }} />, comingSoon: false },
-  { id: 'google_sheets', label: 'Google Sheets', desc: 'Connect via OAuth or share', icon: <TableChartIcon sx={{ fontSize: 32, color: '#0F9D58' }} />, comingSoon: false },
+  {
+    id: 'google_sheets',
+    label: 'Google Sheets',
+    desc: 'Connect via OAuth or share',
+    icon: (
+      <Box
+        component="img"
+        src="/google-sheets-icon.svg"
+        alt="Google Sheets"
+        sx={{ width: 32, height: 32 }}
+      />
+    ),
+    comingSoon: false
+  },
   { id: 'pos_db', label: 'POS / Database', desc: 'Direct integration', icon: <StorageIcon sx={{ fontSize: 32, color: '#5C6BC0' }} />, comingSoon: true }
 ];
 
@@ -100,14 +136,21 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
   const dispatch = useAppDispatch();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [phase, setPhase] = useState<'source' | 'connect' | 'sheets' | 'upload' | 'match' | 'confirm'>('source');
+  const [phase, setPhase] = useState<'source' | 'connect' | 'pick_sheet' | 'sheets' | 'upload' | 'match' | 'confirm'>('source');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedSource, setSelectedSource] = useState<SourceType | null>(null);
   const [googleAuthMode, setGoogleAuthMode] = useState<GoogleAuthMode | null>(null);
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleConnectedEmail, setGoogleConnectedEmail] = useState<string | null>(null);
+  const [savedMapping, setSavedMapping] = useState<Record<string, string>>({});
+  const [savedTransforms, setSavedTransforms] = useState<Record<string, unknown>>({});
 
   const [spreadsheetInput, setSpreadsheetInput] = useState('');
+  const [oauthFiles, setOauthFiles] = useState<OAuthSheetFile[]>([]);
+  const [oauthSearch, setOauthSearch] = useState('');
+  const [selectedOAuthSheet, setSelectedOAuthSheet] = useState<OAuthSheetFile | null>(null);
   const [tabs, setTabs] = useState<TabInfo[]>([]);
   const [selectedTab, setSelectedTab] = useState('');
   const [serviceAccountEmail, setServiceAccountEmail] = useState('');
@@ -132,7 +175,14 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
     setError(null);
     setSelectedSource(null);
     setGoogleAuthMode(null);
+    setGoogleConnected(false);
+    setGoogleConnectedEmail(null);
+    setSavedMapping({});
+    setSavedTransforms({});
     setSpreadsheetInput('');
+    setOauthFiles([]);
+    setOauthSearch('');
+    setSelectedOAuthSheet(null);
     setTabs([]);
     setSelectedTab('');
     setServiceAccountEmail('');
@@ -158,6 +208,14 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
       const gs = res.data?.data?.googleSheets;
       if (gs?.serviceAccountEmail) setServiceAccountEmail(gs.serviceAccountEmail);
       if (gs?.sharedConfig?.spreadsheetId) setSpreadsheetInput(gs.sharedConfig.spreadsheetId);
+      setGoogleConnected(Boolean(gs?.connected));
+      setGoogleConnectedEmail(gs?.connectedEmail ?? null);
+      const columnsMap =
+        (gs?.sharedConfig?.columnsMap && Object.keys(gs.sharedConfig.columnsMap).length > 0
+          ? gs.sharedConfig.columnsMap
+          : gs?.sharedConfig?.lastMapping?.columnsMap) ?? {};
+      setSavedMapping(columnsMap);
+      setSavedTransforms(gs?.sharedConfig?.lastMapping?.transformations ?? {});
     } catch { /* best-effort */ }
   };
 
@@ -166,7 +224,7 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
       setBusy(true);
       setError(null);
       const res = await settingsApi.listTabs();
-      const loaded = (res.data.data as { tabs: TabInfo[] }).tabs ?? [];
+      const loaded = ((res.data.data as any)?.tabs ?? (res.data.data as any)?.tabs) as TabInfo[] ?? [];
       setTabs(loaded);
       if (loaded.length === 0) setError('No tabs found. Verify sheet ID and sharing permissions.');
       return loaded;
@@ -198,6 +256,21 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
     }
   };
 
+  const loadOAuthFiles = async () => {
+    try {
+      setBusy(true);
+      setError(null);
+      const res = await settingsApi.listOAuthSpreadsheets();
+      const files = (res.data?.data?.files ?? []) as OAuthSheetFile[];
+      setOauthFiles(files);
+      if (files.length === 0) setError('No spreadsheets found for this Google account.');
+    } catch (err: any) {
+      setError(err?.response?.data?.message ?? 'Unable to list spreadsheets');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const startOAuth = async () => {
     try {
       setBusy(true);
@@ -218,13 +291,18 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
     try {
       setPreviewLoading(true);
       setError(null);
-      const res = await posApi.previewSheet({ source: 'service', tab, maxRows: 20 });
+      const source = googleAuthMode === 'oauth' ? 'oauth' : 'service';
+      const spreadsheetId = googleAuthMode === 'oauth' ? (selectedOAuthSheet?.id ?? '') : undefined;
+      const res = await posApi.previewSheet({ source, tab, maxRows: 20, spreadsheetId: spreadsheetId || undefined, headerRow: 1 });
       const data = res.data.data as { header: string[]; sampleRows: string[][]; suggestions: Suggestion[] };
       if (!data.header?.length) { setError('No columns found. Check the header row.'); return; }
       setHeaders(data.header);
       setSampleRows(data.sampleRows ?? []);
       setSuggestions(data.suggestions ?? []);
-      setMapping(Object.fromEntries((data.suggestions ?? []).map(s => [s.header, s.suggestion])));
+      const suggested = Object.fromEntries((data.suggestions ?? []).map(s => [s.header, s.suggestion]));
+      const merged = { ...suggested, ...(Object.keys(savedMapping).length > 0 ? savedMapping : {}) };
+      setMapping(merged);
+      if (Object.keys(savedTransforms).length > 0) setTransforms(savedTransforms);
       setValidated(false);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Preview failed.');
@@ -239,16 +317,23 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
   };
 
   useEffect(() => {
-    if (open && selectedSource === 'google_sheets' && googleAuthMode) void loadSettings();
-  }, [open, selectedSource, googleAuthMode]);
+    if (open && selectedSource === 'google_sheets') void loadSettings();
+  }, [open, selectedSource]);
 
   const validateMapping = async () => {
     if (mappedCount === 0) { setError('Map at least one column.'); return; }
+    const mappedTargets = new Set(Object.values(mapping).filter(Boolean));
+    const missingRequired = REQUIRED_TARGET_FIELDS.filter((t) => !mappedTargets.has(t));
+    if (missingRequired.length > 0) {
+      setError(`Missing required fields: ${missingRequired.join(', ')}`);
+      return;
+    }
     try {
       setBusy(true);
       setError(null);
       setRowErrors([]);
-      const res = await posApi.validateMapping({ mapping, transforms, validateSample: true, tab: selectedTab });
+      const spreadsheetId = googleAuthMode === 'oauth' ? (selectedOAuthSheet?.id ?? '') : undefined;
+      const res = await posApi.validateMapping({ mapping, transforms, validateSample: true, tab: selectedTab, spreadsheetId: spreadsheetId || undefined, headerRow: 1 });
       const data = res.data.data as { valid: boolean; rowErrors: Array<{ rowIndex: number; errors: Array<{ col: string; message: string }> }> };
       setRowErrors(data.rowErrors ?? []);
       if (!data.valid) {
@@ -270,7 +355,8 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
     try {
       setBusy(true);
       setError(null);
-      await posApi.commitImport({ mapping, transforms, options: { tab: selectedTab } });
+      const spreadsheetId = googleAuthMode === 'oauth' ? (selectedOAuthSheet?.id ?? '') : undefined;
+      await posApi.commitImport({ mapping, transforms, options: { tab: selectedTab, spreadsheetId: spreadsheetId || undefined, headerRow: 1 } });
       dispatch(showSnackbar({ message: 'POS data imported from Google Sheets', severity: 'success' }));
       await onImported?.();
       close();
@@ -330,15 +416,47 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
   const selectAuthMode = (mode: GoogleAuthMode) => {
     setGoogleAuthMode(mode);
     setError(null);
-    if (mode === 'oauth') { void startOAuth(); return; }
-    setPhase('sheets');
+    void (async () => {
+      try {
+        await settingsApi.setGoogleMode(mode === 'oauth' ? 'oauth' : 'service_account');
+      } catch {
+        // best-effort; endpoints can still infer mode from server settings
+      }
+
+      if (mode === 'oauth' && !googleConnected) {
+        await startOAuth();
+        return;
+      }
+
+      if (mode === 'oauth') {
+        setPhase('pick_sheet');
+        await loadOAuthFiles();
+        return;
+      }
+
+      setPhase('sheets');
+    })();
   };
+
+  const filteredOAuthFiles = useMemo(() => {
+    const q = oauthSearch.trim().toLowerCase();
+    const base = q ? oauthFiles.filter((f) => f.name.toLowerCase().includes(q)) : oauthFiles;
+    const lastUsedId = spreadsheetInput ? extractSpreadsheetId(spreadsheetInput) : '';
+    if (!lastUsedId) return base;
+    return [...base].sort((a, b) => {
+      if (a.id === lastUsedId) return -1;
+      if (b.id === lastUsedId) return 1;
+      return 0;
+    });
+  }, [oauthFiles, oauthSearch, spreadsheetInput]);
 
   /* ── Step indicators ── */
   const stepsForStepper = useMemo(() => {
     if (!selectedSource) return ['Source'];
     if (selectedSource === 'file') return ['Source', 'Upload', 'Confirm'];
-    return ['Source', 'Connect', 'Sheet & Tab', 'Match', 'Confirm'];
+    return googleAuthMode === 'oauth'
+      ? ['Source', 'Connect', 'Pick Sheet', 'Sheet & Tab', 'Match', 'Confirm']
+      : ['Source', 'Connect', 'Sheet & Tab', 'Match', 'Confirm'];
   }, [selectedSource]);
 
   const stepIndex = useMemo(() => {
@@ -346,12 +464,13 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
       source: 0,
       connect: selectedSource === 'file' ? 1 : 1,
       upload: 1,
-      sheets: 2,
+      pick_sheet: 2,
+      sheets: googleAuthMode === 'oauth' ? 3 : 2,
       match: selectedSource === 'file' ? -1 : 3,
       confirm: selectedSource === 'file' ? 2 : 4
     };
     return map[phase] ?? 0;
-  }, [phase, selectedSource]);
+  }, [phase, selectedSource, googleAuthMode]);
 
   /* ── Renderers ── */
 
@@ -444,28 +563,60 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
           </Box>
         )}
 
-        {/* Spreadsheet ID input */}
-        <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
-          <TextField
-            label="Spreadsheet ID or URL"
-            placeholder="Paste ID or full URL"
-            value={spreadsheetInput}
-            onChange={e => setSpreadsheetInput(e.target.value)}
-            fullWidth
-            size="small"
-            sx={{ mb: 1 }}
-          />
-          <Button
-            variant="contained"
-            size="small"
-            fullWidth
-            onClick={saveSheetAndLoadTabs}
-            disabled={busy || !spreadsheetInput.trim()}
-            startIcon={busy ? <CircularProgress size={14} color="inherit" /> : undefined}
-          >
-            {busy ? 'Loading...' : 'Load Tabs'}
-          </Button>
-        </Box>
+        {/* Sheet selection (Shared) */}
+        {googleAuthMode !== 'oauth' && (
+          <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+            <TextField
+              label="Spreadsheet ID or URL"
+              placeholder="Paste ID or full URL"
+              value={spreadsheetInput}
+              onChange={e => setSpreadsheetInput(e.target.value)}
+              fullWidth
+              size="small"
+              sx={{ mb: 1 }}
+            />
+            <Button
+              variant="contained"
+              size="small"
+              fullWidth
+              onClick={saveSheetAndLoadTabs}
+              disabled={busy || !spreadsheetInput.trim()}
+              startIcon={busy ? <CircularProgress size={14} color="inherit" /> : undefined}
+            >
+              {busy ? 'Loading...' : 'Load Tabs'}
+            </Button>
+          </Box>
+        )}
+
+        {/* Sheet selection (OAuth) */}
+        {googleAuthMode === 'oauth' && (
+          <Box sx={{ p: 1.25, borderBottom: 1, borderColor: 'divider' }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+              <Typography variant="caption" color="text.secondary">
+                Selected sheet:
+              </Typography>
+              <Button size="small" variant="text" onClick={() => { setSelectedTab(''); setTabs([]); setHeaders([]); setSampleRows([]); setPhase('pick_sheet'); }} disabled={busy}>
+                Change
+              </Button>
+            </Stack>
+            <Typography variant="body2" fontWeight={600} sx={{ mt: 0.5 }} noWrap title={selectedOAuthSheet?.name ?? ''}>
+              {selectedOAuthSheet?.name ?? '—'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {selectedOAuthSheet?.id ? `ID: ${selectedOAuthSheet.id.slice(0, 10)}…` : ''}
+            </Typography>
+            <Button
+              variant="contained"
+              size="small"
+              fullWidth
+              sx={{ mt: 1 }}
+              onClick={() => void loadTabs()}
+              disabled={busy || !selectedOAuthSheet?.id}
+            >
+              Load Tabs
+            </Button>
+          </Box>
+        )}
 
         {/* Tab list */}
         <Box sx={{ flex: 1, overflow: 'auto' }}>
@@ -633,6 +784,66 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
     switch (phase) {
       case 'source': return renderSourcePhase();
       case 'connect': return renderConnectPhase();
+      case 'pick_sheet':
+        return (
+          <Stack spacing={2}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography variant="body2" color="text.secondary">Select a spreadsheet from your Google Drive.</Typography>
+              <Button size="small" variant="outlined" onClick={() => void loadOAuthFiles()} disabled={busy} startIcon={<RefreshIcon />}>
+                Refresh
+              </Button>
+            </Stack>
+            <TextField
+              size="small"
+              label="Search spreadsheets"
+              value={oauthSearch}
+              onChange={(e) => setOauthSearch(e.target.value)}
+              fullWidth
+            />
+            <Paper variant="outlined" sx={{ maxHeight: 420, overflow: 'auto' }}>
+              <List dense disablePadding>
+                {filteredOAuthFiles.map((f) => (
+                  <ListItemButton
+                    key={f.id}
+                    selected={selectedOAuthSheet?.id === f.id}
+                    onClick={() => {
+                      setSelectedOAuthSheet(f);
+                      setPhase('sheets');
+                      void loadTabs();
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 32 }}>
+                      <Box
+                        component="img"
+                        src="/google-sheets-icon.svg"
+                        alt="Google Sheets"
+                        sx={{
+                          width: 18,
+                          height: 18,
+                          opacity: selectedOAuthSheet?.id === f.id ? 1 : 0.7
+                        }}
+                      />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={f.name}
+                      secondary={f.modifiedTime ? new Date(f.modifiedTime).toLocaleString() : undefined}
+                      primaryTypographyProps={{ variant: 'body2', fontWeight: selectedOAuthSheet?.id === f.id ? 600 : 400, noWrap: true }}
+                      secondaryTypographyProps={{ variant: 'caption' }}
+                    />
+                  </ListItemButton>
+                ))}
+                {filteredOAuthFiles.length === 0 && (
+                  <Box sx={{ p: 2, textAlign: 'center' }}>
+                    <Typography variant="caption" color="text.secondary">No spreadsheets found</Typography>
+                  </Box>
+                )}
+              </List>
+            </Paper>
+            <Stack direction="row" justifyContent="flex-end" spacing={1}>
+              <Button variant="outlined" onClick={() => setPhase('connect')}>Back</Button>
+            </Stack>
+          </Stack>
+        );
       case 'sheets': return renderSheetsPhase();
       case 'upload': return renderUploadPhase();
       case 'match': return renderMatchPhase();

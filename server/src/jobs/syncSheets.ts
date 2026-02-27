@@ -74,6 +74,17 @@ const releaseLock = async () => {
   );
 };
 
+const normalizeStringRecord = (value: unknown): Record<string, string> => {
+  if (!value) return {};
+  if (value instanceof Map) return Object.fromEntries(Array.from(value.entries()).map(([k, v]) => [String(k), String(v)]));
+  if (typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
+  }
+  return {};
+};
+
+const isEmptyRecord = (obj: Record<string, unknown>) => Object.keys(obj).length === 0;
+
 export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArgs): Promise<SheetsSyncResult> => {
   const lockAcquired = await acquireLock();
   if (!lockAcquired) {
@@ -150,6 +161,22 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
           continue;
         }
 
+        const sharedConfig = (settings as any)?.googleSheets?.sharedConfig;
+        const columnsMap = normalizeStringRecord(sharedConfig?.columnsMap);
+        const lastMap = normalizeStringRecord(sharedConfig?.lastMapping?.columnsMap);
+        const effectiveMapping = !isEmptyRecord(columnsMap) ? columnsMap : lastMap;
+        const effectiveTransforms =
+          ((sharedConfig?.lastMapping?.transformations as Record<string, unknown> | undefined) ?? {});
+
+        if (isEmptyRecord(effectiveMapping)) {
+          result.ok = true;
+          result.skipped = true;
+          result.reason = 'No saved field mapping found';
+          skipped += 1;
+          companies.push(result);
+          continue;
+        }
+
         if (dryRun) {
           result.ok = true;
           result.skipped = true;
@@ -160,7 +187,19 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
           continue;
         }
 
-        const importResult = await importRowsForCompany(companyId, parsedRows, 'google_sheets');
+        const mappedRows = parsedRows.map((row) => {
+          const out: Record<string, string | undefined> = { ...row };
+          for (const [sourceHeader, targetField] of Object.entries(effectiveMapping)) {
+            if (!targetField) continue;
+            const raw = row[sourceHeader];
+            if (raw === undefined) continue;
+            let value = String((raw ?? '')).trim();
+            out[targetField] = value;
+          }
+          return out;
+        });
+
+        const importResult = await importRowsForCompany(companyId, mappedRows, 'google_sheets');
         if (!importResult.ok) {
           result.ok = false;
           result.reason = importResult.error?.message ?? 'Validation failed';

@@ -25,7 +25,7 @@ export class PosApi {
     return api.post('/pos/import/sheets/preview');
   }
 
-  previewSheet(payload: { source?: 'service' | 'oauth' | 'file'; tab?: string; maxRows?: number }) {
+  previewSheet(payload: { source?: 'service' | 'oauth' | 'file'; tab?: string; maxRows?: number; spreadsheetId?: string; headerRow?: number }) {
     return api.post('/pos/import/sheets/preview', payload);
   }
 
@@ -34,6 +34,8 @@ export class PosApi {
     transforms?: Record<string, unknown>;
     validateSample?: boolean;
     tab?: string;
+    spreadsheetId?: string;
+    headerRow?: number;
   }) {
     return api.post('/pos/import/sheets/match', payload);
   }

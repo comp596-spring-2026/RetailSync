@@ -22,7 +22,7 @@ import { rbacApi, userApi } from '../../api';
 import { useAppDispatch, useAppSelector } from '../../app/store/hooks';
 import { showSnackbar } from '../../slices/ui/uiSlice';
 import { LoadingEmptyStateWrapper, NoAccess, PageHeader } from '../../components';
-import { hasPermission } from '../../lib/utils/permissions';
+import { hasPermission } from '../../utils/permissions';
 
 type UserItem = {
   _id: string;

@@ -24,6 +24,7 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import GroupIcon from '@mui/icons-material/Group';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import TuneIcon from '@mui/icons-material/Tune';
+import InventoryIcon from '@mui/icons-material/Inventory';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -33,7 +34,7 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { authApi } from '../../api';
 import { clearCompany } from '../../slices/company/companySlice';
 import { logout } from '../../slices/auth/authSlice';
-import { hasPermission } from '../../lib/utils/permissions';
+import { hasPermission } from '../../utils/permissions';
 import { LogoHorizontal } from '../../components';
 import { useMemo, useState } from 'react';
 
@@ -112,7 +113,7 @@ export const DashboardLayout = () => {
     ...(hasPermission(permissions, 'items', 'view') ||
     hasPermission(permissions, 'inventory', 'view') ||
     hasPermission(permissions, 'locations', 'view')
-      ? [{ label: 'Operations', path: '/dashboard/operations', icon: <TuneIcon fontSize="small" /> }]
+      ? [{ label: 'Inventory', path: '/dashboard/operations', icon: <InventoryIcon fontSize="small" /> }]
       : []),
     ...(hasPermission(permissions, 'invoices', 'view') || hasPermission(permissions, 'suppliers', 'view')
       ? [{ label: 'Procurement', path: '/dashboard/procurement', icon: <ReceiptLongIcon fontSize="small" /> }]
