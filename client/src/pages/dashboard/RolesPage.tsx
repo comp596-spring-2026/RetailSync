@@ -25,7 +25,7 @@ import { useAppDispatch, useAppSelector } from '../../app/store/hooks';
 import { setRoles } from '../../slices/rbac/rbacSlice';
 import { showSnackbar } from '../../slices/ui/uiSlice';
 import { LoadingEmptyStateWrapper, NoAccess, PageHeader } from '../../components';
-import { hasPermission } from '../../lib/utils/permissions';
+import { hasPermission } from '../../utils/permissions';
 
 type LocalPermission = PermissionsMap;
 

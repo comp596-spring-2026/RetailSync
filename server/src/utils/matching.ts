@@ -10,7 +10,24 @@ const HEADER_SYNONYMS: Record<string, string[]> = {
   price: ['price', 'unit price', 'amount', 'cost', 'value'],
   date: ['date', 'txn date', 'transaction date', 'day', 'posted date'],
   name: ['name', 'item', 'item name', 'product', 'description'],
-  barcode: ['barcode', 'bar code', 'upc', 'ean']
+  barcode: ['barcode', 'bar code', 'upc', 'ean'],
+
+  // POS daily summary fields
+  highTax: ['high tax', 'hi tax', 'hightax', 'tax high', 'taxable high', 'high taxable'],
+  lowTax: ['low tax', 'lo tax', 'lowtax', 'tax low', 'taxable low', 'low taxable'],
+  saleTax: ['sale tax', 'sales tax', 'saletax', 'tax', 'gst', 'vat'],
+  gas: ['gas', 'fuel', 'gas sales', 'fuel sales'],
+  lottery: ['lottery', 'lottery sold', 'lottery sales', 'lotto', 'lotto sold'],
+  creditCard: ['credit card', 'creditcard', 'cc', 'cards', 'card'],
+  lotteryPayout: [
+    'lottery payout',
+    'lottery payout cash',
+    'lotto payout',
+    'payout',
+    'payout cash'
+  ],
+  cashExpenses: ['cash expenses', 'cash expense', 'expenses', 'expense', 'paid out', 'payouts'],
+  notes: ['notes', 'note', 'description', 'memo', 'cash expense description', 'description for cash expenses']
 };
 
 const normalizeToken = (value: string) =>
@@ -86,7 +103,20 @@ const scoreHeaderForField = (header: string, sampleCells: string[], targetField:
 
   let typeBoost = 0;
   if (normalizedTarget === 'date' && isDateColumn(sampleCells)) typeBoost = 0.25;
-  if ((normalizedTarget === 'qty' || normalizedTarget === 'price') && isNumericColumn(sampleCells)) {
+
+  const numericTargets = new Set([
+    'qty',
+    'price',
+    'hightax',
+    'lowtax',
+    'saletax',
+    'gas',
+    'lottery',
+    'creditcard',
+    'lotterypayout',
+    'cashexpenses'
+  ]);
+  if (numericTargets.has(normalizedTarget) && isNumericColumn(sampleCells)) {
     typeBoost = 0.2;
   }
 

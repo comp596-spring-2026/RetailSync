@@ -5,12 +5,16 @@ import authReducer from '../../slices/auth/authSlice';
 import companyReducer from '../../slices/company/companySlice';
 import rbacReducer from '../../slices/rbac/rbacSlice';
 import uiReducer from '../../slices/ui/uiSlice';
+import itemsReducer from '../../slices/items/itemsSlice';
+import locationsReducer from '../../slices/locations/locationsSlice';
 
 const rootReducer = combineReducers({
   auth: authReducer,
   company: companyReducer,
   rbac: rbacReducer,
-  ui: uiReducer
+  ui: uiReducer,
+  items: itemsReducer,
+  locations: locationsReducer
 });
 
 const persistConfig = {

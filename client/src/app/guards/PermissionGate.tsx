@@ -1,7 +1,7 @@
 import { ModuleKey } from '@retailsync/shared';
 import { ReactElement, cloneElement } from 'react';
 import { useAppSelector } from '../store/hooks';
-import { hasPermission } from '../../lib/utils/permissions';
+import { hasPermission } from '../../utils/permissions';
 
 type PermissionGateProps = {
   module: ModuleKey;

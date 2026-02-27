@@ -6,6 +6,7 @@ import {
   disconnectGoogle,
   disconnectQuickbooks,
   getSettings,
+  resetGoogleSheetsIntegration,
   setGoogleMode,
   setQuickbooksSettings,
   testGoogleSheetAccess,
@@ -26,5 +27,6 @@ router.put('/google-sheets/source', upsertGoogleSource);
 router.put('/quickbooks', setQuickbooksSettings);
 router.post('/disconnect/google', disconnectGoogle);
 router.post('/disconnect/quickbooks', disconnectQuickbooks);
+router.post('/google-sheets/reset', resetGoogleSheetsIntegration);
 
 export default router;

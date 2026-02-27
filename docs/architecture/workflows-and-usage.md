@@ -120,7 +120,12 @@ All import endpoints require `req.companyId` and permissions `pos:create` and `p
 ## 6. Items, locations, inventory
 
 - **Items**: CRUD + CSV import; all scoped by `companyId`.  
+  - `GET/POST /api/inventory/items`
+  - `PUT/DELETE /api/inventory/items/:id`
+  - `POST /api/inventory/items/import`
 - **Locations**: CRUD by `companyId`.  
+  - `GET/POST /api/inventory/locations`
+  - `PUT/DELETE /api/inventory/locations/:id`
 - **Inventory**: Event-sourced.  
   - `POST /api/inventory/move` — creates an immutable ledger entry (itemId, from/to location codes, qty, notes).  
   - `GET /api/inventory/location/:code` — aggregate view of current quantity at that location for the company.  

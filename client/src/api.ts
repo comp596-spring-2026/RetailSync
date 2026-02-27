@@ -5,9 +5,7 @@
 export { api } from './api/client';
 export { authApi } from './api/auth';
 export { companyApi } from './api/company';
-export { inventoryApi } from './api/inventory';
-export { itemsApi } from './api/items';
-export { locationsApi } from './api/locations';
+export { itemsApi, locationsApi } from './api/inventory';
 export { posApi } from './api/pos';
 export { rbacApi } from './api/rbac';
 export { reportsApi } from './api/reports';

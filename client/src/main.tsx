@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './index.css';
 import { AppSnackbar } from './components';
 import { AppProviders } from './app/providers/AppProviders';
 import { AppRoutes } from './app/routes';

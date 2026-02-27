@@ -18,7 +18,8 @@ const posDailySummarySchema = new Schema(
     cash: { type: Number, required: true, default: 0 },
     cashPayout: { type: Number, required: true, default: 0 },
     cashExpenses: { type: Number, required: true, default: 0 },
-    notes: { type: String, default: '' }
+    notes: { type: String, default: '' },
+    source: { type: String, enum: ['file', 'google_sheets', 'manual'], default: 'manual' }
   },
   { timestamps: true }
 );

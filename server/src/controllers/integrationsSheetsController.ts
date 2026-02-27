@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { fail, ok } from '../utils/apiResponse';
-import { getSheetsClient } from '../integrations/google/sheets.client';
+import { getSheetsClientForCompany } from '../integrations/google/sheets.client';
 
 const SERVICE_ACCOUNT_EMAIL =
   'retailsync-run-sa@lively-infinity-488304-m9.iam.gserviceaccount.com';
@@ -12,7 +12,7 @@ const sharedConfigSchema = z.object({
   spreadsheetUrl: z.string().url().optional(),
   sheetName: z.string().min(1).default('Sheet1'),
   headerRow: z.coerce.number().int().min(1).default(1),
-  columnsMap: z.record(z.string(), z.string()).default({}),
+  columnsMap: z.record(z.string(), z.string()).optional(),
   enabled: z.boolean().default(true)
 });
 
@@ -116,7 +116,6 @@ export const upsertSharedSheetsConfig = async (req: Request, res: Response) => {
     updatedAt: new Date()
   }) as any;
 
-  googleSheets.mode = 'service_account';
   googleSheets.serviceAccountEmail =
     googleSheets.serviceAccountEmail || SERVICE_ACCOUNT_EMAIL;
   googleSheets.sharedConfig = {
@@ -124,7 +123,7 @@ export const upsertSharedSheetsConfig = async (req: Request, res: Response) => {
     spreadsheetId,
     sheetName: parsed.data.sheetName,
     headerRow: parsed.data.headerRow,
-    columnsMap: parsed.data.columnsMap,
+    columnsMap: parsed.data.columnsMap ?? (googleSheets.sharedConfig as any)?.columnsMap ?? {},
     enabled: parsed.data.enabled,
     shareStatus: 'unknown',
     lastVerifiedAt: null
@@ -179,7 +178,8 @@ export const listSpreadsheetTabs = async (req: Request, res: Response) => {
   }
 
   try {
-    const sheets = getSheetsClient();
+    const authMode = googleSheets.mode === 'oauth' ? 'oauth' : 'service_account';
+    const sheets = await getSheetsClientForCompany(authMode, companyId);
     const response = await sheets.spreadsheets.get({
       spreadsheetId,
       fields:
@@ -254,7 +254,8 @@ export const verifySharedSheetsConfig = async (req: Request, res: Response) => {
   }
 
   try {
-    const sheets = getSheetsClient();
+    const authMode = googleSheets.mode === 'oauth' ? 'oauth' : 'service_account';
+    const sheets = await getSheetsClientForCompany(authMode, companyId);
     await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${sheetName}!A1:A1`

@@ -7,55 +7,36 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
+  Collapse,
   Divider,
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Select,
+  Link,
   Stack,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from "@mui/material";
 import SettingsSuggestIcon from "@mui/icons-material/SettingsSuggest";
-import LinkIcon from "@mui/icons-material/Link";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import SyncAltIcon from "@mui/icons-material/SyncAlt";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import GoogleIcon from "@mui/icons-material/Google";
-import TableChartIcon from "@mui/icons-material/TableChart";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
 import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AxiosError } from "axios";
-import { NoAccess, PageHeader } from '../../components';
-import { settingsApi, type GoogleSheetMode } from '../../api';
-import { useAppDispatch, useAppSelector } from '../../app/store/hooks';
-import { showSnackbar } from '../../slices/ui/uiSlice';
-import { hasPermission } from '../../lib/utils/permissions';
+import { NoAccess, PageHeader, ImportPOSDataModal } from "../../components";
+import {
+  GoogleSheetsIntegrationCard,
+  GoogleSheetsSettings,
+} from "../../components/settings/googleSheets/GoogleSheetsIntegrationCard";
+import { settingsApi, type GoogleSheetMode } from "../../api";
+import { useAppDispatch, useAppSelector } from "../../app/store/hooks";
+import { showSnackbar } from "../../slices/ui/uiSlice";
+import { hasPermission } from "../../utils/permissions";
+import { getAppErrorMessage } from "../../constants/errorCodes";
 
 type IntegrationSettings = {
-  googleSheets: {
-    mode: GoogleSheetMode;
-    serviceAccountEmail: string;
-    connected: boolean;
-    connectedEmail: string | null;
-    sources: Array<{
-      sourceId: string;
-      name: string;
-      spreadsheetId: string;
-      sheetGid: string | null;
-      range: string;
-      mapping: Record<string, string>;
-      active: boolean;
-    }>;
-    sharedConfig?: {
-      spreadsheetId: string | null;
-      sheetName: string;
-      headerRow: number;
-      enabled: boolean;
-      shareStatus?: 'unknown' | 'not_shared' | 'shared' | 'no_permission' | 'not_found';
-      lastVerifiedAt?: string | null;
-    };
-  };
+  googleSheets: GoogleSheetsSettings;
   quickbooks: {
     connected: boolean;
     environment: "sandbox" | "production";
@@ -75,6 +56,8 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 
 export const SettingsPage = () => {
   const dispatch = useAppDispatch();
+  const location = useLocation();
+  const navigate = useNavigate();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, "rolesSettings", "view");
   const canEdit = hasPermission(permissions, "rolesSettings", "edit");
@@ -90,11 +73,13 @@ export const SettingsPage = () => {
     '{\n  "date": "Date",\n  "amount": "Amount"\n}',
   );
   const [preview, setPreview] = useState<string[][]>([]);
-  const [sharedSpreadsheetId, setSharedSpreadsheetId] = useState('');
-  const [sharedSheetName, setSharedSheetName] = useState('Sheet1');
+  const [sharedSpreadsheetId, setSharedSpreadsheetId] = useState("");
+  const [sharedSheetName, setSharedSheetName] = useState("Sheet1");
   const [sharedHeaderRow, setSharedHeaderRow] = useState(1);
   const [isBusy, setIsBusy] = useState(false);
   const [integrationsExpanded, setIntegrationsExpanded] = useState(true);
+  const [googleEditing, setGoogleEditing] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const loadSettings = async () => {
     try {
@@ -113,10 +98,15 @@ export const SettingsPage = () => {
         setMappingJson(JSON.stringify(activeSource.mapping ?? {}, null, 2));
       }
       if (data.googleSheets.sharedConfig) {
-        setSharedSpreadsheetId(data.googleSheets.sharedConfig.spreadsheetId ?? '');
-        setSharedSheetName(data.googleSheets.sharedConfig.sheetName || 'Sheet1');
+        setSharedSpreadsheetId(
+          data.googleSheets.sharedConfig.spreadsheetId ?? "",
+        );
+        setSharedSheetName(
+          data.googleSheets.sharedConfig.sheetName || "Sheet1",
+        );
         setSharedHeaderRow(data.googleSheets.sharedConfig.headerRow || 1);
       }
+      setGoogleEditing(false);
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load settings"));
     } finally {
@@ -125,12 +115,42 @@ export const SettingsPage = () => {
   };
 
   useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const status = params.get("googleSheets");
+    const reason = params.get("reason") ?? undefined;
+    if (!status) return;
+
+    if (status === "connected") {
+      dispatch(
+        showSnackbar({
+          message:
+            "Google Sheets connected. You can now configure your sheet and mapping.",
+          severity: "success",
+        }),
+      );
+    } else if (status === "error") {
+      dispatch(
+        showSnackbar({
+          message: getAppErrorMessage(
+            reason,
+            "Google Sheets connection error.",
+          ),
+          severity: "error",
+        }),
+      );
+    }
+
+    navigate("/dashboard/settings", { replace: true });
+  }, [location.search, dispatch, navigate]);
+
+  useEffect(() => {
     void loadSettings();
   }, []);
 
   if (!canView) {
     return <NoAccess />;
   }
+  const oauthConnected = Boolean(settings?.googleSheets.connectedEmail);
 
   const onModeChange = async (mode: GoogleSheetMode) => {
     if (!canEdit) return;
@@ -290,25 +310,35 @@ export const SettingsPage = () => {
   const onSaveSharedConfig = async () => {
     if (!canEdit) return;
     if (!sharedSpreadsheetId.trim()) {
-      dispatch(showSnackbar({ message: 'Spreadsheet ID is required', severity: 'error' }));
+      dispatch(
+        showSnackbar({
+          message: "Spreadsheet ID is required",
+          severity: "error",
+        }),
+      );
       return;
     }
     try {
       setIsBusy(true);
       await settingsApi.configureSharedSheet({
         spreadsheetId: sharedSpreadsheetId.trim(),
-        sheetName: sharedSheetName.trim() || 'Sheet1',
+        sheetName: sharedSheetName.trim() || "Sheet1",
         headerRow: sharedHeaderRow,
-        enabled: true
+        enabled: true,
       });
-      dispatch(showSnackbar({ message: 'Shared sheet config saved', severity: 'success' }));
+      dispatch(
+        showSnackbar({
+          message: "Shared sheet config saved",
+          severity: "success",
+        }),
+      );
       await loadSettings();
     } catch (err) {
       dispatch(
         showSnackbar({
-          message: getErrorMessage(err, 'Failed to save shared sheet config'),
-          severity: 'error'
-        })
+          message: getErrorMessage(err, "Failed to save shared sheet config"),
+          severity: "error",
+        }),
       );
     } finally {
       setIsBusy(false);
@@ -320,14 +350,16 @@ export const SettingsPage = () => {
     try {
       setIsBusy(true);
       await settingsApi.verifySharedSheet();
-      dispatch(showSnackbar({ message: 'Shared sheet verified', severity: 'success' }));
+      dispatch(
+        showSnackbar({ message: "Shared sheet verified", severity: "success" }),
+      );
       await loadSettings();
     } catch (err) {
       dispatch(
         showSnackbar({
-          message: getErrorMessage(err, 'Shared sheet verify failed'),
-          severity: 'error'
-        })
+          message: getErrorMessage(err, "Shared sheet verify failed"),
+          severity: "error",
+        }),
       );
       await loadSettings();
     } finally {
@@ -446,241 +478,26 @@ export const SettingsPage = () => {
           </AccordionSummary>
           <AccordionDetails>
             <Stack spacing={2.5}>
-              <Alert severity="info">
-                Choose an integration below, follow the connection steps, run
-                access test, and save.
-              </Alert>
-              <Card>
-                <CardContent>
-                  <Stack spacing={2}>
-                    <Stack
-                      direction="row"
-                      justifyContent="space-between"
-                      alignItems="center"
-                    >
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <GoogleIcon color="primary" fontSize="small" />
-                        <TableChartIcon color="success" fontSize="small" />
-                        <Typography variant="h6">Google Sheets</Typography>
-                      </Stack>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Typography
-                          variant="body2"
-                          color={
-                            settings.googleSheets.connected
-                              ? "success.main"
-                              : "text.secondary"
-                          }
-                        >
-                          {settings.googleSheets.connected
-                            ? "Connected"
-                            : "Not connected"}
-                        </Typography>
-                        {settings.googleSheets.mode === "oauth" && (
-                          <Button
-                            size="small"
-                            color="error"
-                            onClick={onDisconnectGoogle}
-                            disabled={isBusy || !canEdit}
-                          >
-                            Disconnect
-                          </Button>
-                        )}
-                      </Stack>
-                    </Stack>
-
-                    <FormControl size="small" sx={{ maxWidth: 260 }}>
-                      <InputLabel id="google-mode-label">Mode</InputLabel>
-                      <Select
-                        labelId="google-mode-label"
-                        label="Mode"
-                        value={settings.googleSheets.mode}
-                        onChange={(e) =>
-                          void onModeChange(e.target.value as GoogleSheetMode)
-                        }
-                        disabled={isBusy || !canEdit}
-                      >
-                        <MenuItem value="service_account">
-                          Service Account
-                        </MenuItem>
-                        <MenuItem value="oauth">OAuth</MenuItem>
-                      </Select>
-                    </FormControl>
-
-                    <Alert severity="info">
-                      OAuth: click Connect Google and approve access. Service
-                      Account: share your sheet with the service email, then use
-                      Spreadsheet ID + Range.
-                    </Alert>
-
-                    {settings.googleSheets.mode === "oauth" ? (
-                      <Stack
-                        direction={{ xs: "column", md: "row" }}
-                        spacing={1}
-                        alignItems={{ md: "center" }}
-                      >
-                        <Button
-                          variant="outlined"
-                          startIcon={<LinkIcon />}
-                          onClick={onConnectGoogle}
-                          disabled={isBusy || !canEdit}
-                        >
-                          Connect Google
-                        </Button>
-                        <Typography variant="body2" color="text.secondary">
-                          {settings.googleSheets.connectedEmail
-                            ? `Connected as ${settings.googleSheets.connectedEmail}`
-                            : "Connect once, then use Spreadsheet ID and Range below."}
-                        </Typography>
-                      </Stack>
-                    ) : (
-                      <Stack spacing={1}>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <TextField
-                            size="small"
-                            label="Service Account Email"
-                            value={
-                              settings.googleSheets.serviceAccountEmail ||
-                              DEFAULT_EMAIL
-                            }
-                            fullWidth
-                            InputProps={{ readOnly: true }}
-                          />
-                          <Button
-                            variant="text"
-                            startIcon={<ContentCopyIcon />}
-                            onClick={copyServiceEmail}
-                          >
-                            Copy
-                          </Button>
-                        </Stack>
-                        <Alert severity="info">
-                          Share your sheet with this email as Viewer/Editor,
-                          then save Spreadsheet ID and Range.
-                        </Alert>
-                        <TextField
-                          label="Shared Spreadsheet ID"
-                          size="small"
-                          value={sharedSpreadsheetId}
-                          onChange={(e) => setSharedSpreadsheetId(e.target.value)}
-                          fullWidth
-                        />
-                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
-                          <TextField
-                            label="Sheet Tab"
-                            size="small"
-                            value={sharedSheetName}
-                            onChange={(e) => setSharedSheetName(e.target.value)}
-                            fullWidth
-                          />
-                          <TextField
-                            label="Header Row"
-                            type="number"
-                            size="small"
-                            value={sharedHeaderRow}
-                            onChange={(e) => setSharedHeaderRow(Number(e.target.value || 1))}
-                            sx={{ width: { xs: '100%', md: 160 } }}
-                          />
-                        </Stack>
-                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
-                          <Button
-                            variant="outlined"
-                            onClick={onSaveSharedConfig}
-                            disabled={isBusy || !canEdit}
-                          >
-                            Save Shared Config
-                          </Button>
-                          <Button
-                            variant="contained"
-                            onClick={onVerifySharedConfig}
-                            disabled={isBusy || !canEdit}
-                          >
-                            Verify Shared Sheet
-                          </Button>
-                        </Stack>
-                        <Typography variant="body2" color="text.secondary">
-                          Share status: {settings.googleSheets.sharedConfig?.shareStatus ?? 'unknown'}
-                        </Typography>
-                      </Stack>
-                    )}
-
-                    <Divider />
-
-                    <TextField
-                      label="Source Name"
-                      value={sourceName}
-                      onChange={(e) => setSourceName(e.target.value)}
-                      size="small"
-                      fullWidth
-                    />
-                    <TextField
-                      label="Spreadsheet ID"
-                      value={spreadsheetId}
-                      onChange={(e) => setSpreadsheetId(e.target.value)}
-                      size="small"
-                      fullWidth
-                    />
-                    <TextField
-                      label="Range"
-                      value={range}
-                      onChange={(e) => setRange(e.target.value)}
-                      size="small"
-                      fullWidth
-                    />
-                    <TextField
-                      label="Field Mapping (JSON)"
-                      value={mappingJson}
-                      onChange={(e) => setMappingJson(e.target.value)}
-                      multiline
-                      minRows={5}
-                      fullWidth
-                    />
-                    <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
-                      <Button
-                        variant="outlined"
-                        onClick={onTestAccess}
-                        disabled={isBusy || !canEdit}
-                      >
-                        Test Access
-                      </Button>
-                      <Button
-                        variant="contained"
-                        onClick={onSaveSource}
-                        disabled={isBusy || !canEdit}
-                      >
-                        Save Source
-                      </Button>
-                    </Stack>
-
-                    {preview.length > 0 && (
-                      <Box>
-                        <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                          Preview (first 10 rows)
-                        </Typography>
-                        <Box
-                          sx={{
-                            p: 1.5,
-                            border: "1px solid",
-                            borderColor: "divider",
-                            borderRadius: 1,
-                          }}
-                        >
-                          {preview.map((row, index) => (
-                            <Typography
-                              key={`${index}-${row.join("|")}`}
-                              variant="body2"
-                              sx={{ fontFamily: "monospace" }}
-                            >
-                              {row.join(" | ")}
-                            </Typography>
-                          ))}
-                        </Box>
-                      </Box>
-                    )}
-                  </Stack>
-                </CardContent>
-              </Card>
-
+              <GoogleSheetsIntegrationCard
+                settings={settings.googleSheets}
+                canEdit={canEdit}
+                isBusy={isBusy}
+                onConnectOAuth={onConnectGoogle}
+                onDisconnectOAuth={onDisconnectGoogle}
+                onOpenWizard={() => setWizardOpen(true)}
+                onReset={async () => {
+                  try {
+                    setIsBusy(true);
+                    await settingsApi.resetGoogleSheets();
+                    await loadSettings();
+                  } finally {
+                    setIsBusy(false);
+                  }
+                }}
+                onVerifyShared={onVerifySharedConfig}
+                onSaveShared={onSaveSharedConfig}
+                onSetActiveMode={onModeChange}
+              />
               <Card>
                 <CardContent>
                   <Stack spacing={2}>
@@ -696,41 +513,43 @@ export const SettingsPage = () => {
                         />
                         <Typography variant="h6">QuickBooks</Typography>
                       </Stack>
-                      <Typography
-                        variant="body2"
-                        color={
+                      <Chip
+                        size="small"
+                        label={
                           settings.quickbooks.connected
-                            ? "success.main"
-                            : "text.secondary"
+                            ? "Connected"
+                            : "Not connected"
                         }
-                      >
-                        {settings.quickbooks.connected
-                          ? "Connected"
-                          : "Not connected"}
-                      </Typography>
+                        color={
+                          settings.quickbooks.connected ? "success" : "default"
+                        }
+                        variant={
+                          settings.quickbooks.connected ? "filled" : "outlined"
+                        }
+                      />
                     </Stack>
-                    <Alert severity="info">
-                      Select environment, connect account, then verify Realm ID
-                      and Company values below.
-                    </Alert>
-
-                    <FormControl size="small" sx={{ maxWidth: 240 }}>
-                      <InputLabel id="qb-env-label">Environment</InputLabel>
-                      <Select
-                        labelId="qb-env-label"
-                        label="Environment"
+                    <Stack spacing={0.5}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Environment
+                      </Typography>
+                      <ToggleButtonGroup
+                        exclusive
+                        size="small"
                         value={settings.quickbooks.environment}
-                        onChange={(e) =>
-                          void onQuickbooksEnvironment(
-                            e.target.value as "sandbox" | "production",
-                          )
-                        }
-                        disabled={isBusy || !canEdit}
+                        onChange={(
+                          _e,
+                          value: "sandbox" | "production" | null,
+                        ) => {
+                          if (!value || !canEdit || isBusy) return;
+                          void onQuickbooksEnvironment(value);
+                        }}
                       >
-                        <MenuItem value="sandbox">Sandbox</MenuItem>
-                        <MenuItem value="production">Production</MenuItem>
-                      </Select>
-                    </FormControl>
+                        <ToggleButton value="sandbox">Sandbox</ToggleButton>
+                        <ToggleButton value="production">
+                          Production
+                        </ToggleButton>
+                      </ToggleButtonGroup>
+                    </Stack>
 
                     <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
                       <Button
@@ -763,6 +582,15 @@ export const SettingsPage = () => {
           </AccordionDetails>
         </Accordion>
       )}
+
+      <ImportPOSDataModal
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onImported={async () => {
+          setWizardOpen(false);
+          await loadSettings();
+        }}
+      />
     </Stack>
   );
 };

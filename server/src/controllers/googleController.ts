@@ -12,7 +12,7 @@ const SERVICE_ACCOUNT_EMAIL =
 const sheetsOauthStateCookie = 'googleSheetsOAuthState';
 const SHEETS_SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
-  'https://www.googleapis.com/auth/drive.file'
+  'https://www.googleapis.com/auth/drive.metadata.readonly'
 ] as const;
 
 type GoogleSheetsStatePayload = {
@@ -184,7 +184,6 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
           "googleSheets.updatedAt": new Date(),
         },
         $setOnInsert: {
-          "googleSheets.mode": "oauth",
           "googleSheets.serviceAccountEmail": SERVICE_ACCOUNT_EMAIL,
           "googleSheets.sharedConfig": {
             spreadsheetId: null,
@@ -210,6 +209,49 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
   } catch (error) {
     console.error(error);
     return redirectWithStatus(res, 'error', 'google_oauth_callback_failed');
+  }
+};
+
+export const listOAuthSpreadsheets = async (req: Request, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  try {
+    const drive = await (await import('../integrations/google/sheets.client')).getDriveClientForCompany(companyId);
+    // Restrict to Google Sheets only
+    const q = "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
+    const response = await drive.files.list({
+      q,
+      orderBy: 'modifiedTime desc',
+      pageSize: 100,
+      fields: 'files(id,name,mimeType,modifiedTime,owners(displayName,emailAddress),iconLink)'
+    });
+    // Helpful runtime logging so you can see exactly what Drive returns
+    // eslint-disable-next-line no-console
+    console.log('[google-oauth-spreadsheets]', {
+      companyId,
+      rawCount: (response.data.files ?? []).length,
+      sample: (response.data.files ?? []).slice(0, 5)
+    });
+
+    const files = (response.data.files ?? [])
+      .filter((f) => !!f.id && !!f.name && f.mimeType === 'application/vnd.google-apps.spreadsheet')
+      .map((f) => ({
+        id: f.id as string,
+        name: f.name as string,
+        mimeType: f.mimeType ?? null,
+        modifiedTime: f.modifiedTime ?? null,
+        owner: f.owners?.[0]?.displayName ?? null,
+        ownerEmail: f.owners?.[0]?.emailAddress ?? null,
+        iconLink: f.iconLink ?? null
+      }));
+
+    return ok(res, { files });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to list spreadsheets';
+    return fail(res, message, 400);
   }
 };
 

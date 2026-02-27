@@ -10,8 +10,8 @@ import { companyApi } from '../../api';
 import { useAppDispatch } from '../../app/store/hooks';
 import { fetchMeAndSync } from '../../app/auth/fetchMeAndSync';
 import { AuthShell } from '../../components';
-import { currencyOptions, SelectOption, timezoneOptions } from '../../lib/constants/companyOptions';
-import { useAsyncAction } from '../../lib/hooks/useAsyncAction';
+import { currencyOptions, SelectOption, timezoneOptions } from '../../constants/companyOptions';
+import { useAsyncAction } from '../../hooks/useAsyncAction';
 
 type CompanyForm = z.infer<typeof companyCreateSchema>;
 

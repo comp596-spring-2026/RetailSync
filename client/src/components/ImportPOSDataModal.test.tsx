@@ -11,15 +11,21 @@ const mockListTabs = vi.fn();
 const mockPreviewSheet = vi.fn();
 const mockValidateMapping = vi.fn();
 const mockCommitImport = vi.fn();
+const mockGetSettings = vi.fn();
+const mockConfigureSharedSheet = vi.fn();
 
 vi.mock('../api', () => ({
   settingsApi: {
-    listTabs: (...args: unknown[]) => mockListTabs(...args)
+    get: (...args: unknown[]) => mockGetSettings(...args),
+    listTabs: (...args: unknown[]) => mockListTabs(...args),
+    configureSharedSheet: (...args: unknown[]) => mockConfigureSharedSheet(...args),
+    getGoogleConnectUrl: vi.fn().mockResolvedValue({ data: { data: { url: 'https://google.com' } } })
   },
   posApi: {
     previewSheet: (...args: unknown[]) => mockPreviewSheet(...args),
     validateMapping: (...args: unknown[]) => mockValidateMapping(...args),
-    commitImport: (...args: unknown[]) => mockCommitImport(...args)
+    commitImport: (...args: unknown[]) => mockCommitImport(...args),
+    importFile: vi.fn().mockResolvedValue({ data: { data: {} } })
   }
 }));
 
@@ -34,7 +40,7 @@ const createStore = () =>
   });
 
 const renderModal = async () => {
-  const module = await import('./ImportPOSDataModal');
+  const module = await import('./pos/ImportPOSDataModal');
   const Component = module.ImportPOSDataModal;
   return render(
     <Provider store={createStore()}>
@@ -46,9 +52,13 @@ const renderModal = async () => {
 describe('ImportPOSDataModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetSettings.mockResolvedValue({
+      data: { data: { googleSheets: { serviceAccountEmail: 'sa@test.iam.gserviceaccount.com', sharedConfig: { spreadsheetId: 'abc123' } } } }
+    });
     mockListTabs.mockResolvedValue({
       data: { data: { tabs: [{ title: 'Sheet1', rowCount: 100, columnCount: 8 }] } }
     });
+    mockConfigureSharedSheet.mockResolvedValue({ data: { data: {} } });
     mockPreviewSheet.mockResolvedValue({
       data: { data: { header: ['Date'], sampleRows: [['2026-01-01']], suggestions: [] } }
     });
@@ -64,23 +74,31 @@ describe('ImportPOSDataModal', () => {
     cleanup();
   });
 
-  it('loads tabs from settings API', async () => {
+  it('renders three source options', async () => {
     await renderModal();
-
-    await waitFor(() => expect(mockListTabs).toHaveBeenCalled());
-    expect(screen.getByRole('combobox', { name: 'Sheet Tab' })).toBeInTheDocument();
-    expect(screen.getByText('Selected tab: Sheet1')).toBeInTheDocument();
+    expect(await screen.findByText('File Import')).toBeInTheDocument();
+    expect(screen.getByText('Google Sheets')).toBeInTheDocument();
+    expect(screen.getByText('POS / Database')).toBeInTheDocument();
   });
 
-  it('moves from source to preview and triggers preview call', async () => {
+  it('shows coming soon chip only on POS/DB', async () => {
     await renderModal();
+    const chips = screen.getAllByText('Coming Soon');
+    expect(chips.length).toBe(1);
+  });
 
-    await waitFor(() => expect(mockListTabs).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByRole('button', { name: 'Load Preview' })).toBeInTheDocument();
+  it('allows selecting Google Sheets and shows auth options', async () => {
+    await renderModal();
+    fireEvent.click(screen.getByText('Google Sheets'));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load Preview' }));
-    await waitFor(() => expect(mockPreviewSheet).toHaveBeenCalledWith({ source: 'service', tab: 'Sheet1', maxRows: 20 }));
-    expect(screen.getByRole('button', { name: 'Validate Mapping' })).toBeInTheDocument();
+    expect(await screen.findByText('Sign in with Google')).toBeInTheDocument();
+    expect(screen.getByText('Share with Service Account')).toBeInTheDocument();
+  });
+
+  it('allows selecting File Import and shows upload', async () => {
+    await renderModal();
+    fireEvent.click(screen.getByText('File Import'));
+
+    expect(await screen.findByText('Click to choose a file')).toBeInTheDocument();
   });
 });

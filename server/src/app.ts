@@ -1,27 +1,28 @@
-import cookieParser from 'cookie-parser';
-import cors from 'cors';
-import express from 'express';
-import { env } from './config/env';
-import authRoutes from './routes/authRoutes';
-import companyRoutes from './routes/companyRoutes';
-import roleRoutes from './routes/roleRoutes';
-import inviteRoutes from './routes/inviteRoutes';
-import userRoutes from './routes/userRoutes';
-import moduleRoutes from './routes/moduleRoutes';
-import posRoutes from './routes/posRoutes';
-import reportRoutes from './routes/reportRoutes';
-import itemRoutes from './routes/itemRoutes';
-import locationRoutes from './routes/locationRoutes';
-import inventoryRoutes from './routes/inventoryRoutes';
-import sheetsRoutes from './routes/sheetsRoutes';
-import googleRoutes from './routes/googleRoutes';
-import settingsRoutes from './routes/settingsRoutes';
-import debugSheetsRoutes from './routes/debug.sheets.routes';
-import integrationGoogleSheetsRoutes from './routes/integrationGoogleSheetsRoutes';
-import integrationsSheetsRoutes from './routes/integrationsSheetsRoutes';
-import { notFound } from './middleware/notFound';
-import { errorHandler } from './middleware/errorHandler';
-import { withRequestContext } from './config/requestContext';
+import cookieParser from "cookie-parser";
+import cors from "cors";
+import express from "express";
+import { env } from "./config/env";
+import authRoutes from "./routes/authRoutes";
+import companyRoutes from "./routes/companyRoutes";
+import roleRoutes from "./routes/roleRoutes";
+import inviteRoutes from "./routes/inviteRoutes";
+import userRoutes from "./routes/userRoutes";
+import moduleRoutes from "./routes/moduleRoutes";
+import posRoutes from "./routes/posRoutes";
+import reportRoutes from "./routes/reportRoutes";
+import itemRoutes from "./routes/itemRoutes";
+import locationRoutes from "./routes/locationRoutes";
+import inventoryRoutes from "./routes/inventoryRoutes";
+import sheetsRoutes from "./routes/sheetsRoutes";
+import googleRoutes from "./routes/googleRoutes";
+import settingsRoutes from "./routes/settingsRoutes";
+import cronRoutes from "./routes/cronRoutes";
+import debugSheetsRoutes from "./routes/debug.sheets.routes";
+import integrationGoogleSheetsRoutes from "./routes/integrationGoogleSheetsRoutes";
+import integrationsSheetsRoutes from "./routes/integrationsSheetsRoutes";
+import { notFound } from "./middleware/notFound";
+import { errorHandler } from "./middleware/errorHandler";
+import { withRequestContext } from "./config/requestContext";
 
 export const createApp = () => {
   const app = express();
@@ -29,15 +30,15 @@ export const createApp = () => {
   app.use(
     cors({
       origin: env.clientUrl,
-      credentials: true
-    })
+      credentials: true,
+    }),
   );
   app.use(express.json());
   app.use(cookieParser());
   app.use(withRequestContext);
 
-  app.get('/', (_req, res) => {
-    res.type('html').send(`<!doctype html>
+  app.get("/", (_req, res) => {
+    res.type("html").send(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -66,8 +67,9 @@ export const createApp = () => {
     <ul>
       <li>Auth: <code>/api/auth</code></li>
       <li>Company: <code>/api/company</code></li>
-      <li>Items: <code>/api/items</code></li>
-      <li>Inventory: <code>/api/inventory</code></li>
+      <li>Inventory Items: <code>/api/inventory/items</code></li>
+      <li>Inventory Locations: <code>/api/inventory/locations</code></li>
+      <li>Inventory Actions: <code>/api/inventory</code></li>
     </ul>
   </div>
   <script>
@@ -93,52 +95,53 @@ export const createApp = () => {
 </html>`);
   });
 
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', data: { uptime: process.uptime() } });
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", data: { uptime: process.uptime() } });
   });
 
-  app.get('/health/env-readiness', (_req, res) => {
+  app.get("/health/env-readiness", (_req, res) => {
     const required = {
       PORT: Boolean(env.port),
       MONGO_URI: Boolean(env.mongoUri),
       JWT_ACCESS_SECRET: Boolean(env.accessSecret),
       JWT_REFRESH_SECRET: Boolean(env.refreshSecret),
-      CLIENT_URL: Boolean(env.clientUrl)
+      CLIENT_URL: Boolean(env.clientUrl),
     };
 
     const optional = {
       GOOGLE_OAUTH_CLIENT_ID: Boolean(env.googleOAuthClientId),
       GOOGLE_OAUTH_CLIENT_SECRET: Boolean(env.googleOAuthClientSecret),
-      GOOGLE_AUTH_REDIRECT_URI: Boolean(env.googleAuthRedirectUri)
+      GOOGLE_AUTH_REDIRECT_URI: Boolean(env.googleAuthRedirectUri),
     };
 
     res.json({
-      status: 'ok',
+      status: "ok",
       data: {
         allRequiredPresent: Object.values(required).every(Boolean),
         required,
-        optional
-      }
+        optional,
+      },
     });
   });
 
-  app.use('/api/auth', authRoutes);
-  app.use('/api/company', companyRoutes);
-  app.use('/api/roles', roleRoutes);
-  app.use('/api/invites', inviteRoutes);
-  app.use('/api/users', userRoutes);
-  app.use('/api/pos', posRoutes);
-  app.use('/api/reports', reportRoutes);
-  app.use('/api/items', itemRoutes);
-  app.use('/api/locations', locationRoutes);
-  app.use('/api/inventory', inventoryRoutes);
-  app.use('/api/sheets', sheetsRoutes);
-  app.use('/api/google', googleRoutes);
-  app.use('/api/integrations/google/sheets', integrationGoogleSheetsRoutes);
-  app.use('/api/integrations/sheets', integrationsSheetsRoutes);
-  app.use('/api/debug/sheets', debugSheetsRoutes);
-  app.use('/api/settings', settingsRoutes);
-  app.use('/api', moduleRoutes);
+  app.use("/api/auth", authRoutes);
+  app.use("/api/company", companyRoutes);
+  app.use("/api/roles", roleRoutes);
+  app.use("/api/invites", inviteRoutes);
+  app.use("/api/users", userRoutes);
+  app.use("/api/pos", posRoutes);
+  app.use("/api/reports", reportRoutes);
+  app.use("/api/inventory/items", itemRoutes);
+  app.use("/api/inventory/locations", locationRoutes);
+  app.use("/api/inventory", inventoryRoutes);
+  app.use("/api/sheets", sheetsRoutes);
+  app.use("/api/google", googleRoutes);
+  app.use("/api/integrations/google/sheets", integrationGoogleSheetsRoutes);
+  app.use("/api/integrations/sheets", integrationsSheetsRoutes);
+  app.use("/api/debug/sheets", debugSheetsRoutes);
+  app.use("/api/settings", settingsRoutes);
+  app.use("/api/cron", cronRoutes);
+  app.use("/api", moduleRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
