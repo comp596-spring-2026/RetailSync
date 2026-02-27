@@ -18,12 +18,8 @@ import {
   Typography,
 } from "@mui/material";
 import SettingsSuggestIcon from "@mui/icons-material/SettingsSuggest";
-import LinkIcon from "@mui/icons-material/Link";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import SyncAltIcon from "@mui/icons-material/SyncAlt";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import GoogleIcon from "@mui/icons-material/Google";
-import TableChartIcon from "@mui/icons-material/TableChart";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
