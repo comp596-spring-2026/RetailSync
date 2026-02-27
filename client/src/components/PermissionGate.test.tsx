@@ -4,12 +4,12 @@ import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import authReducer from '../features/auth/authSlice';
-import companyReducer from '../features/company/companySlice';
-import rbacReducer from '../features/rbac/rbacSlice';
-import uiReducer from '../features/ui/uiSlice';
+import authReducer from '../slices/auth/authSlice';
+import companyReducer from '../slices/company/companySlice';
+import rbacReducer from '../slices/rbac/rbacSlice';
+import uiReducer from '../slices/ui/uiSlice';
 import type { RootState } from '../app/store';
-import { PermissionGate } from './PermissionGate';
+import { PermissionGate } from '../app/guards';
 
 const buildPermissions = (): PermissionsMap =>
   moduleKeys.reduce((acc, key) => {

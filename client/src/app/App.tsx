@@ -1,30 +1,30 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import { ProtectedRoute } from "./routes/ProtectedRoute";
-import { OnboardingGuard } from "../components/OnboardingGuard";
+import { OnboardingGuard, ProtectedRoute } from "./guards";
 import { DashboardLayout } from "./layout/DashboardLayout";
-import { LoginPage } from "../pages/LoginPage";
-import { GoogleAuthSuccessPage } from "../pages/GoogleAuthSuccessPage";
-import { OnboardingPage } from "../pages/OnboardingPage";
-import { CreateCompanyPage } from "../pages/CreateCompanyPage";
-import { JoinCompanyPage } from "../pages/JoinCompanyPage";
-import { DashboardHomePage } from "../pages/DashboardHomePage";
-import { ModuleShellPage } from "../pages/ModuleShellPage";
-import { RolesPage } from "../pages/RolesPage";
-import { UsersPage } from "../pages/UsersPage";
-import { PosPage } from "../pages/PosPage";
-import { ReportsPage } from "../pages/ReportsPage";
-import { ItemsPage } from "../pages/ItemsPage";
-import { LocationsPage } from "../pages/LocationsPage";
-import { InventoryPage } from "../pages/InventoryPage";
-import { SettingsPage } from "../pages/SettingsPage";
-import { OperationsHubPage } from "../pages/OperationsHubPage";
-import { ProcurementHubPage } from "../pages/ProcurementHubPage";
-import { AccessHubPage } from "../pages/AccessHubPage";
-import { PlaygroundPage } from "../pages/PlaygroundPage";
-import { PrivacyPage } from "../pages/PrivacyPage";
-import { TermsPage } from "../pages/TermsPage";
-import { DataDeletionPage } from "../pages/DataDeletionPage";
-import { HomeDemoPage } from "../pages/HomeDemoPage";
+import { LoginPage } from "../pages/auth/LoginPage";
+import { GoogleAuthSuccessPage } from "../pages/auth/GoogleAuthSuccessPage";
+import { OnboardingPage } from "../pages/onboarding/OnboardingPage";
+import { CreateCompanyPage } from "../pages/onboarding/CreateCompanyPage";
+import { JoinCompanyPage } from "../pages/onboarding/JoinCompanyPage";
+import { DashboardHomePage } from "../pages/dashboard/DashboardHomePage";
+import { ModuleShellPage } from "../pages/dashboard/ModuleShellPage";
+import { RolesPage } from "../pages/dashboard/RolesPage";
+import { UsersPage } from "../pages/dashboard/UsersPage";
+import { PosPage } from "../pages/dashboard/PosPage";
+import { ReportsPage } from "../pages/dashboard/ReportsPage";
+import { ItemsPage } from "../pages/dashboard/ItemsPage";
+import { LocationsPage } from "../pages/dashboard/LocationsPage";
+import { InventoryPage } from "../pages/dashboard/InventoryPage";
+import { SettingsPage } from "../pages/dashboard/SettingsPage";
+import { OperationsHubPage } from "../pages/dashboard/OperationsHubPage";
+import { ProcurementHubPage } from "../pages/dashboard/ProcurementHubPage";
+import { AccessHubPage } from "../pages/dashboard/AccessHubPage";
+import { PlaygroundPage } from "../pages/dashboard/PlaygroundPage";
+import { PrivacyPage } from "../pages/legal/PrivacyPage";
+import { TermsPage } from "../pages/legal/TermsPage";
+import { DataDeletionPage } from "../pages/legal/DataDeletionPage";
+import { HomeDemoPage } from "../pages/demo/HomeDemoPage";
+import { ForbiddenPage, NotFoundPage, ServerErrorPage, UnauthorizedPage } from "../pages/errors";
 
 const App = () => {
   return (
@@ -33,6 +33,10 @@ const App = () => {
       <Route path="/home-demo" element={<HomeDemoPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/auth/google/success" element={<GoogleAuthSuccessPage />} />
+      <Route path="/401" element={<UnauthorizedPage />} />
+      <Route path="/403" element={<ForbiddenPage />} />
+      <Route path="/404" element={<NotFoundPage />} />
+      <Route path="/500" element={<ServerErrorPage />} />
       <Route path="/playground" element={<PlaygroundPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/terms" element={<TermsPage />} />
@@ -78,7 +82,7 @@ const App = () => {
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Route>
-      <Route path="*" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 };

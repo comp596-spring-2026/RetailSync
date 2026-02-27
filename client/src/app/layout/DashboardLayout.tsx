@@ -30,11 +30,11 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { authApi } from '../../api/authApi';
-import { clearCompany } from '../../features/company/companySlice';
-import { logout } from '../../features/auth/authSlice';
-import { hasPermission } from '../../shared/utils/permissions';
-import { BrandLogo } from '../../components/BrandLogo';
+import { authApi } from '../../api';
+import { clearCompany } from '../../slices/company/companySlice';
+import { logout } from '../../slices/auth/authSlice';
+import { hasPermission } from '../../lib/utils/permissions';
+import { LogoHorizontal } from '../../components';
 import { useMemo, useState } from 'react';
 
 const drawerWidth = 260;
@@ -143,7 +143,7 @@ export const DashboardLayout = () => {
         <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Stack direction="row" spacing={1.5} alignItems="center">
             <Box sx={{ px: 0, py: 0 }} component={Link} to="/dashboard" aria-label="Go to dashboard home">
-              <BrandLogo variant="horizontal" height={80} />
+              <LogoHorizontal height={80} />
             </Box>
             <Divider orientation="vertical" flexItem />
             <Typography variant="subtitle1" sx={{ fontWeight: 800, letterSpacing: 0.2, color: '#0f172a' }}>

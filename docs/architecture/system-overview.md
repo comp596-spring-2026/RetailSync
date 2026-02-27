@@ -76,3 +76,7 @@ sequenceDiagram
 - Items, locations, immutable inventory ledger
 - Integrations settings shell + Google Sheets read/connect flows
 - Server-side Google auth (google start/callback + refresh/logout/me)
+
+## See also
+
+- [Workflows and usage](workflows-and-usage.md) — detailed login, onboarding, POS import sources, no-POS-data behavior, reports, and RBAC.

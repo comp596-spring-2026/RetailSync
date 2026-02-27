@@ -17,10 +17,9 @@ import {
   Typography
 } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
-import { posApi } from '../api/posApi';
-import { settingsApi } from '../api/settingsApi';
+import { posApi, settingsApi } from '../api';
 import { useAppDispatch } from '../app/store/hooks';
-import { showSnackbar } from '../features/ui/uiSlice';
+import { showSnackbar } from '../slices/ui/uiSlice';
 import { MatchingWizard } from './MatchingWizard';
 import { TabSelectorDialog } from './TabSelectorDialog';
 
