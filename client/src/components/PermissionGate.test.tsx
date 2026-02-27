@@ -8,7 +8,6 @@ import authReducer from '../slices/auth/authSlice';
 import companyReducer from '../slices/company/companySlice';
 import rbacReducer from '../slices/rbac/rbacSlice';
 import uiReducer from '../slices/ui/uiSlice';
-import type { RootState } from '../app/store';
 import { PermissionGate } from '../app/guards';
 
 const buildPermissions = (): PermissionsMap =>
@@ -24,7 +23,7 @@ const buildPermissions = (): PermissionsMap =>
   }, {} as PermissionsMap);
 
 const renderWithState = (permissions: PermissionsMap) => {
-  const preloadedState: RootState = {
+  const preloadedState = {
     auth: {
       accessToken: 'token',
       user: null,
@@ -36,7 +35,7 @@ const renderWithState = (permissions: PermissionsMap) => {
     company: { company: null },
     rbac: { modules: [], roles: [], selectedRole: null },
     ui: { open: false, message: '', severity: 'info' }
-  };
+  } as any;
 
   const store = configureStore({
     reducer: {
@@ -44,7 +43,7 @@ const renderWithState = (permissions: PermissionsMap) => {
       company: companyReducer,
       rbac: rbacReducer,
       ui: uiReducer
-    },
+    } as any,
     preloadedState
   });
 
