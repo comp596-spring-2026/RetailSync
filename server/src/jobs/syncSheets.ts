@@ -165,8 +165,6 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
         const columnsMap = normalizeStringRecord(sharedConfig?.columnsMap);
         const lastMap = normalizeStringRecord(sharedConfig?.lastMapping?.columnsMap);
         const effectiveMapping = !isEmptyRecord(columnsMap) ? columnsMap : lastMap;
-        const effectiveTransforms =
-          ((sharedConfig?.lastMapping?.transformations as Record<string, unknown> | undefined) ?? {});
 
         if (isEmptyRecord(effectiveMapping)) {
           result.ok = true;
