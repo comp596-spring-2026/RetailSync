@@ -2,23 +2,20 @@ import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import authReducer from '../features/auth/authSlice';
-import companyReducer from '../features/company/companySlice';
-import rbacReducer from '../features/rbac/rbacSlice';
-import uiReducer from '../features/ui/uiSlice';
+import authReducer from '../slices/auth/authSlice';
+import companyReducer from '../slices/company/companySlice';
+import rbacReducer from '../slices/rbac/rbacSlice';
+import uiReducer from '../slices/ui/uiSlice';
 
 const mockListTabs = vi.fn();
 const mockPreviewSheet = vi.fn();
 const mockValidateMapping = vi.fn();
 const mockCommitImport = vi.fn();
 
-vi.mock('../api/settingsApi', () => ({
+vi.mock('../api', () => ({
   settingsApi: {
     listTabs: (...args: unknown[]) => mockListTabs(...args)
-  }
-}));
-
-vi.mock('../api/posApi', () => ({
+  },
   posApi: {
     previewSheet: (...args: unknown[]) => mockPreviewSheet(...args),
     validateMapping: (...args: unknown[]) => mockValidateMapping(...args),

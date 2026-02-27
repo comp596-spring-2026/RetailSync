@@ -1,7 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { store } from '../app/store';
-import { clearCompany } from '../features/company/companySlice';
-import { logout, setAccessToken } from '../features/auth/authSlice';
+import { clearCompany } from '../slices/company/companySlice';
+import { logout, setAccessToken } from '../slices/auth/authSlice';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
@@ -39,6 +39,8 @@ api.interceptors.response.use(
       } catch {
         store.dispatch(logout());
         store.dispatch(clearCompany());
+        window.location.href = '/401';
+        return Promise.reject(error);
       }
     }
 

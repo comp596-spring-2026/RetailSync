@@ -1,8 +1,12 @@
 # RetailSync Execution Status
 
-Last updated: 2026-02-20
+Last updated: 2026-02-26
 
 This file tracks end-to-end implementation status by phase and module.
+
+**Workflows and usage:** See [docs/architecture/workflows-and-usage.md](docs/architecture/workflows-and-usage.md) for detailed login, onboarding, POS import sources, no-POS-data behavior, reports, and RBAC flows.
+
+**Usage flow (summary):** Unauthenticated → `/login` → Google OAuth → `/auth/google/success` → `GET /api/auth/me` → if no company → `/onboarding` (create or join company); if company → `/dashboard`. POS/reports require company; when no POS data, daily list returns `[]` and monthly summary returns zeroed totals; client shows empty state and optional hints.
 
 Status legend:
 - `DONE`: implemented and integrated

@@ -17,7 +17,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useMemo, useState } from 'react';
-import { useTablePagination } from '../../shared/hooks/useTablePagination';
+import { useTablePagination } from '../../lib/hooks/useTablePagination';
 
 export type CrudColumn<T> = {
   id: string;

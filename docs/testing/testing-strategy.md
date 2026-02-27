@@ -12,6 +12,8 @@
   - cross-tenant isolation + scoped aggregates
 - `/Users/trupal/Projects/RetailSync/server/src/inventoryLedger.immutability.test.ts`
   - immutable ledger behavior
+- `/Users/trupal/Projects/RetailSync/server/src/posAndReports.test.ts`
+  - POS daily returns empty array when no data; reports monthly summary returns zeroed totals when no data
 
 ### Client
 
@@ -37,9 +39,9 @@ flowchart TD
 
 ## CI Notes
 
-- Some suites require `mongodb-memory-server` runtime support.
-- Environments that block ephemeral bind/listen operations can fail DB-backed tests.
-- Use targeted unit test commands for transport/template verification when DB tests are unavailable.
+- **Unit** (`pnpm --filter @retailsync/server test:unit`): Excludes DB-backed tests (tenant isolation, auth refresh, inventory ledger, posAndReports). No MongoDB required.
+- **Integration** (`pnpm --filter @retailsync/server test:integration`): Runs tests that use `mongodb-memory-server` (tenant isolation, auth refresh, inventory ledger immutability, POS/reports empty-state). Requires runtime that can start MongoMemoryServer (e.g. write to cache for binary download).
+- Use targeted unit test commands when DB tests are unavailable.
 
 ## Next Priority
 

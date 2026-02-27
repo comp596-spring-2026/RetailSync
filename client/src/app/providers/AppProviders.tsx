@@ -1,8 +1,7 @@
 import { ReactNode } from 'react';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
-import { ErrorBoundary } from '../../components/ErrorBoundary';
-import { WonderLoader } from '../../components/WonderLoader';
+import { ErrorBoundary, WonderLoader } from '../../components';
 import { persistor, store } from '../store';
 import { RouterProvider } from './RouterProvider';
 import { ThemeProvider } from './ThemeProvider';
