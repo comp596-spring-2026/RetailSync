@@ -36,6 +36,8 @@ const toSafeSettings = (doc: any) => ({
     sources: doc.googleSheets.sources,
   },
   quickbooks: doc.quickbooks,
+  lastImportSource: doc.lastImportSource ?? null,
+  lastImportAt: doc.lastImportAt ?? null,
   createdAt: doc.createdAt,
   updatedAt: doc.updatedAt,
 });

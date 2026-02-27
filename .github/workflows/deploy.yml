@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - production
+      - development
 
 concurrency:
   group: deploy-production
@@ -15,6 +16,7 @@ permissions:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/production'
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -101,7 +103,7 @@ jobs:
             --region ${{ env.GCP_REGION }} \
             --platform managed \
             --service-account "retailsync-run-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,GOOGLE_OAUTH_CLIENT_ID=GOOGLE_OAUTH_CLIENT_ID:latest,GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest,GOOGLE_AUTH_REDIRECT_URI=GOOGLE_AUTH_REDIRECT_URI:latest,GOOGLE_INTEGRATION_REDIRECT_URI=GOOGLE_INTEGRATION_REDIRECT_URI:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest" \
+            --set-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,GOOGLE_OAUTH_CLIENT_ID=GOOGLE_OAUTH_CLIENT_ID:latest,GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest,GOOGLE_AUTH_REDIRECT_URI=GOOGLE_AUTH_REDIRECT_URI:latest,GOOGLE_INTEGRATION_REDIRECT_URI=GOOGLE_INTEGRATION_REDIRECT_URI:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest,CRON_SECRET=CRON_SECRET:latest" \
             --set-env-vars "NODE_ENV=production,CLIENT_URL=https://${{ env.GCP_PROJECT_ID }}.web.app" \
             --allow-unauthenticated
 

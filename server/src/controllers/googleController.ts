@@ -184,7 +184,6 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
           "googleSheets.updatedAt": new Date(),
         },
         $setOnInsert: {
-          "googleSheets.mode": "oauth",
           "googleSheets.serviceAccountEmail": SERVICE_ACCOUNT_EMAIL,
           "googleSheets.sharedConfig": {
             spreadsheetId: null,

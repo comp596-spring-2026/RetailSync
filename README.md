@@ -249,6 +249,16 @@ Local fallback is also supported in non-production:
 - Local runbook: `/Users/trupal/Projects/RetailSync/docs/operations/local-development.md`
 - Testing strategy: `/Users/trupal/Projects/RetailSync/docs/testing/testing-strategy.md`
 
+### Daily Google Sheets → POS Sync
+
+- **Cloud Scheduler (production)**: configure a daily HTTP POST job to  
+  `https://<cloud-run-url>/api/cron/sync-sheets` with header `x-cron-secret: $CRON_SECRET`.  
+  The secret comes from the `CRON_SECRET` secret wired in the Cloud Run deploy step.
+- **Local dev cron (optional)**: set `ENABLE_LOCAL_CRON=true` and optionally override  
+  `LOCAL_CRON_EXPR` (default: `0 2 * * *`) in `server/.env` to run the sync on a schedule.
+- **Manual / dry run**: you can test without writing to the DB via:  
+  `curl -X POST 'http://localhost:4000/api/cron/sync-sheets?dryRun=true' -H 'x-cron-secret: <value-or-empty>'`
+
 ## Docker
 
 ```bash

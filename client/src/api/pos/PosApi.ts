@@ -33,6 +33,7 @@ export class PosApi {
     mapping: Record<string, string>;
     transforms?: Record<string, unknown>;
     validateSample?: boolean;
+    tab?: string;
   }) {
     return api.post('/pos/import/sheets/match', payload);
   }

@@ -16,6 +16,7 @@ import inventoryRoutes from './routes/inventoryRoutes';
 import sheetsRoutes from './routes/sheetsRoutes';
 import googleRoutes from './routes/googleRoutes';
 import settingsRoutes from './routes/settingsRoutes';
+import cronRoutes from './routes/cronRoutes';
 import debugSheetsRoutes from './routes/debug.sheets.routes';
 import integrationGoogleSheetsRoutes from './routes/integrationGoogleSheetsRoutes';
 import integrationsSheetsRoutes from './routes/integrationsSheetsRoutes';
@@ -138,6 +139,7 @@ export const createApp = () => {
   app.use('/api/integrations/sheets', integrationsSheetsRoutes);
   app.use('/api/debug/sheets', debugSheetsRoutes);
   app.use('/api/settings', settingsRoutes);
+  app.use('/api/cron', cronRoutes);
   app.use('/api', moduleRoutes);
 
   app.use(notFound);

@@ -9,7 +9,7 @@ import { POSDailySummaryModel } from '../models/POSDailySummary';
 import { getSheetsClient } from '../integrations/google/sheets.client';
 import { fail, ok } from '../utils/apiResponse';
 import { suggestMappings } from '../utils/matching';
-import { buildRange, normalizeRows } from '../utils/sheetsRange';
+import { buildRange, escapeSheetName, normalizeRows } from '../utils/sheetsRange';
 
 type CsvRow = Record<string, string | undefined>;
 
@@ -22,7 +22,8 @@ const previewRequestSchema = z.object({
 const matchMappingSchema = z.object({
   mapping: z.record(z.string(), z.string()).default({}),
   transforms: z.record(z.string(), z.any()).optional(),
-  validateSample: z.boolean().optional()
+  validateSample: z.boolean().optional(),
+  tab: z.string().min(1).optional()
 });
 
 const commitImportSchema = z.object({
@@ -130,7 +131,7 @@ const parseRowsWithHeader = (rows: string[][]) => {
     });
 };
 
-const parseRowsWithHeaderRow = (rows: string[][], headerRow: number) => {
+export const parseRowsWithHeaderRow = (rows: string[][], headerRow: number) => {
   if (rows.length < headerRow + 1) return [] as CsvRow[];
   const headerIndex = Math.max(0, headerRow - 1);
   const header = rows[headerIndex];
@@ -213,7 +214,7 @@ const getSharedSheetsSourceForCompany = async (companyId: string) => {
   };
 };
 
-const readSharedSheetRows = async (
+export const readSharedSheetRows = async (
   companyId: string,
   opts?: { tab?: string; maxRows?: number }
 ) => {
@@ -232,8 +233,11 @@ const readSharedSheetRows = async (
     throw new Error('tab_not_found');
   }
 
-  const maxRows = Math.min(Math.max(Number(opts?.maxRows ?? 20), 1), 100);
-  const range = buildRange(selectedTab, source.headerRow, maxRows);
+  const hasMaxRows = opts?.maxRows !== undefined;
+  const maxRows = hasMaxRows ? Math.min(Math.max(Number(opts.maxRows), 1), 100) : undefined;
+  const range = maxRows
+    ? buildRange(selectedTab, source.headerRow, maxRows)
+    : `${escapeSheetName(selectedTab)}!A${source.headerRow}:Z`;
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: source.spreadsheetId,
     range
@@ -289,7 +293,7 @@ const applyMappingAndTransforms = (
   return { rowErrors, correctedPreview };
 };
 
-const importRowsForCompany = async (companyId: string, rawRows: CsvRow[]) => {
+export const importRowsForCompany = async (companyId: string, rawRows: CsvRow[], importSource: 'file' | 'google_sheets' | 'manual' = 'manual') => {
   const parsedRows = rawRows.map(mapRow).filter((row): row is NonNullable<ReturnType<typeof mapRow>> => !!row);
   const validatedRows = parsedRows.map((row, index) => {
     const parsed = posDailySummarySchema.safeParse(row);
@@ -325,7 +329,7 @@ const importRowsForCompany = async (companyId: string, rawRows: CsvRow[]) => {
     return {
       updateOne: {
         filter: { companyId, date },
-        update: { $set: { ...row, date } },
+        update: { $set: { ...row, date, source: importSource } },
         upsert: true
       }
     };
@@ -353,10 +357,15 @@ export const importPosCsv = async (req: Request, res: Response) => {
   }
 
   const rows = parseCsvFileRows(req.file.buffer);
-  const result = await importRowsForCompany(req.companyId, rows);
+  const result = await importRowsForCompany(req.companyId, rows, 'file');
   if (!result.ok) {
     return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
   }
+
+  await IntegrationSettingsModel.updateOne(
+    { companyId: req.companyId },
+    { $set: { lastImportSource: 'file', lastImportAt: new Date() } }
+  );
 
   return ok(res, result.data);
 };
@@ -380,10 +389,15 @@ export const importPosFile = async (req: Request, res: Response) => {
   }
 
   const rows = isCsv ? parseCsvFileRows(req.file.buffer) : parseXlsxRows(req.file.buffer);
-  const result = await importRowsForCompany(req.companyId, rows);
+  const result = await importRowsForCompany(req.companyId, rows, 'file');
   if (!result.ok) {
     return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
   }
+
+  await IntegrationSettingsModel.updateOne(
+    { companyId: req.companyId },
+    { $set: { lastImportSource: 'file', lastImportAt: new Date() } }
+  );
 
   return ok(res, result.data);
 };
@@ -406,7 +420,7 @@ export const importPosRows = async (req: Request, res: Response) => {
     return fail(res, 'No data rows found. Ensure the first row contains headers.', 400);
   }
 
-  const result = await importRowsForCompany(req.companyId, parsedRows);
+  const result = await importRowsForCompany(req.companyId, parsedRows, 'file');
   if (!result.ok) {
     return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
   }
@@ -469,7 +483,10 @@ export const matchPosImportMapping = async (req: Request, res: Response) => {
   }
 
   try {
-    const { source, rawRows } = await readSharedSheetRows(req.companyId, { maxRows: 20 });
+    const { source, rawRows } = await readSharedSheetRows(req.companyId, {
+      tab: parsed.data.tab,
+      maxRows: 20
+    });
     const header = rawRows[0] ?? [];
     const sampleRows = rawRows.slice(1, 11);
     const { rowErrors, correctedPreview } = applyMappingAndTransforms(
@@ -503,13 +520,16 @@ export const commitPosImportFromSharedSheet = async (req: Request, res: Response
   }
 
   try {
-    const { source, rawRows } = await readSharedSheetRows(req.companyId);
+    const selectedTab = (parsedCommit.data.options?.tab as string) || undefined;
+    const { source, rawRows } = await readSharedSheetRows(req.companyId, {
+      tab: selectedTab
+    });
     const parsedRows = parseRowsWithHeaderRow(rawRows, source.headerRow);
     if (parsedRows.length === 0) {
       return fail(res, 'No data rows found in shared sheet', 400);
     }
 
-    const result = await importRowsForCompany(req.companyId, parsedRows);
+    const result = await importRowsForCompany(req.companyId, parsedRows, 'google_sheets');
     if (!result.ok) {
       return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
     }
@@ -527,7 +547,9 @@ export const commitPosImportFromSharedSheet = async (req: Request, res: Response
               createdBy: req.user.id
             },
             'googleSheets.connected': true,
-            'googleSheets.updatedAt': new Date()
+            'googleSheets.updatedAt': new Date(),
+            lastImportSource: 'google_sheets',
+            lastImportAt: new Date()
           }
         }
       );

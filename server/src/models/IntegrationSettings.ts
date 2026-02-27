@@ -59,7 +59,9 @@ const integrationSettingsSchema = new Schema(
       realmId: { type: String, default: null },
       companyName: { type: String, default: null },
       updatedAt: { type: Date, default: Date.now }
-    }
+    },
+    lastImportSource: { type: String, enum: ['file', 'google_sheets', null], default: null },
+    lastImportAt: { type: Date, default: null }
   },
   { timestamps: true }
 );
