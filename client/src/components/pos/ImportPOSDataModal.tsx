@@ -143,7 +143,6 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
   const [selectedSource, setSelectedSource] = useState<SourceType | null>(null);
   const [googleAuthMode, setGoogleAuthMode] = useState<GoogleAuthMode | null>(null);
   const [googleConnected, setGoogleConnected] = useState(false);
-  const [googleConnectedEmail, setGoogleConnectedEmail] = useState<string | null>(null);
   const [savedMapping, setSavedMapping] = useState<Record<string, string>>({});
   const [savedTransforms, setSavedTransforms] = useState<Record<string, unknown>>({});
 
@@ -165,7 +164,6 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [transforms, setTransforms] = useState<Record<string, unknown>>({});
   const [rowErrors, setRowErrors] = useState<Array<{ rowIndex: number; errors: Array<{ col: string; message: string }> }>>([]);
-  const [validated, setValidated] = useState(false);
 
   const mappedCount = useMemo(() => Object.values(mapping).filter(Boolean).length, [mapping]);
 
@@ -176,7 +174,6 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
     setSelectedSource(null);
     setGoogleAuthMode(null);
     setGoogleConnected(false);
-    setGoogleConnectedEmail(null);
     setSavedMapping({});
     setSavedTransforms({});
     setSpreadsheetInput('');
@@ -195,7 +192,6 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
     setMapping({});
     setTransforms({});
     setRowErrors([]);
-    setValidated(false);
   };
 
   const close = () => { resetState(); onClose(); };
@@ -209,7 +205,6 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
       if (gs?.serviceAccountEmail) setServiceAccountEmail(gs.serviceAccountEmail);
       if (gs?.sharedConfig?.spreadsheetId) setSpreadsheetInput(gs.sharedConfig.spreadsheetId);
       setGoogleConnected(Boolean(gs?.connected));
-      setGoogleConnectedEmail(gs?.connectedEmail ?? null);
       const columnsMap =
         (gs?.sharedConfig?.columnsMap && Object.keys(gs.sharedConfig.columnsMap).length > 0
           ? gs.sharedConfig.columnsMap
@@ -303,7 +298,6 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
       const merged = { ...suggested, ...(Object.keys(savedMapping).length > 0 ? savedMapping : {}) };
       setMapping(merged);
       if (Object.keys(savedTransforms).length > 0) setTransforms(savedTransforms);
-      setValidated(false);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Preview failed.');
     } finally {
@@ -338,14 +332,11 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
       setRowErrors(data.rowErrors ?? []);
       if (!data.valid) {
         setError(`Validation found ${data.rowErrors?.length ?? 0} issue(s). Fix mapping and retry.`);
-        setValidated(false);
         return;
       }
-      setValidated(true);
       setPhase('confirm');
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Validation failed');
-      setValidated(false);
     } finally {
       setBusy(false);
     }
@@ -401,9 +392,6 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
   };
 
   /* ── Phase navigation helpers ── */
-
-  const goToSource = () => { setPhase('source'); setError(null); };
-
   const selectSource = (src: SourceType) => {
     if (src === 'pos_db') return;
     setSelectedSource(src);
@@ -752,8 +740,8 @@ export const ImportPOSDataModal = ({ open, onClose, onImported }: ImportPOSDataM
       transforms={transforms}
       targetFields={TARGET_FIELDS}
       rowErrors={rowErrors}
-      onChangeMapping={m => { setMapping(m); setValidated(false); }}
-      onChangeTransforms={t => { setTransforms(t); setValidated(false); }}
+      onChangeMapping={m => { setMapping(m); }}
+      onChangeTransforms={t => { setTransforms(t); }}
     />
   );
 

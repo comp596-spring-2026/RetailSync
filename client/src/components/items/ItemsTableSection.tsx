@@ -24,8 +24,6 @@ export const ItemsTableSection = () => {
   const items = useAppSelector(selectItems);
   const loading = useAppSelector(selectItemsLoading);
   const error = useAppSelector(selectItemsError);
-
-  const canEdit = hasPermission(permissions, 'items', 'edit');
   const canDelete = hasPermission(permissions, 'items', 'delete');
 
   useEffect(() => {

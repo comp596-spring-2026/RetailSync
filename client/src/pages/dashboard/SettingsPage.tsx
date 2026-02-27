@@ -25,17 +25,19 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import GoogleIcon from "@mui/icons-material/Google";
 import TableChartIcon from "@mui/icons-material/TableChart";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
-import ShareIcon from "@mui/icons-material/Share";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AxiosError } from "axios";
-import { NoAccess, PageHeader, ImportPOSDataModal } from '../../components';
-import { GoogleSheetsIntegrationCard, GoogleSheetsSettings } from '../../components/settings/googleSheets/GoogleSheetsIntegrationCard';
-import { settingsApi, type GoogleSheetMode } from '../../api';
-import { useAppDispatch, useAppSelector } from '../../app/store/hooks';
-import { showSnackbar } from '../../slices/ui/uiSlice';
-import { hasPermission } from '../../utils/permissions';
-import { getAppErrorMessage } from '../../constants/errorCodes';
+import { NoAccess, PageHeader, ImportPOSDataModal } from "../../components";
+import {
+  GoogleSheetsIntegrationCard,
+  GoogleSheetsSettings,
+} from "../../components/settings/googleSheets/GoogleSheetsIntegrationCard";
+import { settingsApi, type GoogleSheetMode } from "../../api";
+import { useAppDispatch, useAppSelector } from "../../app/store/hooks";
+import { showSnackbar } from "../../slices/ui/uiSlice";
+import { hasPermission } from "../../utils/permissions";
+import { getAppErrorMessage } from "../../constants/errorCodes";
 
 type IntegrationSettings = {
   googleSheets: GoogleSheetsSettings;
@@ -75,14 +77,12 @@ export const SettingsPage = () => {
     '{\n  "date": "Date",\n  "amount": "Amount"\n}',
   );
   const [preview, setPreview] = useState<string[][]>([]);
-  const [sharedSpreadsheetId, setSharedSpreadsheetId] = useState('');
-  const [sharedSheetName, setSharedSheetName] = useState('Sheet1');
+  const [sharedSpreadsheetId, setSharedSpreadsheetId] = useState("");
+  const [sharedSheetName, setSharedSheetName] = useState("Sheet1");
   const [sharedHeaderRow, setSharedHeaderRow] = useState(1);
   const [isBusy, setIsBusy] = useState(false);
   const [integrationsExpanded, setIntegrationsExpanded] = useState(true);
   const [googleEditing, setGoogleEditing] = useState(false);
-  const [mappingView, setMappingView] = useState<"json" | "table">("json");
-  const [mappingExpanded, setMappingExpanded] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
 
   const loadSettings = async () => {
@@ -102,12 +102,15 @@ export const SettingsPage = () => {
         setMappingJson(JSON.stringify(activeSource.mapping ?? {}, null, 2));
       }
       if (data.googleSheets.sharedConfig) {
-        setSharedSpreadsheetId(data.googleSheets.sharedConfig.spreadsheetId ?? '');
-        setSharedSheetName(data.googleSheets.sharedConfig.sheetName || 'Sheet1');
+        setSharedSpreadsheetId(
+          data.googleSheets.sharedConfig.spreadsheetId ?? "",
+        );
+        setSharedSheetName(
+          data.googleSheets.sharedConfig.sheetName || "Sheet1",
+        );
         setSharedHeaderRow(data.googleSheets.sharedConfig.headerRow || 1);
       }
       setGoogleEditing(false);
-      setMappingView("json");
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load settings"));
     } finally {
@@ -124,14 +127,18 @@ export const SettingsPage = () => {
     if (status === "connected") {
       dispatch(
         showSnackbar({
-          message: "Google Sheets connected. You can now configure your sheet and mapping.",
+          message:
+            "Google Sheets connected. You can now configure your sheet and mapping.",
           severity: "success",
         }),
       );
     } else if (status === "error") {
       dispatch(
         showSnackbar({
-          message: getAppErrorMessage(reason, "Google Sheets connection error."),
+          message: getAppErrorMessage(
+            reason,
+            "Google Sheets connection error.",
+          ),
           severity: "error",
         }),
       );
@@ -147,9 +154,6 @@ export const SettingsPage = () => {
   if (!canView) {
     return <NoAccess />;
   }
-
-  const canEditGoogleDetails =
-    googleEditing && canEdit && !isBusy;
   const oauthConnected = Boolean(settings?.googleSheets.connectedEmail);
 
   const onModeChange = async (mode: GoogleSheetMode) => {
@@ -310,25 +314,35 @@ export const SettingsPage = () => {
   const onSaveSharedConfig = async () => {
     if (!canEdit) return;
     if (!sharedSpreadsheetId.trim()) {
-      dispatch(showSnackbar({ message: 'Spreadsheet ID is required', severity: 'error' }));
+      dispatch(
+        showSnackbar({
+          message: "Spreadsheet ID is required",
+          severity: "error",
+        }),
+      );
       return;
     }
     try {
       setIsBusy(true);
       await settingsApi.configureSharedSheet({
         spreadsheetId: sharedSpreadsheetId.trim(),
-        sheetName: sharedSheetName.trim() || 'Sheet1',
+        sheetName: sharedSheetName.trim() || "Sheet1",
         headerRow: sharedHeaderRow,
-        enabled: true
+        enabled: true,
       });
-      dispatch(showSnackbar({ message: 'Shared sheet config saved', severity: 'success' }));
+      dispatch(
+        showSnackbar({
+          message: "Shared sheet config saved",
+          severity: "success",
+        }),
+      );
       await loadSettings();
     } catch (err) {
       dispatch(
         showSnackbar({
-          message: getErrorMessage(err, 'Failed to save shared sheet config'),
-          severity: 'error'
-        })
+          message: getErrorMessage(err, "Failed to save shared sheet config"),
+          severity: "error",
+        }),
       );
     } finally {
       setIsBusy(false);
@@ -340,14 +354,16 @@ export const SettingsPage = () => {
     try {
       setIsBusy(true);
       await settingsApi.verifySharedSheet();
-      dispatch(showSnackbar({ message: 'Shared sheet verified', severity: 'success' }));
+      dispatch(
+        showSnackbar({ message: "Shared sheet verified", severity: "success" }),
+      );
       await loadSettings();
     } catch (err) {
       dispatch(
         showSnackbar({
-          message: getErrorMessage(err, 'Shared sheet verify failed'),
-          severity: 'error'
-        })
+          message: getErrorMessage(err, "Shared sheet verify failed"),
+          severity: "error",
+        }),
       );
       await loadSettings();
     } finally {
@@ -524,13 +540,18 @@ export const SettingsPage = () => {
                         exclusive
                         size="small"
                         value={settings.quickbooks.environment}
-                        onChange={(_e, value: "sandbox" | "production" | null) => {
+                        onChange={(
+                          _e,
+                          value: "sandbox" | "production" | null,
+                        ) => {
                           if (!value || !canEdit || isBusy) return;
                           void onQuickbooksEnvironment(value);
                         }}
                       >
                         <ToggleButton value="sandbox">Sandbox</ToggleButton>
-                        <ToggleButton value="production">Production</ToggleButton>
+                        <ToggleButton value="production">
+                          Production
+                        </ToggleButton>
                       </ToggleButtonGroup>
                     </Stack>
 

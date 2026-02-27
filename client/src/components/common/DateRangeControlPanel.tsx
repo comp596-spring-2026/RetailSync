@@ -18,18 +18,6 @@ import {
   type RangeKeyDict,
   type Range
 } from 'react-date-range';
-import {
-  startOfWeek,
-  endOfWeek,
-  startOfMonth,
-  endOfMonth,
-  startOfYear,
-  endOfYear,
-  subDays,
-  subMonths,
-  subYears,
-  addMonths
-} from 'date-fns';
 import moment from 'moment';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
@@ -49,33 +37,68 @@ const dateToMonth = (dateStr: string) => dateStr.slice(0, 7);
 export type DateRange = { from: string; to: string };
 
 const customStaticRanges = createStaticRanges([
-  { label: 'Today', range: () => ({ startDate: new Date(), endDate: new Date() }) },
+  {
+    label: 'Today',
+    range: () => {
+      const start = moment().startOf('day');
+      const end = moment().endOf('day');
+      return { startDate: start.toDate(), endDate: end.toDate() };
+    }
+  },
   {
     label: 'This Week',
-    range: () => ({ startDate: startOfWeek(new Date()), endDate: endOfWeek(new Date()) })
+    range: () => {
+      const start = moment().startOf('week');
+      const end = moment().endOf('week');
+      return { startDate: start.toDate(), endDate: end.toDate() };
+    }
   },
   {
     label: 'This Month',
-    range: () => ({ startDate: startOfMonth(new Date()), endDate: endOfMonth(new Date()) })
+    range: () => {
+      const start = moment().startOf('month');
+      const end = moment().endOf('month');
+      return { startDate: start.toDate(), endDate: end.toDate() };
+    }
   },
   {
     label: 'Last Month',
     range: () => {
-      const prev = subMonths(new Date(), 1);
-      return { startDate: startOfMonth(prev), endDate: endOfMonth(prev) };
+      const end = moment().startOf('month').subtract(1, 'day').endOf('day');
+      const start = end.clone().startOf('month');
+      return { startDate: start.toDate(), endDate: end.toDate() };
     }
   },
-  { label: 'Last 7 Days', range: () => ({ startDate: subDays(new Date(), 6), endDate: new Date() }) },
-  { label: 'Last 30 Days', range: () => ({ startDate: subDays(new Date(), 29), endDate: new Date() }) },
+  {
+    label: 'Last 7 Days',
+    range: () => {
+      const end = moment().endOf('day');
+      const start = end.clone().subtract(6, 'days').startOf('day');
+      return { startDate: start.toDate(), endDate: end.toDate() };
+    }
+  },
+  {
+    label: 'Last 30 Days',
+    range: () => {
+      const end = moment().endOf('day');
+      const start = end.clone().subtract(29, 'days').startOf('day');
+      return { startDate: start.toDate(), endDate: end.toDate() };
+    }
+  },
   {
     label: 'This Year',
-    range: () => ({ startDate: startOfYear(new Date()), endDate: endOfYear(new Date()) })
+    range: () => {
+      const start = moment().startOf('year');
+      const end = moment().endOf('year');
+      return { startDate: start.toDate(), endDate: end.toDate() };
+    }
   },
   {
     label: 'Last Year',
     range: () => {
-      const prev = subYears(new Date(), 1);
-      return { startDate: startOfYear(prev), endDate: endOfYear(prev) };
+      const end = moment().startOf('year').subtract(1, 'day').endOf('day');
+      const start = end.clone().startOf('year');
+      return { startDate: start.toDate(), endDate: end.toDate() };
     }
   }
 ]);
@@ -167,7 +190,7 @@ export const DateRangeControlPanel = ({
                   staticRanges={customStaticRanges}
                   inputRanges={[]}
                   rangeColors={['#1976d2']}
-                  maxDate={addMonths(new Date(), 1)}
+                  maxDate={moment().add(1, 'month').toDate()}
                 />
               </Paper>
             </ClickAwayListener>
