@@ -2,7 +2,7 @@ import { InferSchemaType, Schema, model } from 'mongoose';
 
 const jobLockSchema = new Schema(
   {
-    key: { type: String, required: true, unique: true },
+    key: { type: String, required: true },
     isLocked: { type: Boolean, default: false },
     lockedAt: { type: Date, default: null },
     expiresAt: { type: Date, default: null }

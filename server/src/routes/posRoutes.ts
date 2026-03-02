@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import multer from 'multer';
 import {
+  clearPosDailyData,
   commitPosImportFromSharedSheet,
+  exportPosDailyCsv,
+  getPosOverview,
   importPosCsv,
   importPosFile,
   importPosRows,
   listPosDaily,
+  listPosDailyPaged,
   matchPosImportMapping,
   previewPosImportFromSharedSheet
 } from '../controllers/posController';
@@ -49,11 +53,26 @@ router.post(
   commitPosImportFromSharedSheet
 );
 router.post(
+  '/import/google-sheets',
+  requirePermission('pos', 'create'),
+  requirePermission('pos', 'import'),
+  commitPosImportFromSharedSheet
+);
+router.post(
   '/import/sheets/match',
   requirePermission('pos', 'create'),
   requirePermission('pos', 'import'),
   matchPosImportMapping
 );
+router.post(
+  '/clear',
+  requirePermission('pos', 'create'),
+  requirePermission('pos', 'import'),
+  clearPosDailyData
+);
 router.get('/daily', requirePermission('pos', 'view'), listPosDaily);
+router.get('/daily-paged', requirePermission('pos', 'view'), listPosDailyPaged);
+router.get('/overview', requirePermission('pos', 'view'), getPosOverview);
+router.get('/export', requirePermission('pos', 'view'), exportPosDailyCsv);
 
 export default router;

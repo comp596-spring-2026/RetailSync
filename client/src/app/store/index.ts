@@ -1,21 +1,7 @@
-import { combineReducers, configureStore } from '@reduxjs/toolkit';
+import { configureStore } from '@reduxjs/toolkit';
 import storage from 'redux-persist/lib/storage';
 import { persistReducer, persistStore } from 'redux-persist';
-import authReducer from '../../slices/auth/authSlice';
-import companyReducer from '../../slices/company/companySlice';
-import rbacReducer from '../../slices/rbac/rbacSlice';
-import uiReducer from '../../slices/ui/uiSlice';
-import itemsReducer from '../../slices/items/itemsSlice';
-import locationsReducer from '../../slices/locations/locationsSlice';
-
-const rootReducer = combineReducers({
-  auth: authReducer,
-  company: companyReducer,
-  rbac: rbacReducer,
-  ui: uiReducer,
-  items: itemsReducer,
-  locations: locationsReducer
-});
+import { rootReducer } from './rootReducer';
 
 const persistConfig = {
   key: 'retailsync-root',

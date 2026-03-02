@@ -19,11 +19,7 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import SyncAltIcon from '@mui/icons-material/SyncAlt';
-import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
-import AssessmentIcon from '@mui/icons-material/Assessment';
-import GroupIcon from '@mui/icons-material/Group';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
-import TuneIcon from '@mui/icons-material/Tune';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
@@ -31,9 +27,9 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { authApi } from '../../api';
-import { clearCompany } from '../../slices/company/companySlice';
-import { logout } from '../../slices/auth/authSlice';
+import { authApi } from '../api';
+import { clearCompany } from '../../modules/users/state';
+import { logout } from '../../modules/auth/state';
 import { hasPermission } from '../../utils/permissions';
 import { LogoHorizontal } from '../../components';
 import { useMemo, useState } from 'react';
@@ -99,9 +95,6 @@ export const DashboardLayout = () => {
       : []),
     ...(hasPermission(permissions, 'pos', 'view')
       ? [{ label: 'POS', path: '/dashboard/pos', icon: <PointOfSaleIcon fontSize="small" /> }]
-      : []),
-    ...(hasPermission(permissions, 'reports', 'view')
-      ? [{ label: 'Reports', path: '/dashboard/reports', icon: <AssessmentIcon fontSize="small" /> }]
       : []),
     ...(hasPermission(permissions, 'dashboard', 'view')
       ? [{ label: 'Playground', path: '/dashboard/playground', icon: <ScienceOutlinedIcon fontSize="small" /> }]

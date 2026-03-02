@@ -1,49 +1,52 @@
 # Testing Strategy
 
-## Current Implemented Tests
+## Coverage Model
 
-### Server
+- Unit tests for reducers, hooks, utils, and API wrappers
+- Component tests for critical UI and guard behavior
+- Integration tests (server) with `mongodb-memory-server`
+- E2E module playbook documented in `module-e2e-cases.md`
 
-- `/Users/trupal/Projects/RetailSync/server/src/app.test.ts`
-  - health endpoint contract
-- `/Users/trupal/Projects/RetailSync/server/src/auth.refresh.test.ts`
-  - refresh rotation and old token reuse rejection
-- `/Users/trupal/Projects/RetailSync/server/src/tenantIsolation.test.ts`
-  - cross-tenant isolation + scoped aggregates
-- `/Users/trupal/Projects/RetailSync/server/src/inventoryLedger.immutability.test.ts`
-  - immutable ledger behavior
-- `/Users/trupal/Projects/RetailSync/server/src/posAndReports.test.ts`
-  - POS daily returns empty array when no data; reports monthly summary returns zeroed totals when no data
+## Module Coverage (Client)
 
-### Client
+- Auth: login/onboarding pages + auth API + auth sync flow tests
+- POS: slice thunks, mapping wizard, chart rendering tests
+- Inventory: item/location slice tests
+- Users: company slice tests
+- RBAC: role state tests
+- Settings: settings slice + debug helper tests
+- Procurement: hub page smoke test
+- Dev: home demo page smoke test
 
-- `/Users/trupal/Projects/RetailSync/client/src/utils/permissions.test.ts`
-- `/Users/trupal/Projects/RetailSync/client/src/components/PermissionGate.test.tsx`
-- `/Users/trupal/Projects/RetailSync/client/src/components/ImportPOSDataModal.test.tsx`
+Detailed matrix:
 
-## Run Commands
+- [Module Test Matrix](/Users/trupal/Projects/RetailSync/docs/testing/module-test-matrix.md)
+- [Module E2E Cases](/Users/trupal/Projects/RetailSync/docs/testing/module-e2e-cases.md)
+
+## Server Coverage
+
+- Health/app contract
+- JWT refresh rotation and reuse protection
+- Tenant isolation for company-scoped data
+- Inventory ledger immutability
+- POS/reports integration baseline behavior
+
+## Commands
 
 ```bash
-pnpm --filter @retailsync/server test
-pnpm --filter @retailsync/client test
+# Client
+pnpm -C client exec tsc --noEmit
+pnpm -C client test
+
+# Server
+pnpm -C server exec tsc --noEmit
+pnpm -C server test
+
+# Workspace
 pnpm test
 ```
 
-## Test Pyramid
+## CI
 
-```mermaid
-flowchart TD
-  U["Unit\nutilities, schemas"] --> I["Integration\nexpress + DB behavior"]
-  I --> F["Flow/E2E\ntenant workflows"]
-```
-
-## CI Notes
-
-- **Unit** (`pnpm --filter @retailsync/server test:unit`): Excludes DB-backed tests (tenant isolation, auth refresh, inventory ledger, posAndReports). No MongoDB required.
-- **Integration** (`pnpm --filter @retailsync/server test:integration`): Runs tests that use `mongodb-memory-server` (tenant isolation, auth refresh, inventory ledger immutability, POS/reports empty-state). Requires runtime that can start MongoMemoryServer (e.g. write to cache for binary download).
-- Use targeted unit test commands when DB tests are unavailable.
-
-## Next Priority
-
-1. Add E2E browser automation (Playwright) for complete login/onboarding/dashboard flows.
-2. Add coverage thresholds in CI.
+- CI should run client + server typecheck and tests on every PR.
+- Integration suites requiring Mongo memory binaries should run in CI environments with download/cache access.

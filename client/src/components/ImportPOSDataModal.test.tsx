@@ -1,11 +1,12 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import authReducer from '../slices/auth/authSlice';
-import companyReducer from '../slices/company/companySlice';
-import rbacReducer from '../slices/rbac/rbacSlice';
-import uiReducer from '../slices/ui/uiSlice';
+import authReducer from '../modules/auth/state';
+import companyReducer from '../modules/users/state';
+import rbacReducer from '../modules/rbac/state';
+import uiReducer from '../app/store/uiSlice';
+import { ImportPOSDataModal } from '../modules/pos/components/ImportPOSDataModal';
 
 const mockListTabs = vi.fn();
 const mockPreviewSheet = vi.fn();
@@ -13,14 +14,27 @@ const mockValidateMapping = vi.fn();
 const mockCommitImport = vi.fn();
 const mockGetSettings = vi.fn();
 const mockConfigureSharedSheet = vi.fn();
+const mockListTabsWithSpreadsheetId = vi.fn();
+const mockListOAuthSpreadsheets = vi.fn();
+const mockListSharedSpreadsheets = vi.fn();
+const mockSetGoogleMode = vi.fn();
+const mockSaveGoogleSheetsMapping = vi.fn();
 
-vi.mock('../api', () => ({
+vi.mock('../modules/settings/api', () => ({
   settingsApi: {
     get: (...args: unknown[]) => mockGetSettings(...args),
     listTabs: (...args: unknown[]) => mockListTabs(...args),
+    listTabsWithSpreadsheetId: (...args: unknown[]) => mockListTabsWithSpreadsheetId(...args),
+    listOAuthSpreadsheets: (...args: unknown[]) => mockListOAuthSpreadsheets(...args),
+    listSharedSpreadsheets: (...args: unknown[]) => mockListSharedSpreadsheets(...args),
     configureSharedSheet: (...args: unknown[]) => mockConfigureSharedSheet(...args),
+    setGoogleMode: (...args: unknown[]) => mockSetGoogleMode(...args),
+    saveGoogleSheetsMapping: (...args: unknown[]) => mockSaveGoogleSheetsMapping(...args),
     getGoogleConnectUrl: vi.fn().mockResolvedValue({ data: { data: { url: 'https://google.com' } } })
-  },
+  }
+}));
+
+vi.mock('../modules/pos/api', () => ({
   posApi: {
     previewSheet: (...args: unknown[]) => mockPreviewSheet(...args),
     validateMapping: (...args: unknown[]) => mockValidateMapping(...args),
@@ -39,12 +53,10 @@ const createStore = () =>
     }
   });
 
-const renderModal = async () => {
-  const module = await import('./pos/ImportPOSDataModal');
-  const Component = module.ImportPOSDataModal;
+const renderModal = () => {
   return render(
     <Provider store={createStore()}>
-      <Component open onClose={vi.fn()} />
+      <ImportPOSDataModal open onClose={vi.fn()} />
     </Provider>
   );
 };
@@ -58,7 +70,14 @@ describe('ImportPOSDataModal', () => {
     mockListTabs.mockResolvedValue({
       data: { data: { tabs: [{ title: 'Sheet1', rowCount: 100, columnCount: 8 }] } }
     });
+    mockListTabsWithSpreadsheetId.mockResolvedValue({
+      data: { data: { tabs: [{ title: 'Sheet1', rowCount: 100, columnCount: 8 }] } }
+    });
+    mockListOAuthSpreadsheets.mockResolvedValue({ data: { data: { files: [] } } });
+    mockListSharedSpreadsheets.mockResolvedValue({ data: { data: { files: [] } } });
     mockConfigureSharedSheet.mockResolvedValue({ data: { data: {} } });
+    mockSetGoogleMode.mockResolvedValue({ data: { data: {} } });
+    mockSaveGoogleSheetsMapping.mockResolvedValue({ data: { data: {} } });
     mockPreviewSheet.mockResolvedValue({
       data: { data: { header: ['Date'], sampleRows: [['2026-01-01']], suggestions: [] } }
     });
@@ -75,29 +94,29 @@ describe('ImportPOSDataModal', () => {
   });
 
   it('renders three source options', async () => {
-    await renderModal();
-    expect(await screen.findByText('File Import')).toBeInTheDocument();
-    expect(screen.getByText('Google Sheets')).toBeInTheDocument();
-    expect(screen.getByText('POS / Database')).toBeInTheDocument();
+    renderModal();
+    expect(screen.getByText('Import POS Data')).toBeInTheDocument();
+    expect(screen.queryAllByText('Import Excel').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('Google Sheets').length).toBeGreaterThan(0);
   });
 
-  it('shows coming soon chip only on POS/DB', async () => {
-    await renderModal();
-    const chips = screen.getAllByText('Coming Soon');
-    expect(chips.length).toBe(1);
+  it('shows source selection guidance', async () => {
+    renderModal();
+    expect(screen.getByText('Select a data source to begin importing POS data.')).toBeInTheDocument();
   });
 
-  it('allows selecting Google Sheets and shows auth options', async () => {
-    await renderModal();
-    fireEvent.click(screen.getByText('Google Sheets'));
+  it('allows selecting Google Sheets and shows setup guidance', async () => {
+    renderModal();
+    fireEvent.click(screen.getAllByText('Google Sheets')[0]);
 
-    expect(await screen.findByText('Sign in with Google')).toBeInTheDocument();
-    expect(screen.getByText('Share with Service Account')).toBeInTheDocument();
+    expect(await screen.findByText('Source')).toBeInTheDocument();
+    expect(screen.queryByText('Select a data source to begin importing POS data.')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Google Sheets').length).toBeGreaterThan(0);
   });
 
-  it('allows selecting File Import and shows upload', async () => {
-    await renderModal();
-    fireEvent.click(screen.getByText('File Import'));
+  it('allows selecting Import Excel and shows upload', async () => {
+    renderModal();
+    fireEvent.click(screen.getAllByText('Import Excel')[0]);
 
     expect(await screen.findByText('Click to choose a file')).toBeInTheDocument();
   });

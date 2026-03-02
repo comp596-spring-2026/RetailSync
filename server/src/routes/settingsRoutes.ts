@@ -6,6 +6,7 @@ import {
   disconnectGoogle,
   disconnectQuickbooks,
   getSettings,
+  getGoogleSheetsSyncOverview,
   resetGoogleSheetsIntegration,
   setGoogleMode,
   setQuickbooksSettings,
@@ -18,6 +19,7 @@ const router = Router();
 router.use(requireAuth, requirePermission('rolesSettings', 'view'));
 
 router.get('/', getSettings);
+router.get('/google-sheets/sync-overview', getGoogleSheetsSyncOverview);
 router.post('/google-sheets/test', testGoogleSheetAccess);
 router.post('/quickbooks/connect', connectQuickbooksPlaceholder);
 

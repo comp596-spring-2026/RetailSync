@@ -6,6 +6,9 @@ import {
   parseRowsWithHeaderRow,
   importRowsForCompany
 } from '../controllers/posController';
+import { ensureSharedSheets, isEmptyRecord, normalizeStringRecord, pickDefaultSharedSheet } from '../utils/sharedSheets';
+import { parseUtcOffsetToMinutes } from '../utils/utcOffset';
+import { buildSheetsBindingKey } from '../utils/sheetsBinding';
 
 export type RunSheetsSyncArgs = {
   source: string;
@@ -37,6 +40,7 @@ export type SheetsSyncResult = {
 
 const LOCK_KEY = 'sheets-sync';
 const LOCK_TTL_MS = 15 * 60 * 1000;
+const DEFAULT_SYNC_UTC_OFFSET = 'UTC-08:00';
 
 const acquireLock = async () => {
   const now = new Date();
@@ -74,16 +78,44 @@ const releaseLock = async () => {
   );
 };
 
-const normalizeStringRecord = (value: unknown): Record<string, string> => {
-  if (!value) return {};
-  if (value instanceof Map) return Object.fromEntries(Array.from(value.entries()).map(([k, v]) => [String(k), String(v)]));
-  if (typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
-  }
-  return {};
+type SheetsSyncSchedule = {
+  enabled?: boolean;
+  hour?: number;
+  minute?: number;
+  timezone?: string;
 };
 
-const isEmptyRecord = (obj: Record<string, unknown>) => Object.keys(obj).length === 0;
+const getLocalDateParts = (date: Date, offsetMinutes: number) => {
+  const shifted = new Date(date.getTime() + offsetMinutes * 60_000);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+    hour: shifted.getUTCHours(),
+    minute: shifted.getUTCMinutes()
+  };
+};
+
+const isScheduleDue = (schedule: SheetsSyncSchedule | undefined, lastScheduledSyncAt: Date | null, now = new Date()) => {
+  if (!schedule?.enabled) return true;
+  const timezone = schedule.timezone || DEFAULT_SYNC_UTC_OFFSET;
+  const offsetMinutes = parseUtcOffsetToMinutes(timezone) ?? parseUtcOffsetToMinutes(DEFAULT_SYNC_UTC_OFFSET) ?? 0;
+  const targetHour = Number.isFinite(schedule.hour) ? Number(schedule.hour) : 2;
+  const targetMinute = Number.isFinite(schedule.minute) ? Number(schedule.minute) : 0;
+
+  const nowParts = getLocalDateParts(now, offsetMinutes);
+  const nowMinutes = nowParts.hour * 60 + nowParts.minute;
+  const targetMinutes = targetHour * 60 + targetMinute;
+  if (nowMinutes < targetMinutes) return false;
+
+  if (!lastScheduledSyncAt) return true;
+  const lastParts = getLocalDateParts(lastScheduledSyncAt, offsetMinutes);
+  const sameDay =
+    lastParts.year === nowParts.year &&
+    lastParts.month === nowParts.month &&
+    lastParts.day === nowParts.day;
+  return !sameDay;
+};
 
 export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArgs): Promise<SheetsSyncResult> => {
   const lockAcquired = await acquireLock();
@@ -107,8 +139,11 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
 
   try {
     const settingsList = await IntegrationSettingsModel.find({
-      'googleSheets.sharedConfig.enabled': true,
-      'googleSheets.sharedConfig.spreadsheetId': { $ne: null }
+      companyId: { $exists: true },
+      $or: [
+        { 'googleSheets.sharedSheets.enabled': true, 'googleSheets.sharedSheets.spreadsheetId': { $ne: null } },
+        { 'googleSheets.sharedConfig.enabled': true, 'googleSheets.sharedConfig.spreadsheetId': { $ne: null } }
+      ]
     }).lean();
 
     if (settingsList.length === 0) {
@@ -139,6 +174,19 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
       };
 
       try {
+        const schedule = ((settings as any)?.googleSheets?.syncSchedule ?? {}) as SheetsSyncSchedule;
+        const lastScheduledSyncAt = ((settings as any)?.googleSheets?.lastScheduledSyncAt as Date | null | undefined) ?? null;
+        if (!isScheduleDue(schedule, lastScheduledSyncAt, new Date())) {
+          const hour = String(schedule.hour ?? 2).padStart(2, '0');
+          const minute = String(schedule.minute ?? 0).padStart(2, '0');
+          result.ok = true;
+          result.skipped = true;
+          result.reason = `Not due by schedule (${schedule.timezone ?? DEFAULT_SYNC_UTC_OFFSET} ${hour}:${minute})`;
+          skipped += 1;
+          companies.push(result);
+          continue;
+        }
+
         const { source: sharedSource, rawRows, rowCount } = await readSharedSheetRows(companyId);
         result.rowCount = rowCount;
 
@@ -161,10 +209,13 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
           continue;
         }
 
-        const sharedConfig = (settings as any)?.googleSheets?.sharedConfig;
-        const columnsMap = normalizeStringRecord(sharedConfig?.columnsMap);
-        const lastMap = normalizeStringRecord(sharedConfig?.lastMapping?.columnsMap);
+        const googleSheets = ((settings as any)?.googleSheets ?? {}) as Record<string, unknown>;
+        const profile = pickDefaultSharedSheet(googleSheets) ?? (ensureSharedSheets(googleSheets)[0] ?? null);
+        const columnsMap = normalizeStringRecord(profile?.columnsMap);
+        const lastMap = normalizeStringRecord(profile?.lastMapping?.columnsMap);
         const effectiveMapping = !isEmptyRecord(columnsMap) ? columnsMap : lastMap;
+        const effectiveTransforms =
+          ((profile?.lastMapping?.transformations as Record<string, unknown> | undefined) ?? {});
 
         if (isEmptyRecord(effectiveMapping)) {
           result.ok = true;
@@ -186,18 +237,44 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
         }
 
         const mappedRows = parsedRows.map((row) => {
-          const out: Record<string, string | undefined> = { ...row };
+          const out: Record<string, string | undefined> = {};
           for (const [sourceHeader, targetField] of Object.entries(effectiveMapping)) {
             if (!targetField) continue;
+            const normalizedTargetField = targetField.startsWith('custom:')
+              ? targetField.replace(/^custom:/, '').trim()
+              : targetField;
+            if (!normalizedTargetField) continue;
             const raw = row[sourceHeader];
             if (raw === undefined) continue;
             let value = String((raw ?? '')).trim();
-            out[targetField] = value;
+            out[normalizedTargetField] = value;
           }
           return out;
         });
 
-        const importResult = await importRowsForCompany(companyId, mappedRows, 'google_sheets');
+        const derivedFields = Array.isArray((effectiveTransforms as Record<string, unknown>).__derivedFields)
+          ? ((effectiveTransforms as Record<string, unknown>).__derivedFields as unknown[])
+              .map((value) => String(value))
+              .filter(Boolean)
+          : undefined;
+        const importBindingKey = buildSheetsBindingKey({
+          mode: 'service_account',
+          profileName: profile?.name ?? 'POS DATA SHEET',
+          spreadsheetId: sharedSource.spreadsheetId,
+          sheetName: sharedSource.sheetName
+        });
+
+        const importResult = await importRowsForCompany(companyId, mappedRows, 'google_sheets', {
+          importBindingKey,
+          derivedFields,
+          sourceRef: {
+            mode: 'service_account',
+            profileName: profile?.name ?? 'POS DATA SHEET',
+            spreadsheetId: sharedSource.spreadsheetId,
+            sheetName: sharedSource.sheetName,
+            reason: 'Scheduled sync'
+          }
+        });
         if (!importResult.ok) {
           result.ok = false;
           result.reason = importResult.error?.message ?? 'Validation failed';
@@ -216,7 +293,8 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
           {
             $set: {
               lastImportSource: 'google_sheets',
-              lastImportAt: new Date()
+              lastImportAt: new Date(),
+              'googleSheets.lastScheduledSyncAt': new Date()
             }
           },
           { new: true }
@@ -249,4 +327,3 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
     companies
   };
 };
-

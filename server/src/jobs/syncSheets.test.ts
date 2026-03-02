@@ -186,7 +186,10 @@ describe('runSheetsSync', () => {
     expect(importRowsForCompanyMock).toHaveBeenCalledWith(
       'company-1',
       expect.any(Array),
-      'google_sheets'
+      'google_sheets',
+      expect.objectContaining({
+        importBindingKey: expect.any(String)
+      })
     );
     expect(findOneAndUpdateSettingsMock).toHaveBeenCalledWith(
       { companyId: 'company-1' },
@@ -199,4 +202,3 @@ describe('runSheetsSync', () => {
     );
   });
 });
-

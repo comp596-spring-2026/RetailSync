@@ -31,14 +31,16 @@ Organized by role; consumed via barrel `import { X } from '../components'`.
 
 ---
 
-## `slices/` — Redux state (slices)
+## `modules/*/state/` — Redux feature state
 
-One folder per slice; each contains the Redux slice and optionally slice-specific types/utils.
+Redux state is feature-owned under `modules/<feature>/state`.
 
-- `auth/` — authSlice (user, token, permissions). **Does not** call API (avoids circular deps with `api/client` which uses the store).
-- `company/` — companySlice.
-- `rbac/` — rbacSlice.
-- `ui/` — uiSlice (snackbar, etc.).
+- `modules/auth/state` — auth reducer/actions/types.
+- `modules/company/state` — company reducer/actions.
+- `modules/rbac/state` — rbac reducer/actions.
+- `modules/ui/state` — global UI reducer/actions.
+- `modules/items/state`, `modules/locations/state`, `modules/settings/state`, `modules/pos/state`.
+- Each feature exposes a public state API via `modules/<feature>/state/index.ts`.
 
 **When to use thunks vs helpers vs component fetch**
 
@@ -59,8 +61,8 @@ Grouped by flow: **`auth/`** (Login, GoogleAuthSuccess), **`onboarding/`** (Onbo
 
 ## Redux + API layering
 
-- **Store:** `app/store/` — configureStore, root reducer, persist, hooks. Single source of truth for auth, company, rbac, ui.
-- **Slices:** `slices/` — one folder per slice (auth, company, rbac, ui). Slices do not import API (avoids circular deps).
+- **Store:** `app/store/` — configureStore, root reducer, persist, hooks. Infrastructure only.
+- **Feature state:** `modules/*/state/` — feature reducers/actions/selectors/thunks.
 - **API (service layer):** `api.ts` + `api/` — class-based clients; call after import, e.g. `authApi.me()`, `companyApi.create(payload)`.
 
 ---

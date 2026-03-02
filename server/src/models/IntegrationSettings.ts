@@ -5,18 +5,26 @@ const googleSheetSourceSchema = new Schema(
   {
     sourceId: { type: String, required: true },
     name: { type: String, required: true },
+    spreadsheetTitle: { type: String, default: null },
     spreadsheetId: { type: String, required: true },
     sheetGid: { type: String, default: null },
     range: { type: String, required: true, default: 'Sheet1!A1:Z' },
     mapping: { type: Map, of: String, default: {} },
+    transformations: { type: Map, of: Schema.Types.Mixed, default: {} },
     active: { type: Boolean, default: false }
   },
+  { _id: false }
+);
+
+const availableTabSchema = new Schema(
+  { sheetId: { type: Number, required: true }, sheetName: { type: String, required: true } },
   { _id: false }
 );
 
 const googleSharedSheetConfigSchema = new Schema(
   {
     spreadsheetId: { type: String, default: null },
+    spreadsheetTitle: { type: String, default: null },
     sheetName: { type: String, default: 'Sheet1' },
     sheetId: { type: Number, default: null },
     headerRow: { type: Number, default: 1, min: 1 },
@@ -28,6 +36,9 @@ const googleSharedSheetConfigSchema = new Schema(
       default: 'unknown'
     },
     oauthConnectedAccount: { type: String, default: null },
+    availableTabs: { type: [availableTabSchema], default: undefined },
+    ownerEmail: { type: String, default: null },
+    modifiedTime: { type: String, default: null },
     lastMapping: {
       columnsMap: { type: Map, of: String, default: {} },
       transformations: { type: Map, of: Schema.Types.Mixed, default: {} },
@@ -36,6 +47,48 @@ const googleSharedSheetConfigSchema = new Schema(
     },
     lastVerifiedAt: { type: Date, default: null },
     lastImportAt: { type: Date, default: null }
+  },
+  { _id: false }
+);
+
+const googleSharedSheetProfileSchema = new Schema(
+  {
+    profileId: { type: String, required: true },
+    name: { type: String, required: true, default: 'POS Data SHEET' },
+    spreadsheetId: { type: String, default: null },
+    spreadsheetTitle: { type: String, default: null },
+    sheetName: { type: String, default: 'Sheet1' },
+    sheetId: { type: Number, default: null },
+    headerRow: { type: Number, default: 1, min: 1 },
+    columnsMap: { type: Map, of: String, default: {} },
+    enabled: { type: Boolean, default: false },
+    shareStatus: {
+      type: String,
+      enum: ['unknown', 'not_shared', 'shared', 'no_permission', 'not_found'],
+      default: 'unknown'
+    },
+    availableTabs: { type: [availableTabSchema], default: undefined },
+    ownerEmail: { type: String, default: null },
+    modifiedTime: { type: String, default: null },
+    lastMapping: {
+      columnsMap: { type: Map, of: String, default: {} },
+      transformations: { type: Map, of: Schema.Types.Mixed, default: {} },
+      createdAt: { type: Date, default: null },
+      createdBy: { type: String, default: null }
+    },
+    lastVerifiedAt: { type: Date, default: null },
+    lastImportAt: { type: Date, default: null },
+    isDefault: { type: Boolean, default: false }
+  },
+  { _id: false }
+);
+
+const googleSheetsSyncScheduleSchema = new Schema(
+  {
+    enabled: { type: Boolean, default: false },
+    hour: { type: Number, min: 0, max: 23, default: 2 },
+    minute: { type: Number, min: 0, max: 59, default: 0 },
+    timezone: { type: String, default: 'UTC-08:00' }
   },
   { _id: false }
 );
@@ -50,7 +103,10 @@ const integrationSettingsSchema = new Schema(
       connected: { type: Boolean, default: false },
       connectedEmail: { type: String, default: null },
       sources: { type: [googleSheetSourceSchema], default: [] },
+      sharedSheets: { type: [googleSharedSheetProfileSchema], default: [] },
       sharedConfig: { type: googleSharedSheetConfigSchema, default: () => ({}) },
+      syncSchedule: { type: googleSheetsSyncScheduleSchema, default: () => ({}) },
+      lastScheduledSyncAt: { type: Date, default: null },
       updatedAt: { type: Date, default: Date.now }
     },
     quickbooks: {

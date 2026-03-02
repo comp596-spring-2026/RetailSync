@@ -39,7 +39,7 @@ const readWithOAuth = async (spreadsheetId: string, range: string, req: Request)
   }).select('+encryptedPayload');
 
   if (!tokenDoc?.encryptedPayload) {
-    throw new Error('Google OAuth tokens not found. Use Connect Google first.');
+    throw new Error('Google OAuth tokens not found. Configure an OAuth source for this sheet first.');
   }
 
   if (!env.googleOAuthClientId || !env.googleOAuthClientSecret || !env.googleIntegrationRedirectUri) {

@@ -60,6 +60,9 @@ export const AuthShell = ({
           )}
           {children}
           <Stack direction="row" justifyContent="center" spacing={2} sx={{ pt: 1 }}>
+            <MuiLink component={Link} to="/home-demo" underline="hover" variant="caption" color="text.secondary">
+              About project
+            </MuiLink>
             <MuiLink component={Link} to="/privacy" underline="hover" variant="caption" color="text.secondary">
               Privacy
             </MuiLink>

@@ -4,28 +4,29 @@ Base URL: `http://localhost:4000/api`
 
 ## Response Contract
 
-- success: `{ "status": "ok", "data": ... }`
-- error: `{ "status": "error", "message": "...", "details"?: ... }`
+- Success: `{ "status": "ok", "data": ... }`
+- Error: `{ "status": "error", "message": "...", "details"?: ... }`
 
-## Auth Endpoints
+## Health
 
-### `GET /auth/google/start`
-Starts Google OAuth authorization.
+- `GET /health`
+- `GET /health/env-readiness`
 
-### `GET /auth/google/callback`
-Handles Google OAuth callback and redirects client with `accessToken`.
+## Auth
 
-### `POST /auth/refresh`
-### `POST /auth/logout`
-### `GET /auth/me`
+- `GET /auth/google/start`
+- `GET /auth/google/callback`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `GET /auth/me`
 
-## Company Onboarding
+## Company
 
 - `POST /company/create`
 - `POST /company/join`
 - `GET /company/mine`
 
-## RBAC Roles
+## Roles / RBAC
 
 - `GET /roles/modules`
 - `GET /roles`
@@ -41,15 +42,29 @@ Handles Google OAuth callback and redirects client with `accessToken`.
 - `GET /invites`
 - `DELETE /invites/:id`
 
-## POS and Reports
+## POS
 
 - `POST /pos/import` (multipart `file`)
 - `POST /pos/import-file` (multipart `file`)
 - `POST /pos/import-rows` (JSON rows)
+- `POST /pos/import/sheets/preview`
+- `POST /pos/import/sheets/match`
+- `POST /pos/import/sheets/commit`
+- `POST /pos/import/google-sheets` (alias to commit flow)
+- `POST /pos/clear`
 - `GET /pos/daily?start=YYYY-MM-DD&end=YYYY-MM-DD`
-- `GET /reports/monthly-summary?month=YYYY-MM`
+- `GET /pos/daily-paged?start&end&page&limit`
+- `GET /pos/overview?start&end`
+- `GET /pos/export?start&end` (CSV download)
 
-## Items, Locations, Inventory
+## Reports (API still available)
+
+- `GET /reports/monthly-summary?month=YYYY-MM`
+- `GET /reports/date-range-summary?start=YYYY-MM-DD&end=YYYY-MM-DD`
+
+## Inventory
+
+Items:
 
 - `GET /inventory/items`
 - `POST /inventory/items`
@@ -57,75 +72,80 @@ Handles Google OAuth callback and redirects client with `accessToken`.
 - `DELETE /inventory/items/:id`
 - `POST /inventory/items/import` (multipart `file`)
 
+Locations:
+
 - `GET /inventory/locations`
 - `POST /inventory/locations`
 - `PUT /inventory/locations/:id`
 - `DELETE /inventory/locations/:id`
 
+Operations:
+
 - `POST /inventory/move`
 - `GET /inventory/location/:code`
 
-## Google / Sheets Integrations
+## Integrations: Google + Sheets
 
-- `GET /google/connect-url` (auth required, returns OAuth URL)
-- `GET /google/connect` (placeholder/public flow depending on route config)
+Google helper routes:
+
+- `GET /google/connect-url`
+- `GET /google/connect`
 - `GET /google/callback`
+
+Sheets read helper:
+
 - `GET /sheets/read?spreadsheetId=...&range=...`
 
-## Integration Settings
+Google Sheets integration (OAuth-specific):
 
-- `GET /settings/`
+- `GET /integrations/google/sheets/oauth-status`
+- `GET /integrations/google/sheets/start-url`
+- `GET /integrations/google/sheets/files`
+- `GET /integrations/google/sheets/start`
+- `GET /integrations/google/sheets/callback`
+
+Shared/service-account sheets integration:
+
+- `GET /integrations/sheets/shared-files`
+- `POST /integrations/sheets/config`
+- `POST /integrations/sheets/verify`
+- `GET /integrations/sheets/tabs`
+- `POST /integrations/sheets/tabs`
+- `POST /integrations/sheets/save-mapping`
+- `POST /integrations/sheets/sync-schedule`
+- `POST /integrations/sheets/delete-source`
+
+Debug endpoints:
+
+- `GET /debug/sheets/read`
+- `POST /debug/sheets/append`
+
+## Settings
+
+- `GET /settings`
+- `GET /settings/google-sheets/sync-overview`
 - `POST /settings/google-sheets/test`
 - `PUT /settings/google-sheets/mode`
 - `PUT /settings/google-sheets/source`
+- `POST /settings/google-sheets/reset`
+- `POST /settings/disconnect/google`
 - `POST /settings/quickbooks/connect`
 - `PUT /settings/quickbooks`
-- `POST /settings/disconnect/google`
 - `POST /settings/disconnect/quickbooks`
 
-## Placeholder CRUD Shell Endpoints
+## Cron
 
-Also available under `/api/<module>` for generic module shells:
+- `POST /cron/sync-sheets` (expects `x-cron-secret` when configured)
+
+## Module Shell CRUD (placeholder)
+
+Available under `/api/<module>` for shell-backed modules:
 
 - `GET /<module>`
 - `POST /<module>`
 - `PUT /<module>/:id`
 - `DELETE /<module>/:id`
 
-## Workflow: Auth and Session
+Current registered modules:
 
-```mermaid
-flowchart TD
-  A["Login with Google"] --> B["/auth/google/start"]
-  B --> C["Google consent + callback"]
-  C --> D["Issue access + refresh tokens"]
-  D --> E["Refresh rotates token"]
-  E --> F["Logout revokes token"]
-```
-
-## Workflow: Google Sheets Import
-
-```mermaid
-flowchart TD
-  A["Import POS Data modal"] --> B["Select source (File / Google Sheets / POS DB)"]
-  B --> C["If Google Sheets: Connect (OAuth or Service Account)"]
-  C --> D["List tabs (/integrations/sheets/tabs or Drive files)"]
-  D --> E["Preview sheet (/pos/import/sheets/preview)"]
-  E --> F["Match columns (/pos/import/sheets/match)"]
-  F --> G["Commit import (/pos/import/sheets/commit)"]
-```
-
-## Permission Matrix by Endpoint (Current)
-
-```mermaid
-flowchart TD
-  A[/pos/import or pos/import-file/] --> P1[pos:create + pos:import]
-  B[/pos/daily/] --> P2[pos:view]
-  C[/reports/monthly-summary/] --> P3[reports:view]
-
-  D[/inventory/items/import/] --> P4[items:create + items:import]
-  E[/inventory/items CRUD/] --> P5[items:view/create/edit/delete]
-  F[/inventory/locations CRUD/] --> P6[locations:view/create/edit/delete]
-  G[/inventory/move/] --> P7[inventory:edit + inventory:move]
-  H[/inventory/location/:code/] --> P8[inventory:view]
-```
+- `inventory`, `invoices`, `pos`, `items`, `bankStatements`, `reconciliation`, `locations`, `suppliers`, `reports`, `dashboard`

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAppDispatch } from '../app/store/hooks';
-import { showSnackbar } from '../slices/ui/uiSlice';
+import { showSnackbar } from '../app/store/uiSlice';
 import { extractApiErrorMessage } from '../utils/apiError';
 
 type AsyncFeedback = {
@@ -35,5 +35,4 @@ export const useAsyncAction = () => {
 
   return { loading, runAction };
 };
-
 
