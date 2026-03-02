@@ -61,9 +61,6 @@ import {
   selectSettingsIsBusy,
 } from "../state";
 
-const DEFAULT_RANGE = "Sheet1!A1:Z";
-const DEFAULT_EMAIL =
-  "retailsync-run-sa@lively-infinity-488304-m9.iam.gserviceaccount.com";
 const REQUIRED_FIELDS = [
   "date",
   "highTax",
@@ -104,19 +101,11 @@ export const SettingsPage = () => {
   const [isBusyLocal, setIsBusyLocal] = useState(false);
   const isBusy = isBusyRedux || isBusyLocal;
 
-  const [sourceName, setSourceName] = useState("POS Sheet");
-  const [spreadsheetId, setSpreadsheetId] = useState("");
-  const [range, setRange] = useState(DEFAULT_RANGE);
-  const [mappingJson, setMappingJson] = useState(
-    '{\n  "date": "Date",\n  "amount": "Amount"\n}',
-  );
-  const [preview, setPreview] = useState<string[][]>([]);
   const [sharedSpreadsheetId, setSharedSpreadsheetId] = useState("");
   const [sharedSheetName, setSharedSheetName] = useState("Sheet1");
   const [sharedHeaderRow, setSharedHeaderRow] = useState(1);
   const [integrationsExpanded, setIntegrationsExpanded] = useState(true);
   const [expandGoogleConfigureSection, setExpandGoogleConfigureSection] = useState(false);
-  const [googleEditing, setGoogleEditing] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugTitle, setDebugTitle] = useState("Google Sheets Debug");
   const [debugSteps, setDebugSteps] = useState<DebugStep[]>([]);
@@ -139,15 +128,6 @@ export const SettingsPage = () => {
 
   useEffect(() => {
     if (!settings) return;
-    const activeSource =
-      settings.googleSheets.sources.find((source) => source.active) ??
-      settings.googleSheets.sources[0];
-    if (activeSource) {
-      setSourceName(activeSource.name);
-      setSpreadsheetId(activeSource.spreadsheetId);
-      setRange(activeSource.range);
-      setMappingJson(JSON.stringify(activeSource.mapping ?? {}, null, 2));
-    }
     if (settings.googleSheets.sharedConfig) {
       setSharedSpreadsheetId(
         settings.googleSheets.sharedConfig.spreadsheetId ?? "",
@@ -157,7 +137,6 @@ export const SettingsPage = () => {
       );
       setSharedHeaderRow(settings.googleSheets.sharedConfig.headerRow || 1);
     }
-    setGoogleEditing(false);
   }, [settings]);
 
   useEffect(() => {
@@ -216,7 +195,6 @@ export const SettingsPage = () => {
   if (!canView) {
     return <NoAccess />;
   }
-  const oauthConnected = Boolean(settings?.googleSheets.connected);
   const defaultSharedProfile =
     settings?.googleSheets.sharedSheets?.find((sheet) => sheet.isDefault) ??
     settings?.googleSheets.sharedSheets?.[0];
@@ -232,97 +210,6 @@ export const SettingsPage = () => {
           severity: "error",
         }),
       );
-    }
-  };
-
-  const onTestAccess = async () => {
-    if (!settings) return;
-    if (!spreadsheetId.trim() || !range.trim()) {
-      dispatch(
-        showSnackbar({
-          message: "Spreadsheet ID and Range are required",
-          severity: "error",
-        }),
-      );
-      return;
-    }
-
-    try {
-      setIsBusyLocal(true);
-      const res = await settingsApi.testGoogleSheet({
-        spreadsheetId: spreadsheetId.trim(),
-        range: range.trim(),
-        authMode: settings.googleSheets.mode,
-      });
-      setPreview((res.data.data.preview ?? []) as string[][]);
-      dispatch(
-        showSnackbar({
-          message: "Google Sheet access verified",
-          severity: "success",
-        }),
-      );
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Google Sheet access failed"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
-    }
-  };
-
-  const onSaveSource = async () => {
-    if (!canEdit || !settings) return;
-    if (!spreadsheetId.trim() || !range.trim() || !sourceName.trim()) {
-      dispatch(
-        showSnackbar({
-          message: "Name, Spreadsheet ID and Range are required",
-          severity: "error",
-        }),
-      );
-      return;
-    }
-
-    let mapping: Record<string, string> = {};
-    try {
-      const parsed = JSON.parse(mappingJson) as Record<string, unknown>;
-      mapping = Object.fromEntries(
-        Object.entries(parsed).map(([k, v]) => [k, String(v)]),
-      );
-    } catch {
-      dispatch(
-        showSnackbar({
-          message: "Mapping must be valid JSON",
-          severity: "error",
-        }),
-      );
-      return;
-    }
-
-    try {
-      setIsBusyLocal(true);
-      await settingsApi.saveGoogleSource({
-        name: sourceName.trim(),
-        spreadsheetId: spreadsheetId.trim(),
-        range: range.trim(),
-        mapping,
-        active: true,
-      });
-      dispatch(
-        showSnackbar({ message: "Google source saved", severity: "success" }),
-      );
-      await dispatch(fetchSettings());
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to save source"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
     }
   };
 
@@ -640,21 +527,6 @@ export const SettingsPage = () => {
     }
   };
 
-  const copyServiceEmail = async () => {
-    const email = settings?.googleSheets.serviceAccountEmail ?? DEFAULT_EMAIL;
-    try {
-      await navigator.clipboard.writeText(email);
-      dispatch(
-        showSnackbar({
-          message: "Service account email copied",
-          severity: "success",
-        }),
-      );
-    } catch {
-      dispatch(showSnackbar({ message: "Copy failed", severity: "error" }));
-    }
-  };
-
   const appendStepLog = (index: number, message: string, status?: DebugStep["status"]) => {
     setDebugSteps((prev) =>
       prev.map((step, i) => {
@@ -708,7 +580,7 @@ export const SettingsPage = () => {
       let spreadsheetId = "";
       let sheetName = "Sheet1";
       let mapping: Record<string, string> = {};
-      let source: "oauth" | "service" = "service";
+      let source: "oauth" | "service";
 
       if (mode === "oauth") {
         appendStepLog(0, "Validating OAuth connection...", "running");

@@ -205,6 +205,9 @@ export const GoogleSheetsIntegrationCard = ({
   initialExpandConfigureSection = false,
   onConsumedExpandConfigure,
 }: Props) => {
+  void onCheckOAuthStatus;
+  void onSetActiveMode;
+
   const shared = settings.sharedConfig;
   const sharedSheets = settings.sharedSheets ?? [];
   const [expanded, setExpanded] = useState<ProfileName | null>("POS DATA SHEET");

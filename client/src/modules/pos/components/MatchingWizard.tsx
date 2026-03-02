@@ -84,6 +84,10 @@ export const MatchingWizard = ({
   onChangeMapping,
   onChangeTransforms
 }: MatchingWizardProps) => {
+  void transforms;
+  void targetFields;
+  void onChangeTransforms;
+
   const resolvedMapping = useMemo(() => {
     const next: Record<string, string> = {};
     const used = new Set<string>();

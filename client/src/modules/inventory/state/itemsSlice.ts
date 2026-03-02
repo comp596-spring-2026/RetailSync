@@ -83,7 +83,7 @@ const itemsSlice = createSlice({
         const id = action.meta.arg;
         state.items = state.items.filter((it) => it._id !== id);
       })
-      .addCase(importItems.fulfilled, (state) => {
+      .addCase(importItems.fulfilled, () => {
         // After import we expect a refetch from the UI.
       })
       .addCase(createItemThunk.fulfilled, () => {
