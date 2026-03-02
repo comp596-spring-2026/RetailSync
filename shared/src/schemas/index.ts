@@ -68,6 +68,11 @@ export const monthlySummaryQuerySchema = z.object({
   month: z.string().trim().regex(/^\d{4}-\d{2}$/)
 });
 
+export const dateRangeSummaryQuerySchema = z.object({
+  from: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/)
+}).refine((data) => data.from <= data.to, { message: 'from must be before or equal to to', path: ['to'] });
+
 export const itemCreateSchema = z.object({
   upc: z.string().trim().min(1),
   modifier: z.string().trim().default(''),
@@ -117,6 +122,7 @@ export type AssignRoleInput = z.infer<typeof assignRoleSchema>;
 export type PosDailySummaryInput = z.infer<typeof posDailySummarySchema>;
 export type PosDailyQueryInput = z.infer<typeof posDailyQuerySchema>;
 export type MonthlySummaryQueryInput = z.infer<typeof monthlySummaryQuerySchema>;
+export type DateRangeSummaryQueryInput = z.infer<typeof dateRangeSummaryQuerySchema>;
 export type ItemCreateInput = z.infer<typeof itemCreateSchema>;
 export type ItemUpdateInput = z.infer<typeof itemUpdateSchema>;
 export type LocationCreateInput = z.infer<typeof locationCreateSchema>;

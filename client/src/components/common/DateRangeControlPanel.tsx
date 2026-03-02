@@ -106,10 +106,12 @@ const customStaticRanges = createStaticRanges([
 type DateRangeControlPanelProps = {
   from: string;
   to: string;
-  onFromChange: (date: string) => void;
-  onToChange: (date: string) => void;
+  onDateRangeChange?: (range: DateRange) => void;
+  onFromChange?: (date: string) => void;
+  onToChange?: (date: string) => void;
   loading?: boolean;
   onRefresh: () => void;
+  refreshPlacement?: 'inline' | 'right';
   actions?: React.ReactNode;
   stats?: React.ReactNode;
 };
@@ -117,10 +119,12 @@ type DateRangeControlPanelProps = {
 export const DateRangeControlPanel = ({
   from,
   to,
+  onDateRangeChange,
   onFromChange,
   onToChange,
   loading = false,
   onRefresh,
+  refreshPlacement = 'right',
   actions,
   stats
 }: DateRangeControlPanelProps) => {
@@ -145,10 +149,18 @@ export const DateRangeControlPanel = ({
   const handleSelect = useCallback(
     (rangesByKey: RangeKeyDict) => {
       const sel = rangesByKey.selection;
-      if (sel.startDate) onFromChange(moment(sel.startDate).format('YYYY-MM-DD'));
-      if (sel.endDate) onToChange(moment(sel.endDate).format('YYYY-MM-DD'));
+      const nextFrom = sel.startDate ? moment(sel.startDate).format('YYYY-MM-DD') : from;
+      const nextTo = sel.endDate ? moment(sel.endDate).format('YYYY-MM-DD') : to;
+
+      if (onDateRangeChange) {
+        onDateRangeChange({ from: nextFrom, to: nextTo });
+        return;
+      }
+
+      if (onFromChange && sel.startDate) onFromChange(nextFrom);
+      if (onToChange && sel.endDate) onToChange(nextTo);
     },
-    [onFromChange, onToChange]
+    [from, onDateRangeChange, onFromChange, onToChange, to]
   );
 
   const displayFrom = moment(from).format('MMM D, YYYY');
@@ -196,9 +208,7 @@ export const DateRangeControlPanel = ({
             </ClickAwayListener>
           </Popper>
 
-          <Box sx={{ flex: 1 }} />
-
-          <Stack direction="row" spacing={1} alignItems="center">
+          {refreshPlacement === 'inline' && (
             <Button
               variant="outlined"
               size="small"
@@ -208,6 +218,22 @@ export const DateRangeControlPanel = ({
             >
               Refresh
             </Button>
+          )}
+
+          <Box sx={{ flex: 1 }} />
+
+          <Stack direction="row" spacing={1} alignItems="center">
+            {refreshPlacement === 'right' && (
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={loading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                onClick={onRefresh}
+                disabled={loading || !!dateError}
+              >
+                Refresh
+              </Button>
+            )}
             {actions}
           </Stack>
         </Stack>

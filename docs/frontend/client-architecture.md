@@ -2,62 +2,116 @@
 
 ## Stack
 
-- Vite + React + TypeScript
-- MUI for UI
-- React Router for routing
+- Vite + React 18 + TypeScript
+- Material UI
+- React Router v6
 - Redux Toolkit + redux-persist
-- Axios with refresh-token retry interceptor
+- Axios with refresh-token retry
+- Vitest + React Testing Library
 
-## State Slices
+## App Layers
 
-- `authSlice`
-  - `accessToken`, `user`, `role`, `permissions`
-- `companySlice`
-  - current company profile
-- `rbacSlice`
-  - module catalog, roles list
-- `uiSlice`
-  - snackbar notifications
-- `itemsSlice`
-  - cached item list, loading/error state, lastLoadedAt (used by inventory workspace)
-- `locationsSlice`
-  - cached locations, loading/error state (used by inventory workspace + layout viewer)
+```text
+client/src/
+  app/
+    api/            # global axios client + shared API barrel
+    store/          # store infra only (index, rootReducer, hooks, uiSlice)
+    guards/         # ProtectedRoute, OnboardingGuard, PermissionGate
+    layout/         # Dashboard shell
+  modules/
+    auth/
+    inventory/
+    pos/
+    procurement/
+    users/
+    rbac/
+    settings/
+    dev/
+  components/       # shared reusable UI
+  layout/           # shared module shell page
+```
 
-## Token Flow
+## Redux Pattern (Hybrid)
+
+- Global infra lives in `client/src/app/store/*`.
+- Feature state lives in `client/src/modules/<module>/state/*`.
+- Root reducer imports module reducers from module entrypoints.
+
+Current reducer keys:
+
+- `auth`
+- `company` (users module state)
+- `rbac`
+- `ui`
+- `items` (inventory)
+- `locations` (inventory)
+- `settings`
+- `pos`
+
+## Routing
+
+Public routes:
+
+- `/login`
+- `/home-demo`
+- `/privacy`
+- `/terms`
+- `/data-deletion`
+- `/auth/google/success`
+- `/401`, `/403`, `/404`, `/500`
+- `/playground`
+
+Onboarding routes (guarded by `OnboardingGuard`):
+
+- `/onboarding`
+- `/onboarding/create-company`
+- `/onboarding/join-company`
+
+Protected routes (guarded by `ProtectedRoute` under `/dashboard`):
+
+- `/dashboard` (inventory dashboard home)
+- `/dashboard/pos`
+- `/dashboard/operations`
+- `/dashboard/items`
+- `/dashboard/locations`
+- `/dashboard/procurement`
+- `/dashboard/users`
+- `/dashboard/access`
+- `/dashboard/roles`
+- `/dashboard/settings`
+- `/dashboard/playground`
+- plus module-shell pages (`invoices`, `suppliers`, `reconciliation`, `bankStatements`, `rolesSettings`)
+
+## Module Conventions
+
+Each module may contain:
+
+- `state/` for slices/thunks/selectors
+- `api/` for module API wrappers
+- `pages/` for route-level screens
+- `components/` for module-only UI
+- `charts/` and `utils/` when needed
+- `tests/` for module tests
+
+## Auth + Token Refresh Flow
 
 ```mermaid
 sequenceDiagram
-  participant UI as UI Action
+  participant UI as Client Action
   participant AX as Axios Interceptor
-  participant API as API
+  participant API as Express API
 
-  UI->>AX: Request with access token
+  UI->>AX: Request with bearer token
   AX->>API: API request
-  API-->>AX: 401 Unauthorized
-  AX->>API: POST /auth/refresh (cookie)
-  API-->>AX: new access token
-  AX->>AX: update Redux token
-  AX->>API: retry original request once
+  API-->>AX: 401
+  AX->>API: POST /api/auth/refresh (cookie)
+  API-->>AX: New access token
+  AX->>AX: Update Redux auth token
+  AX->>API: Retry original request once
 ```
 
-## Routing Structure
+## Permissions
 
-- default route: `/` -> `/login`
-- login route: `/login`
-- onboarding guarded routes: `/onboarding/*`
-- protected app shell: `/dashboard/*`
-- Google callback route: `/auth/google/success`
-- informational routes remain public: `/playground`, `/privacy`, `/terms`, `/data-deletion`, `/home-demo`
-
-Main dashboard pages currently:
-- `/dashboard/pos`
-- `/dashboard/reports`
-- `/dashboard/operations` (Inventory workspace: items, locations, layout)
-- `/dashboard/users`
-- `/dashboard/roles`
-
-## Permission Rendering Rules
-
-- Sidebar module link appears if user has `view` for that module.
-- `PermissionGate` checks actions for each button.
-- Pages render `NoAccess` when module view permission is absent.
+- Route access and sidebar visibility are permission-aware.
+- `PermissionGate` enforces module/action visibility for controls.
+- `hasPermission` allows custom actions as `actions:<key>`.

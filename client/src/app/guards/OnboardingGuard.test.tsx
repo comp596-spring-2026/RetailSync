@@ -3,11 +3,11 @@ import { Provider } from 'react-redux';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import authReducer from '../../slices/auth/authSlice';
-import companyReducer from '../../slices/company/companySlice';
-import rbacReducer from '../../slices/rbac/rbacSlice';
-import uiReducer from '../../slices/ui/uiSlice';
-import { setAccessToken, setAuthContext } from '../../slices/auth/authSlice';
+import authReducer from '../../modules/auth/state';
+import companyReducer from '../../modules/users/state';
+import rbacReducer from '../../modules/rbac/state';
+import uiReducer from '../../app/store/uiSlice';
+import { setAccessToken, setAuthContext } from '../../modules/auth/state';
 import { OnboardingGuard } from './OnboardingGuard';
 
 const createStore = (overrides: { accessToken?: string | null; companyId?: string | null } = {}) => {

@@ -82,7 +82,14 @@ describe('integrationsSheetsController', () => {
 
   it('verifies shared sheet and sets connected status', async () => {
     const { verifySharedSheetsConfig } = await import('./controllers/integrationsSheetsController');
-    getMock.mockResolvedValueOnce({ data: { values: [['header']] } });
+    getMock
+      .mockResolvedValueOnce({
+        data: {
+          properties: { title: 'RetailSync Shared Sheet' },
+          sheets: [{ properties: { sheetId: 1, title: 'Sheet1' } }]
+        }
+      })
+      .mockResolvedValueOnce({ data: { values: [['header']] } });
     const { res, status, json } = createResponse();
     const req = { user: { companyId: 'company-1', id: 'user-1' } } as unknown as Request;
 

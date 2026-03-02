@@ -1,14 +1,14 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { describe, expect, it, vi } from 'vitest';
-import authReducer from '../../slices/auth/authSlice';
-import companyReducer from '../../slices/company/companySlice';
-import rbacReducer from '../../slices/rbac/rbacSlice';
-import uiReducer from '../../slices/ui/uiSlice';
+import authReducer from '../../modules/auth/state';
+import companyReducer from '../../modules/users/state';
+import rbacReducer from '../../modules/rbac/state';
+import uiReducer from '../../app/store/uiSlice';
 import { fetchMeAndSync } from './fetchMeAndSync';
 
 const mockMe = vi.fn();
 
-vi.mock('../../api', () => ({
+vi.mock('../api', () => ({
   authApi: {
     me: (...args: unknown[]) => mockMe(...args)
   }

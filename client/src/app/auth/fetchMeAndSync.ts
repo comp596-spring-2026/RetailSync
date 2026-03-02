@@ -1,7 +1,7 @@
 import type { AppDispatch } from '../store';
-import { authApi } from '../../api';
-import { setAuthContext } from '../../slices/auth/authSlice';
-import { setCompany } from '../../slices/company/companySlice';
+import { authApi } from '../api';
+import { setAuthContext } from '../../modules/auth/state';
+import { setCompany } from '../../modules/users/state';
 
 type MeData = {
   user: { _id: string; firstName: string; lastName: string; email: string; companyId: string | null; roleId: string | null };

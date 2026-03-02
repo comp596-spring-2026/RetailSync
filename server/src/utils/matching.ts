@@ -22,11 +22,9 @@ const HEADER_SYNONYMS: Record<string, string[]> = {
   lotteryPayout: [
     'lottery payout',
     'lottery payout cash',
-    'lotto payout',
-    'payout',
-    'payout cash'
+    'lotto payout'
   ],
-  cashExpenses: ['cash expenses', 'cash expense', 'expenses', 'expense', 'paid out', 'payouts'],
+  cashExpenses: ['cash expenses', 'cash expense', 'cash payout', 'cash payouts', 'expenses', 'expense', 'paid out', 'payouts'],
   notes: ['notes', 'note', 'description', 'memo', 'cash expense description', 'description for cash expenses']
 };
 

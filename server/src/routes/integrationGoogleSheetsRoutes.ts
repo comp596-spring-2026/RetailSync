@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   getGoogleSheetsConnectUrl,
+  getGoogleSheetsOAuthStatus,
   googleSheetsCallback,
   listOAuthSpreadsheets,
   startGoogleSheetsConnect
@@ -10,6 +11,12 @@ import { requirePermission } from '../middleware/requirePermission';
 
 const router = Router();
 
+router.get(
+  '/oauth-status',
+  requireAuth,
+  requirePermission('rolesSettings', 'view'),
+  getGoogleSheetsOAuthStatus
+);
 router.get(
   '/start-url',
   requireAuth,

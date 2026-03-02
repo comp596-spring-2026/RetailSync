@@ -1,30 +1,37 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { OnboardingGuard, ProtectedRoute } from "./guards";
 import { DashboardLayout } from "./layout/DashboardLayout";
-import { LoginPage } from "../pages/auth/LoginPage";
-import { GoogleAuthSuccessPage } from "../pages/auth/GoogleAuthSuccessPage";
-import { OnboardingPage } from "../pages/onboarding/OnboardingPage";
-import { CreateCompanyPage } from "../pages/onboarding/CreateCompanyPage";
-import { JoinCompanyPage } from "../pages/onboarding/JoinCompanyPage";
-import { DashboardHomePage } from "../pages/dashboard/DashboardHomePage";
-import { ModuleShellPage } from "../pages/dashboard/ModuleShellPage";
-import { RolesPage } from "../pages/dashboard/RolesPage";
-import { UsersPage } from "../pages/dashboard/UsersPage";
-import { PosPage } from "../pages/dashboard/PosPage";
-import { ReportsPage } from "../pages/dashboard/ReportsPage";
-import { ItemsPage } from "../pages/dashboard/ItemsPage";
-import { LocationsPage } from "../pages/dashboard/LocationsPage";
-import { InventoryPage } from "../pages/dashboard/InventoryPage";
-import { SettingsPage } from "../pages/dashboard/SettingsPage";
-import { InventoryWorkspacePage } from "../pages/dashboard/InventoryWorkspacePage";
-import { ProcurementHubPage } from "../pages/dashboard/ProcurementHubPage";
-import { AccessHubPage } from "../pages/dashboard/AccessHubPage";
-import { PlaygroundPage } from "../pages/dashboard/PlaygroundPage";
-import { PrivacyPage } from "../pages/legal/PrivacyPage";
-import { TermsPage } from "../pages/legal/TermsPage";
-import { DataDeletionPage } from "../pages/legal/DataDeletionPage";
-import { HomeDemoPage } from "../pages/demo/HomeDemoPage";
-import { ForbiddenPage, NotFoundPage, ServerErrorPage, UnauthorizedPage } from "../pages/errors";
+import {
+  CreateCompanyPage,
+  GoogleAuthSuccessPage,
+  JoinCompanyPage,
+  LoginPage,
+  OnboardingPage
+} from "../modules/auth/pages";
+import {
+  DataDeletionPage,
+  ForbiddenPage,
+  HomeDemoPage,
+  NotFoundPage,
+  PlaygroundPage,
+  PrivacyPage,
+  ServerErrorPage,
+  TermsPage,
+  UnauthorizedPage
+} from "../modules/dev/pages";
+import {
+  DashboardHomePage,
+  InventoryPage,
+  InventoryWorkspacePage,
+  ItemsPage,
+  LocationsPage
+} from "../modules/inventory/pages";
+import { PosPage } from "../modules/pos/pages";
+import { ProcurementHubPage } from "../modules/procurement/pages";
+import { RolesPage } from "../modules/rbac/pages";
+import { SettingsPage } from "../modules/settings/pages";
+import { AccessHubPage, UsersPage } from "../modules/users/pages";
+import { ModuleShellPage } from "../layout/ModuleShellPage";
 
 const App = () => {
   return (
@@ -73,7 +80,6 @@ const App = () => {
             element={<ModuleShellPage module="bankStatements" />}
           />
           <Route path="suppliers" element={<ModuleShellPage module="suppliers" />} />
-          <Route path="reports" element={<ReportsPage />} />
           <Route path="playground" element={<PlaygroundPage />} />
           <Route
             path="rolesSettings"

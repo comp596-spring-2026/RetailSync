@@ -3,11 +3,11 @@ import { Provider } from 'react-redux';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import authReducer from '../../slices/auth/authSlice';
-import companyReducer from '../../slices/company/companySlice';
-import rbacReducer from '../../slices/rbac/rbacSlice';
-import uiReducer from '../../slices/ui/uiSlice';
-import { setAccessToken } from '../../slices/auth/authSlice';
+import authReducer from '../../modules/auth/state';
+import companyReducer from '../../modules/users/state';
+import rbacReducer from '../../modules/rbac/state';
+import uiReducer from '../../app/store/uiSlice';
+import { setAccessToken } from '../../modules/auth/state';
 import { ProtectedRoute } from './ProtectedRoute';
 
 const createStore = (accessToken: string | null) => {
@@ -26,7 +26,7 @@ const createStore = (accessToken: string | null) => {
 };
 
 describe('ProtectedRoute', () => {
-  it('redirects to /401 when there is no access token', () => {
+  it('redirects to /login when there is no access token', () => {
     const store = createStore(null);
     render(
       <Provider store={store}>
@@ -35,12 +35,12 @@ describe('ProtectedRoute', () => {
             <Route path="/" element={<ProtectedRoute />}>
               <Route index element={<div>Protected content</div>} />
             </Route>
-            <Route path="/401" element={<div>Unauthorized</div>} />
+            <Route path="/login" element={<div>Login</div>} />
           </Routes>
         </MemoryRouter>
       </Provider>
     );
-    expect(screen.getByText('Unauthorized')).toBeInTheDocument();
+    expect(screen.getByText('Login')).toBeInTheDocument();
     expect(screen.queryByText('Protected content')).not.toBeInTheDocument();
   });
 
@@ -53,7 +53,7 @@ describe('ProtectedRoute', () => {
             <Route path="/" element={<ProtectedRoute />}>
               <Route index element={<div>Protected content</div>} />
             </Route>
-            <Route path="/401" element={<div>Unauthorized</div>} />
+            <Route path="/login" element={<div>Login</div>} />
           </Routes>
         </MemoryRouter>
       </Provider>

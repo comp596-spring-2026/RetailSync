@@ -58,7 +58,7 @@ const run = async () => {
             lotteryPayout,
             clTotal: creditCard + lottery,
             cash: totalSales - creditCard,
-            cashPayout: lotteryPayout,
+            cashPayout: cashExpenses,
             cashExpenses,
             notes: row.DESCRIPTION ?? ''
           }

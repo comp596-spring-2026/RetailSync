@@ -4,12 +4,16 @@ import { google } from "googleapis";
 import { env } from "../config/env";
 import { IntegrationSettingsModel } from "../models/IntegrationSettings";
 import { IntegrationSecretModel } from "../models/IntegrationSecret";
+import { POSDailySummaryModel } from "../models/POSDailySummary";
 import { decryptJson } from "../utils/encryption";
 import { fail, ok } from "../utils/apiResponse";
+import { ensureSharedSheets, pickDefaultSharedSheet } from "../utils/sharedSheets";
+import { normalizeUtcOffset } from "../utils/utcOffset";
 
 const DEFAULT_RANGE = "Sheet1!A1:Z";
 const SERVICE_ACCOUNT_EMAIL =
   "retailsync-run-sa@lively-infinity-488304-m9.iam.gserviceaccount.com";
+const DEFAULT_SYNC_UTC_OFFSET = "UTC-08:00";
 
 type GoogleOAuthSecret = {
   accessToken: string;
@@ -22,25 +26,42 @@ type GoogleOAuthSecret = {
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const toSafeSettings = (doc: any) => ({
-  id: doc._id.toString(),
-  companyId: doc.companyId.toString(),
-  ownerUserId: doc.ownerUserId.toString(),
-  googleSheets: {
-    mode: doc.googleSheets.mode,
-    serviceAccountEmail: doc.googleSheets.serviceAccountEmail,
-    connected: doc.googleSheets.connected,
-    connectedEmail: doc.googleSheets.connectedEmail,
-    sharedConfig: doc.googleSheets.sharedConfig,
-    updatedAt: doc.googleSheets.updatedAt,
-    sources: doc.googleSheets.sources,
-  },
-  quickbooks: doc.quickbooks,
-  lastImportSource: doc.lastImportSource ?? null,
-  lastImportAt: doc.lastImportAt ?? null,
-  createdAt: doc.createdAt,
-  updatedAt: doc.updatedAt,
-});
+const resolveSyncTimezone = (value: unknown) => {
+  if (typeof value !== "string") return DEFAULT_SYNC_UTC_OFFSET;
+  return normalizeUtcOffset(value) ?? DEFAULT_SYNC_UTC_OFFSET;
+};
+
+const toSafeSettings = (doc: any) => {
+  // Existing tenant data may include old IANA values; always return normalized UTC offsets.
+  const sourceSchedule = doc.googleSheets.syncSchedule ?? {};
+  return {
+    id: doc._id.toString(),
+    companyId: doc.companyId.toString(),
+    ownerUserId: doc.ownerUserId.toString(),
+    googleSheets: {
+      mode: doc.googleSheets.mode,
+      serviceAccountEmail: doc.googleSheets.serviceAccountEmail,
+      connected: doc.googleSheets.connected,
+      connectedEmail: doc.googleSheets.connectedEmail,
+      sharedSheets: doc.googleSheets.sharedSheets ?? [],
+      sharedConfig: doc.googleSheets.sharedConfig,
+      syncSchedule: {
+        enabled: Boolean(sourceSchedule.enabled),
+        hour: Number.isFinite(sourceSchedule.hour) ? Number(sourceSchedule.hour) : 2,
+        minute: Number.isFinite(sourceSchedule.minute) ? Number(sourceSchedule.minute) : 0,
+        timezone: resolveSyncTimezone(sourceSchedule.timezone),
+      },
+      lastScheduledSyncAt: doc.googleSheets.lastScheduledSyncAt ?? null,
+      updatedAt: doc.googleSheets.updatedAt,
+      sources: doc.googleSheets.sources,
+    },
+    quickbooks: doc.quickbooks,
+    lastImportSource: doc.lastImportSource ?? null,
+    lastImportAt: doc.lastImportAt ?? null,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+};
 
 const ensureSubdocs = (settings: any) => {
   if (!settings.googleSheets) {
@@ -49,6 +70,7 @@ const ensureSubdocs = (settings: any) => {
       serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
       connected: false,
       connectedEmail: null,
+      sharedSheets: [],
       sharedConfig: {
         spreadsheetId: null,
         sheetName: "Sheet1",
@@ -62,9 +84,20 @@ const ensureSubdocs = (settings: any) => {
         lastVerifiedAt: null,
         lastImportAt: null,
       },
+      syncSchedule: {
+        enabled: false,
+        hour: 2,
+        minute: 0,
+        timezone: DEFAULT_SYNC_UTC_OFFSET,
+      },
+      lastScheduledSyncAt: null,
       sources: [],
       updatedAt: new Date(),
     };
+  }
+
+  if (!Array.isArray(settings.googleSheets.sharedSheets)) {
+    settings.googleSheets.sharedSheets = [];
   }
 
   if (!settings.googleSheets.sharedConfig) {
@@ -82,6 +115,23 @@ const ensureSubdocs = (settings: any) => {
       lastImportAt: null,
     };
   }
+
+  if (!settings.googleSheets.syncSchedule) {
+    settings.googleSheets.syncSchedule = {
+      enabled: false,
+      hour: 2,
+      minute: 0,
+      timezone: DEFAULT_SYNC_UTC_OFFSET,
+    };
+  }
+  settings.googleSheets.syncSchedule.timezone = resolveSyncTimezone(
+    settings.googleSheets.syncSchedule.timezone,
+  );
+  if (typeof settings.googleSheets.lastScheduledSyncAt === "undefined") {
+    settings.googleSheets.lastScheduledSyncAt = null;
+  }
+
+  ensureSharedSheets(settings.googleSheets);
 
   if (!settings.quickbooks) {
     settings.quickbooks = {
@@ -112,6 +162,7 @@ const getOrCreateSettings = async (req: Request) => {
           mode: "service_account",
           connected: false,
           connectedEmail: null,
+          sharedSheets: [],
           serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
           sharedConfig: {
             spreadsheetId: null,
@@ -126,6 +177,13 @@ const getOrCreateSettings = async (req: Request) => {
             lastVerifiedAt: null,
             lastImportAt: null,
           },
+          syncSchedule: {
+            enabled: false,
+            hour: 2,
+            minute: 0,
+            timezone: DEFAULT_SYNC_UTC_OFFSET,
+          },
+          lastScheduledSyncAt: null,
           sources: [],
           updatedAt: new Date(),
         },
@@ -168,7 +226,7 @@ const loadGoogleAuthClient = async (
   }).select("+encryptedPayload");
 
   if (!secretDoc?.encryptedPayload) {
-    throw new Error("Google OAuth tokens not found. Connect Google first.");
+    throw new Error("Google OAuth tokens not found. Configure an OAuth source for this sheet first.");
   }
 
   const tokenPayload = decryptJson<GoogleOAuthSecret>(
@@ -203,6 +261,63 @@ export const getSettings = async (req: Request, res: Response) => {
   }
 };
 
+export const getGoogleSheetsSyncOverview = async (req: Request, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) {
+    return fail(res, "Company onboarding required", 403);
+  }
+
+  try {
+    const [overview] = await POSDailySummaryModel.aggregate([
+      { $match: { companyId: req.companyId, source: "google_sheets" } },
+      {
+        $group: {
+          _id: null,
+          totalEntries: { $sum: 1 },
+          lastUpdatedAt: { $max: "$updatedAt" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalEntries: 1,
+          lastUpdatedAt: 1,
+        },
+      },
+    ]);
+
+    const byProfile = await POSDailySummaryModel.aggregate([
+      { $match: { companyId: req.companyId, source: "google_sheets" } },
+      {
+        $group: {
+          _id: { $ifNull: ["$sourceRef.profileName", "UNSPECIFIED"] },
+          entries: { $sum: 1 },
+          lastUpdatedAt: { $max: "$updatedAt" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          profileName: "$_id",
+          entries: 1,
+          lastUpdatedAt: 1,
+        },
+      },
+      { $sort: { profileName: 1 } },
+    ]);
+
+    return ok(res, {
+      totalEntries: Number(overview?.totalEntries ?? 0),
+      lastUpdatedAt: overview?.lastUpdatedAt ?? null,
+      byProfile: Array.isArray(byProfile) ? byProfile : [],
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to load sync overview";
+    return fail(res, message, 400);
+  }
+};
+
 export const setGoogleMode = async (req: Request, res: Response) => {
   const mode = req.body?.mode;
   if (mode !== "service_account" && mode !== "oauth") {
@@ -212,6 +327,11 @@ export const setGoogleMode = async (req: Request, res: Response) => {
   try {
     const settings = ensureSubdocs(await getOrCreateSettings(req));
     settings.googleSheets.mode = mode;
+    if (mode === 'service_account') {
+      const defaultShared = pickDefaultSharedSheet(settings.googleSheets);
+      if (defaultShared && !defaultShared.isDefault) defaultShared.isDefault = true;
+      ensureSharedSheets(settings.googleSheets);
+    }
     settings.googleSheets.updatedAt = new Date();
     await settings.save();
     return ok(res, toSafeSettings(settings));
@@ -224,12 +344,14 @@ export const setGoogleMode = async (req: Request, res: Response) => {
 
 export const upsertGoogleSource = async (req: Request, res: Response) => {
   const spreadsheetId = String(req.body?.spreadsheetId ?? "").trim();
+  const spreadsheetTitleInput = String(req.body?.spreadsheetTitle ?? "").trim();
   const range = String(req.body?.range ?? DEFAULT_RANGE).trim();
   const name = String(req.body?.name ?? "POS Sheet").trim();
   const sourceId = String(req.body?.sourceId ?? "").trim();
   const sheetGid = String(req.body?.sheetGid ?? "").trim();
   const active = req.body?.active === true;
   const mappingInput = req.body?.mapping;
+  const transformationsInput = req.body?.transformations;
 
   if (!spreadsheetId) {
     return fail(res, "spreadsheetId is required", 400);
@@ -243,10 +365,15 @@ export const upsertGoogleSource = async (req: Request, res: Response) => {
   if (mappingInput !== undefined && !isObjectRecord(mappingInput)) {
     return fail(res, "mapping must be an object", 400);
   }
+  if (transformationsInput !== undefined && !isObjectRecord(transformationsInput)) {
+    return fail(res, "transformations must be an object", 400);
+  }
 
   try {
     const settings = ensureSubdocs(await getOrCreateSettings(req));
     const nextSourceId = sourceId || randomUUID();
+    const existingSource =
+      settings.googleSheets.sources.find((item: { sourceId: string }) => item.sourceId === nextSourceId) ?? null;
     const mapping = isObjectRecord(mappingInput)
       ? Object.fromEntries(
           Object.entries(mappingInput).map(([key, value]) => [
@@ -255,13 +382,21 @@ export const upsertGoogleSource = async (req: Request, res: Response) => {
           ]),
         )
       : {};
+    const transformations = isObjectRecord(transformationsInput)
+      ? Object.fromEntries(Object.entries(transformationsInput))
+      : {};
     const source = {
       sourceId: nextSourceId,
       name,
+      spreadsheetTitle:
+        spreadsheetTitleInput ||
+        (existingSource ? String((existingSource as any).spreadsheetTitle ?? "") : "") ||
+        null,
       spreadsheetId,
       sheetGid: sheetGid || null,
       range,
       mapping,
+      transformations,
       active,
     };
 
@@ -284,6 +419,7 @@ export const upsertGoogleSource = async (req: Request, res: Response) => {
     }
 
     settings.googleSheets.updatedAt = new Date();
+    ensureSharedSheets(settings.googleSheets);
     await settings.save();
     return ok(res, toSafeSettings(settings));
   } catch (error) {
@@ -388,6 +524,7 @@ export const disconnectGoogle = async (req: Request, res: Response) => {
     const settings = ensureSubdocs(await getOrCreateSettings(req));
     settings.googleSheets.connected = false;
     settings.googleSheets.connectedEmail = null;
+    ensureSharedSheets(settings.googleSheets);
     settings.googleSheets.updatedAt = new Date();
     await settings.save();
     return ok(res, toSafeSettings(settings));
@@ -408,6 +545,19 @@ export const resetGoogleSheetsIntegration = async (req: Request, res: Response) 
     const settings = ensureSubdocs(await getOrCreateSettings(req));
     settings.googleSheets.connected = false;
     settings.googleSheets.connectedEmail = null;
+    if (Array.isArray(settings.googleSheets.sharedSheets)) {
+      settings.googleSheets.sharedSheets = settings.googleSheets.sharedSheets.map((sheet: any) => ({
+        ...sheet,
+        enabled: false,
+        spreadsheetId: null,
+        sheetName: "Sheet1",
+        headerRow: 1,
+        columnsMap: {},
+        lastMapping: null,
+        lastVerifiedAt: null,
+        lastImportAt: null,
+      }));
+    }
     if (settings.googleSheets.sharedConfig) {
       settings.googleSheets.sharedConfig.enabled = false;
       settings.googleSheets.sharedConfig.spreadsheetId = null;
@@ -419,6 +569,7 @@ export const resetGoogleSheetsIntegration = async (req: Request, res: Response) 
       settings.googleSheets.sharedConfig.lastImportAt = null;
     }
     settings.googleSheets.sources = [];
+    ensureSharedSheets(settings.googleSheets);
     settings.googleSheets.updatedAt = new Date();
     await settings.save();
     return ok(res, toSafeSettings(settings));

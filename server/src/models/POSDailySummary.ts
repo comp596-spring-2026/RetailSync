@@ -19,7 +19,18 @@ const posDailySummarySchema = new Schema(
     cashPayout: { type: Number, required: true, default: 0 },
     cashExpenses: { type: Number, required: true, default: 0 },
     notes: { type: String, default: '' },
-    source: { type: String, enum: ['file', 'google_sheets', 'manual'], default: 'manual' }
+    source: { type: String, enum: ['file', 'google_sheets', 'manual'], default: 'manual' },
+    importBindingKey: { type: String, default: null, index: true },
+    derivedFieldsApplied: { type: [String], default: undefined },
+    sourceRef: {
+      mode: { type: String, default: null },
+      profileName: { type: String, default: null },
+      spreadsheetId: { type: String, default: null },
+      sheetName: { type: String, default: null },
+      sourceId: { type: String, default: null },
+      importJobId: { type: String, default: null },
+      reason: { type: String, default: null }
+    }
   },
   { timestamps: true }
 );

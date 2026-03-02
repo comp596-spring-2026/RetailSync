@@ -5,6 +5,11 @@ type Props = {
   children: ReactNode;
 };
 
+const future = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true
+};
+
 export const RouterProvider = ({ children }: Props) => {
-  return <BrowserRouter>{children}</BrowserRouter>;
+  return <BrowserRouter future={future}>{children}</BrowserRouter>;
 };
