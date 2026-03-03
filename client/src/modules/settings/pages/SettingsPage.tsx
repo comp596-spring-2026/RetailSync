@@ -145,16 +145,45 @@ export const SettingsPage = () => {
     const params = new URLSearchParams(location.search);
     const openSection = params.get("open");
     const expandParam = params.get("expand");
-    const status = params.get("googleSheets");
+    const googleStatus = params.get("googleSheets");
+    const quickbooksStatus = params.get("quickbooks");
     const reason = params.get("reason") ?? undefined;
 
-    if (openSection === "google_sheets" || status === "connected") {
+    if (
+      openSection === "google_sheets" ||
+      googleStatus === "connected" ||
+      quickbooksStatus === "connected"
+    ) {
       setIntegrationsExpanded(true);
     }
     if (expandParam === "configure") {
       setExpandGoogleConfigureSection(true);
     }
-    if (status === "connected") {
+    if (quickbooksStatus === "connected") {
+      dispatch(
+        showSnackbar({
+          message: "QuickBooks connected successfully.",
+          severity: "success",
+        }),
+      );
+      void dispatch(fetchSettings()).finally(() => {
+        navigate("/dashboard/settings", { replace: true });
+      });
+      return;
+    }
+    if (quickbooksStatus === "error") {
+      dispatch(
+        showSnackbar({
+          message: getAppErrorMessage(reason, "QuickBooks connection error."),
+          severity: "error",
+        }),
+      );
+      void dispatch(fetchSettings()).finally(() => {
+        navigate("/dashboard/settings", { replace: true });
+      });
+      return;
+    }
+    if (googleStatus === "connected") {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(
           OAUTH_WIZARD_RESUME_KEY,
@@ -180,7 +209,7 @@ export const SettingsPage = () => {
       });
       return;
     }
-    if (status === "error") {
+    if (googleStatus === "error") {
       console.error("[GoogleSheets OAuth] callback error", {
         reason: reason ?? "unknown",
         query: location.search,
@@ -223,7 +252,7 @@ export const SettingsPage = () => {
       });
       return;
     }
-    if (openSection || expandParam || status) {
+    if (openSection || expandParam || googleStatus || quickbooksStatus) {
       navigate("/dashboard/settings", { replace: true });
     }
   }, [location.search, dispatch, navigate]);
@@ -513,7 +542,14 @@ export const SettingsPage = () => {
     if (!canEdit) return;
     try {
       setIsBusyLocal(true);
-      await settingsApi.connectQuickbooks();
+      const response = await settingsApi.connectQuickbooks("/dashboard/settings");
+      const url = (response.data as { data?: { url?: string } })?.data?.url;
+      if (!url) {
+        throw new Error("Missing QuickBooks OAuth URL");
+      }
+      if (typeof window !== "undefined") {
+        window.location.href = url;
+      }
     } catch (err) {
       dispatch(
         showSnackbar({

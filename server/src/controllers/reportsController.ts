@@ -1,7 +1,10 @@
-import { dateRangeSummaryQuerySchema, monthlySummaryQuerySchema } from '@retailsync/shared';
-import { Request, Response } from 'express';
-import { POSDailySummaryModel } from '../models/POSDailySummary';
-import { fail, ok } from '../utils/apiResponse';
+import { Request, Response } from "express";
+import { POSDailySummaryModel } from "../models/POSDailySummary";
+import { fail, ok } from "../utils/apiResponse";
+import {
+  dateRangeSummaryQuerySchema,
+  monthlySummaryQuerySchema,
+} from "@retailsync/shared";
 
 type SummaryRow = {
   highTax: number;
@@ -36,7 +39,10 @@ type SummaryResult = {
   eftExpected: number;
 };
 
-function buildSummaryFromRows(rows: SummaryRow[], rangeLabel: string): SummaryResult {
+function buildSummaryFromRows(
+  rows: SummaryRow[],
+  rangeLabel: string,
+): SummaryResult {
   const acc: SummaryResult = {
     month: rangeLabel,
     days: 0,
@@ -53,7 +59,7 @@ function buildSummaryFromRows(rows: SummaryRow[], rangeLabel: string): SummaryRe
     sumCashExpenses: 0,
     expectedCardDeposit: 0,
     expectedCashDeposit: 0,
-    eftExpected: 0
+    eftExpected: 0,
   };
   for (const row of rows) {
     acc.days += 1;
@@ -77,21 +83,21 @@ function buildSummaryFromRows(rows: SummaryRow[], rangeLabel: string): SummaryRe
 
 export const monthlySummary = async (req: Request, res: Response) => {
   if (!req.companyId) {
-    return fail(res, 'Company onboarding required', 403);
+    return fail(res, "Company onboarding required", 403);
   }
 
   const parsed = monthlySummaryQuerySchema.safeParse(req.query);
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
-  const [year, month] = parsed.data.month.split('-').map(Number);
+  const [year, month] = parsed.data.month.split("-").map(Number);
   const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
   const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
   const rows = await POSDailySummaryModel.find({
     companyId: req.companyId,
-    date: { $gte: start, $lte: end }
+    date: { $gte: start, $lte: end },
   });
 
   const totals = buildSummaryFromRows(rows, parsed.data.month);
@@ -100,20 +106,20 @@ export const monthlySummary = async (req: Request, res: Response) => {
 
 export const dateRangeSummary = async (req: Request, res: Response) => {
   if (!req.companyId) {
-    return fail(res, 'Company onboarding required', 403);
+    return fail(res, "Company onboarding required", 403);
   }
 
   const parsed = dateRangeSummaryQuerySchema.safeParse(req.query);
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
-  const start = new Date(parsed.data.from + 'T00:00:00.000Z');
-  const end = new Date(parsed.data.to + 'T23:59:59.999Z');
+  const start = new Date(parsed.data.from + "T00:00:00.000Z");
+  const end = new Date(parsed.data.to + "T23:59:59.999Z");
 
   const rows = await POSDailySummaryModel.find({
     companyId: req.companyId,
-    date: { $gte: start, $lte: end }
+    date: { $gte: start, $lte: end },
   });
 
   const rangeLabel = `${parsed.data.from} to ${parsed.data.to}`;

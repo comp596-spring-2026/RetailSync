@@ -25,6 +25,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { authApi } from '../api';
@@ -104,8 +105,8 @@ export const DashboardLayout = () => {
 
   const hubLinks: NavItem[] = [
     ...(hasPermission(permissions, 'items', 'view') ||
-    hasPermission(permissions, 'inventory', 'view') ||
-    hasPermission(permissions, 'locations', 'view')
+      hasPermission(permissions, 'inventory', 'view') ||
+      hasPermission(permissions, 'locations', 'view')
       ? [{ label: 'Inventory', path: '/dashboard/operations', icon: <InventoryIcon fontSize="small" /> }]
       : []),
     ...(hasPermission(permissions, 'invoices', 'view') || hasPermission(permissions, 'suppliers', 'view')
@@ -116,6 +117,9 @@ export const DashboardLayout = () => {
       : []),
     ...(hasPermission(permissions, 'reconciliation', 'view') || hasPermission(permissions, 'bankStatements', 'view')
       ? [{ label: 'Finance', path: '/dashboard/reconciliation', icon: <SyncAltIcon fontSize="small" /> }]
+      : []),
+    ...(hasPermission(permissions, 'accounting', 'view')
+      ? [{ label: 'Accounting', path: '/dashboard/accounting/statements', icon: <AccountBalanceIcon fontSize="small" /> }]
       : [])
   ];
 

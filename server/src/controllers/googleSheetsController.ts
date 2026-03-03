@@ -1,9 +1,9 @@
-import { Request, Response } from 'express';
-import { Types } from 'mongoose';
-import { z } from 'zod';
-import { getOAuthClientForCompany } from '../integrations/google/sheets.client';
-import { IntegrationSettingsModel } from '../models/IntegrationSettings';
-import { fail, ok } from '../utils/apiResponse';
+import { Request, Response } from "express";
+import { Types } from "mongoose";
+import { z } from "zod";
+import { getOAuthClientForCompany } from "../integrations/google/sheets.client";
+import { IntegrationSettingsModel } from "../models/IntegrationSettings";
+import { fail, ok } from "../utils/apiResponse";
 import {
   asObjectId,
   createDefaultConnector,
@@ -11,28 +11,31 @@ import {
   getOrCreateSettings,
   idEquals,
   mapToPlain,
-  normalizeTransformations
-} from '../utils/googleSheetsSettings';
+  normalizeTransformations,
+} from "../utils/googleSheetsSettings";
 import {
   readSheetSampleOAuth,
   readSheetSampleShared,
-  SheetsHttpError
-} from '../utils/sheetsClient';
+  SheetsHttpError,
+} from "../utils/sheetsClient";
 import {
   computeCompatibilityForConnector,
   validateColumnMapOneToOne,
-  type CompatibilityReport
-} from '../utils/sheetsCompatibility';
-import { DEFAULT_CONNECTOR_KEY, getConnectorDefinition } from '../utils/sheetsConnectors';
-import { suggestMappings } from '../utils/matching';
+  type CompatibilityReport,
+} from "../utils/sheetsCompatibility";
+import {
+  DEFAULT_CONNECTOR_KEY,
+  getConnectorDefinition,
+} from "../utils/sheetsConnectors";
+import { suggestMappings } from "../utils/matching";
 import {
   resolveActiveSheetsConfig,
   resolveSheetsConfigByRef,
   SheetsConfigError,
-  type ResolvedSheetsConfig
-} from '../utils/sheetsSourceResolver';
+  type ResolvedSheetsConfig,
+} from "../utils/sheetsSourceResolver";
 
-type IntegrationType = 'oauth' | 'shared';
+type IntegrationType = "oauth" | "shared";
 
 type DebugResult = {
   ok: boolean;
@@ -84,11 +87,16 @@ const connectorInputSchema = z.object({
   schedule: z
     .object({
       enabled: z.boolean().default(false),
-      frequency: z.enum(['hourly', 'daily', 'weekly', 'manual']).default('manual'),
-      timeOfDay: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-      dayOfWeek: z.coerce.number().int().min(0).max(6).optional()
+      frequency: z
+        .enum(["hourly", "daily", "weekly", "manual"])
+        .default("manual"),
+      timeOfDay: z
+        .string()
+        .regex(/^\d{2}:\d{2}$/)
+        .optional(),
+      dayOfWeek: z.coerce.number().int().min(0).max(6).optional(),
     })
-    .optional()
+    .optional(),
 });
 
 const connectorPatchSchema = z.object({
@@ -105,43 +113,46 @@ const connectorPatchSchema = z.object({
   schedule: z
     .object({
       enabled: z.boolean().optional(),
-      frequency: z.enum(['hourly', 'daily', 'weekly', 'manual']).optional(),
-      timeOfDay: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-      dayOfWeek: z.coerce.number().int().min(0).max(6).optional()
+      frequency: z.enum(["hourly", "daily", "weekly", "manual"]).optional(),
+      timeOfDay: z
+        .string()
+        .regex(/^\d{2}:\d{2}$/)
+        .optional(),
+      dayOfWeek: z.coerce.number().int().min(0).max(6).optional(),
     })
-    .optional()
+    .optional(),
 });
 
 const createOAuthSourceSchema = z.object({
   name: z.string().min(1),
-  connectors: z.array(connectorInputSchema).min(1)
+  connectors: z.array(connectorInputSchema).min(1),
 });
 
 const createSharedProfileSchema = z.object({
   name: z.string().min(1),
-  connectors: z.array(connectorInputSchema).min(1)
+  connectors: z.array(connectorInputSchema).min(1),
 });
 
 const activateSchema = z.object({
-  integrationType: z.enum(['oauth', 'shared']),
+  integrationType: z.enum(["oauth", "shared"]),
   sourceId: z.string().optional(),
   profileId: z.string().optional(),
-  connectorKey: z.string().optional()
+  connectorKey: z.string().optional(),
 });
 
 const debugOAuthSchema = z.object({
   sourceId: z.string().optional(),
-  connectorKey: z.string().optional()
+  connectorKey: z.string().optional(),
 });
 
 const debugSharedSchema = z.object({
   profileId: z.string().optional(),
-  connectorKey: z.string().optional()
+  connectorKey: z.string().optional(),
 });
 
 const stageChangeSchema = z.object({
   connectorKey: z.string().default(DEFAULT_CONNECTOR_KEY),
-  sourceType: z.enum(['oauth', 'shared']),
+  sourceType: z.enum(["oauth", "shared"]),
   sourceId: z.string().optional(),
   profileId: z.string().optional(),
   spreadsheetId: z.string().min(5),
@@ -150,12 +161,12 @@ const stageChangeSchema = z.object({
   tab: z.string().min(1).optional(),
   headerRow: z.coerce.number().int().min(1).default(1),
   mapping: z.record(z.string(), z.string()).optional(),
-  transformations: z.record(z.string(), z.unknown()).optional()
+  transformations: z.record(z.string(), z.unknown()).optional(),
 });
 
 const commitChangeSchema = z.object({
   connectorKey: z.string().default(DEFAULT_CONNECTOR_KEY),
-  sourceType: z.enum(['oauth', 'shared']),
+  sourceType: z.enum(["oauth", "shared"]),
   sourceId: z.string().optional(),
   profileId: z.string().optional(),
   sourceName: z.string().min(1).optional(),
@@ -169,23 +180,28 @@ const commitChangeSchema = z.object({
   transformations: z.record(z.string(), z.unknown()).optional(),
   mappingConfirmedAt: z.string().datetime().nullable().optional(),
   mappingHash: z.string().min(1).nullable().optional(),
-  activate: z.boolean().default(true)
+  activate: z.boolean().default(true),
 });
 
 const ensureCompanyContext = (req: Request, res: Response) => {
   const companyId = req.companyId;
   const userId = req.user?.id;
   if (!companyId || !userId) {
-    fail(res, 'Company onboarding required', 403);
+    fail(res, "Company onboarding required", 403);
     return null;
   }
   return { companyId, userId };
 };
 
-const normalizeConnectorPayload = (input: z.infer<typeof connectorInputSchema>) => {
+const normalizeConnectorPayload = (
+  input: z.infer<typeof connectorInputSchema>,
+) => {
   const definition = getConnectorDefinition(input.key);
   const mapping = Object.fromEntries(
-    Object.entries(input.mapping ?? {}).map(([column, target]) => [String(column), String(target)])
+    Object.entries(input.mapping ?? {}).map(([column, target]) => [
+      String(column),
+      String(target),
+    ]),
   );
 
   return {
@@ -193,31 +209,41 @@ const normalizeConnectorPayload = (input: z.infer<typeof connectorInputSchema>) 
     label: String(input.label ?? definition.label).trim() || definition.label,
     enabled: input.enabled,
     spreadsheetId: String(input.spreadsheetId).trim(),
-    spreadsheetTitle: input.spreadsheetTitle ? String(input.spreadsheetTitle).trim() : undefined,
+    spreadsheetTitle: input.spreadsheetTitle
+      ? String(input.spreadsheetTitle).trim()
+      : undefined,
     sheetName: String(input.sheetName).trim(),
     headerRow: Number(input.headerRow ?? 1),
     mapping,
     transformations: normalizeTransformations(input.transformations),
-    mappingConfirmedAt: input.mappingConfirmedAt ? new Date(input.mappingConfirmedAt) : undefined,
-    mappingHash: input.mappingHash ? String(input.mappingHash).trim() : undefined,
+    mappingConfirmedAt: input.mappingConfirmedAt
+      ? new Date(input.mappingConfirmedAt)
+      : undefined,
+    mappingHash: input.mappingHash
+      ? String(input.mappingHash).trim()
+      : undefined,
     schedule: input.schedule
       ? {
           enabled: Boolean(input.schedule.enabled),
           frequency: input.schedule.frequency,
           timeOfDay: input.schedule.timeOfDay,
-          dayOfWeek: input.schedule.dayOfWeek
+          dayOfWeek: input.schedule.dayOfWeek,
         }
-      : undefined
+      : undefined,
   };
 };
 
 const toConnectorResponse = (connector: any) => ({
   key: String(connector.key),
-  label: String(connector.label ?? getConnectorDefinition(String(connector.key)).label),
+  label: String(
+    connector.label ?? getConnectorDefinition(String(connector.key)).label,
+  ),
   enabled: Boolean(connector.enabled),
-  spreadsheetId: String(connector.spreadsheetId ?? ''),
-  spreadsheetTitle: connector.spreadsheetTitle ? String(connector.spreadsheetTitle) : null,
-  sheetName: String(connector.sheetName ?? ''),
+  spreadsheetId: String(connector.spreadsheetId ?? ""),
+  spreadsheetTitle: connector.spreadsheetTitle
+    ? String(connector.spreadsheetTitle)
+    : null,
+  sheetName: String(connector.sheetName ?? ""),
   headerRow: Number(connector.headerRow ?? 1),
   mapping: mapToPlain(connector.mapping),
   transformations: normalizeTransformations(connector.transformations),
@@ -228,31 +254,35 @@ const toConnectorResponse = (connector: any) => ({
         enabled: Boolean(connector.schedule.enabled),
         frequency: connector.schedule.frequency,
         timeOfDay: connector.schedule.timeOfDay,
-        dayOfWeek: connector.schedule.dayOfWeek
+        dayOfWeek: connector.schedule.dayOfWeek,
       }
     : undefined,
   lastDebugResult: connector.lastDebugResult ?? null,
   lastImportAt: connector.lastImportAt ?? null,
   createdAt: connector.createdAt ?? null,
-  updatedAt: connector.updatedAt ?? null
+  updatedAt: connector.updatedAt ?? null,
 });
 
 const toSourceResponse = (source: any) => ({
-  id: source._id?.toString?.() ?? String(source._id ?? ''),
-  name: String(source.name ?? ''),
-  connectors: Array.isArray(source.connectors) ? source.connectors.map(toConnectorResponse) : [],
+  id: source._id?.toString?.() ?? String(source._id ?? ""),
+  name: String(source.name ?? ""),
+  connectors: Array.isArray(source.connectors)
+    ? source.connectors.map(toConnectorResponse)
+    : [],
   lastDebugResult: source.lastDebugResult ?? null,
   createdAt: source.createdAt ?? null,
-  updatedAt: source.updatedAt ?? null
+  updatedAt: source.updatedAt ?? null,
 });
 
 const toProfileResponse = (profile: any) => ({
-  id: profile._id?.toString?.() ?? String(profile._id ?? ''),
-  name: String(profile.name ?? ''),
-  connectors: Array.isArray(profile.connectors) ? profile.connectors.map(toConnectorResponse) : [],
+  id: profile._id?.toString?.() ?? String(profile._id ?? ""),
+  name: String(profile.name ?? ""),
+  connectors: Array.isArray(profile.connectors)
+    ? profile.connectors.map(toConnectorResponse)
+    : [],
   lastDebugResult: profile.lastDebugResult ?? null,
   createdAt: profile.createdAt ?? null,
-  updatedAt: profile.updatedAt ?? null
+  updatedAt: profile.updatedAt ?? null,
 });
 
 const readSheetSampleByIntegration = async (
@@ -262,15 +292,15 @@ const readSheetSampleByIntegration = async (
     spreadsheetId: string;
     sheetName: string;
     headerRow?: number;
-  }
+  },
 ) => {
-  if (integrationType === 'oauth') {
+  if (integrationType === "oauth") {
     return readSheetSampleOAuth(
       companyId,
       connector.spreadsheetId,
       connector.sheetName,
       Number(connector.headerRow ?? 1),
-      30
+      30,
     );
   }
 
@@ -279,7 +309,7 @@ const readSheetSampleByIntegration = async (
     connector.spreadsheetId,
     connector.sheetName,
     Number(connector.headerRow ?? 1),
-    30
+    30,
   );
 };
 
@@ -292,27 +322,31 @@ const validateConnectorCompatibility = async (
     sheetName: string;
     headerRow?: number;
     mapping: Record<string, string>;
-  }
+  },
 ) => {
   const oneToOne = validateColumnMapOneToOne(connector.mapping);
   if (!oneToOne.ok) {
     return {
       sample: null,
       compatibility: {
-        status: 'error',
+        status: "error",
         missingColumns: [],
         missingTargets: [],
         duplicateTargets: oneToOne.duplicateTargets,
-        warnings: []
-      } as CompatibilityReport
+        warnings: [],
+      } as CompatibilityReport,
     };
   }
 
-  const sample = await readSheetSampleByIntegration(companyId, integrationType, connector);
+  const sample = await readSheetSampleByIntegration(
+    companyId,
+    integrationType,
+    connector,
+  );
   const compatibility = computeCompatibilityForConnector({
     connectorKey: connector.key,
     columns: sample.columns,
-    mapping: connector.mapping
+    mapping: connector.mapping,
   });
 
   return { sample, compatibility };
@@ -325,40 +359,53 @@ const toErrorStatus = (error: unknown) => {
 };
 
 const POS_MAPPING_TARGET_FIELDS = [
-  'date',
-  'day',
-  'highTax',
-  'lowTax',
-  'saleTax',
-  'totalSales',
-  'gas',
-  'lottery',
-  'creditCard',
-  'lotteryPayout',
-  'creditPlusLottery',
-  'cashDiff',
-  'cashPayout',
+  "date",
+  "day",
+  "highTax",
+  "lowTax",
+  "saleTax",
+  "totalSales",
+  "gas",
+  "lottery",
+  "creditCard",
+  "lotteryPayout",
+  "creditPlusLottery",
+  "cashDiff",
+  "cashPayout",
   // Backward-compatible aliases
-  'clTotal',
-  'cash',
-  'cashExpenses',
-  'notes'
+  "clTotal",
+  "cash",
+  "cashExpenses",
+  "notes",
 ];
 
 const resolveContainerForIntegration = (
   settingsDoc: any,
   integrationType: IntegrationType,
-  ref?: { sourceId?: string; profileId?: string; sourceName?: string; profileName?: string }
+  ref?: {
+    sourceId?: string;
+    profileId?: string;
+    sourceName?: string;
+    profileName?: string;
+  },
 ) => {
   const googleSheets = settingsDoc.googleSheets as any;
-  if (integrationType === 'oauth') {
-    const sources = (googleSheets.oauth?.sources ?? []) as Array<Record<string, unknown>>;
-    const requestedId = String(ref?.sourceId ?? '').trim();
-    const activeId = String(googleSheets.oauth?.activeSourceId?.toString?.() ?? '').trim();
+  if (integrationType === "oauth") {
+    const sources = (googleSheets.oauth?.sources ?? []) as Array<
+      Record<string, unknown>
+    >;
+    const requestedId = String(ref?.sourceId ?? "").trim();
+    const activeId = String(
+      googleSheets.oauth?.activeSourceId?.toString?.() ?? "",
+    ).trim();
 
     let source =
-      (requestedId ? sources.find((entry: any) => idEquals(entry._id, requestedId)) : null) ??
-      (activeId ? sources.find((entry: any) => idEquals(entry._id, activeId)) : null) ??
+      (requestedId
+        ? sources.find((entry: any) => idEquals(entry._id, requestedId))
+        : null) ??
+      (activeId
+        ? sources.find((entry: any) => idEquals(entry._id, activeId))
+        : null) ??
       sources[0] ??
       null;
 
@@ -366,31 +413,47 @@ const resolveContainerForIntegration = (
       const createdId = new Types.ObjectId();
       const draft = {
         _id: createdId,
-        name: String(ref?.sourceName ?? 'POS DATA SHEET').trim() || 'POS DATA SHEET',
+        name:
+          String(ref?.sourceName ?? "POS DATA SHEET").trim() ||
+          "POS DATA SHEET",
         connectors: [],
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
       };
       googleSheets.oauth.sources.push(draft);
       source =
-        (googleSheets.oauth.sources as Array<Record<string, unknown>>).find((entry) =>
-          idEquals((entry as Record<string, unknown>)._id, createdId.toString())
+        (googleSheets.oauth.sources as Array<Record<string, unknown>>).find(
+          (entry) =>
+            idEquals(
+              (entry as Record<string, unknown>)._id,
+              createdId.toString(),
+            ),
         ) ?? draft;
     }
 
     return {
       container: source,
-      containerId: (source as Record<string, unknown>)._id?.toString?.() ?? String((source as Record<string, unknown>)._id ?? '')
+      containerId:
+        (source as Record<string, unknown>)._id?.toString?.() ??
+        String((source as Record<string, unknown>)._id ?? ""),
     };
   }
 
-  const profiles = (googleSheets.shared?.profiles ?? []) as Array<Record<string, unknown>>;
-  const requestedId = String(ref?.profileId ?? '').trim();
-  const activeId = String(googleSheets.shared?.activeProfileId?.toString?.() ?? '').trim();
+  const profiles = (googleSheets.shared?.profiles ?? []) as Array<
+    Record<string, unknown>
+  >;
+  const requestedId = String(ref?.profileId ?? "").trim();
+  const activeId = String(
+    googleSheets.shared?.activeProfileId?.toString?.() ?? "",
+  ).trim();
 
   let profile =
-    (requestedId ? profiles.find((entry: any) => idEquals(entry._id, requestedId)) : null) ??
-    (activeId ? profiles.find((entry: any) => idEquals(entry._id, activeId)) : null) ??
+    (requestedId
+      ? profiles.find((entry: any) => idEquals(entry._id, requestedId))
+      : null) ??
+    (activeId
+      ? profiles.find((entry: any) => idEquals(entry._id, activeId))
+      : null) ??
     profiles[0] ??
     null;
 
@@ -398,22 +461,28 @@ const resolveContainerForIntegration = (
     const createdId = new Types.ObjectId();
     const draft = {
       _id: createdId,
-      name: String(ref?.profileName ?? 'POS DATA SHEET').trim() || 'POS DATA SHEET',
+      name:
+        String(ref?.profileName ?? "POS DATA SHEET").trim() || "POS DATA SHEET",
       connectors: [],
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
     googleSheets.shared.profiles.push(draft);
     profile =
-      (googleSheets.shared.profiles as Array<Record<string, unknown>>).find((entry) =>
-        idEquals((entry as Record<string, unknown>)._id, createdId.toString())
+      (googleSheets.shared.profiles as Array<Record<string, unknown>>).find(
+        (entry) =>
+          idEquals(
+            (entry as Record<string, unknown>)._id,
+            createdId.toString(),
+          ),
       ) ?? draft;
   }
 
   return {
     container: profile,
     containerId:
-      (profile as Record<string, unknown>)._id?.toString?.() ?? String((profile as Record<string, unknown>)._id ?? '')
+      (profile as Record<string, unknown>)._id?.toString?.() ??
+      String((profile as Record<string, unknown>)._id ?? ""),
   };
 };
 
@@ -425,40 +494,60 @@ const getExistingConnectorMapping = (params: {
   profileId?: string;
 }) => {
   const googleSheets = params.settingsDoc.googleSheets as any;
-  const key = String(params.connectorKey ?? '').trim() || DEFAULT_CONNECTOR_KEY;
+  const key = String(params.connectorKey ?? "").trim() || DEFAULT_CONNECTOR_KEY;
 
-  if (params.integrationType === 'oauth') {
-    const sources = Array.isArray(googleSheets.oauth?.sources) ? googleSheets.oauth.sources : [];
-    const requestedId = String(params.sourceId ?? '').trim();
-    const activeId = String(googleSheets.oauth?.activeSourceId?.toString?.() ?? '').trim();
+  if (params.integrationType === "oauth") {
+    const sources = Array.isArray(googleSheets.oauth?.sources)
+      ? googleSheets.oauth.sources
+      : [];
+    const requestedId = String(params.sourceId ?? "").trim();
+    const activeId = String(
+      googleSheets.oauth?.activeSourceId?.toString?.() ?? "",
+    ).trim();
     const source =
-      (requestedId ? sources.find((entry: any) => idEquals(entry._id, requestedId)) : null) ??
-      (activeId ? sources.find((entry: any) => idEquals(entry._id, activeId)) : null) ??
+      (requestedId
+        ? sources.find((entry: any) => idEquals(entry._id, requestedId))
+        : null) ??
+      (activeId
+        ? sources.find((entry: any) => idEquals(entry._id, activeId))
+        : null) ??
       sources[0] ??
       null;
     const connector = Array.isArray(source?.connectors)
-      ? source.connectors.find((entry: any) => String(entry?.key ?? '').trim() === key)
+      ? source.connectors.find(
+          (entry: any) => String(entry?.key ?? "").trim() === key,
+        )
       : null;
     return {
       mapping: mapToPlain(connector?.mapping),
-      transformations: normalizeTransformations(connector?.transformations)
+      transformations: normalizeTransformations(connector?.transformations),
     };
   }
 
-  const profiles = Array.isArray(googleSheets.shared?.profiles) ? googleSheets.shared.profiles : [];
-  const requestedId = String(params.profileId ?? '').trim();
-  const activeId = String(googleSheets.shared?.activeProfileId?.toString?.() ?? '').trim();
+  const profiles = Array.isArray(googleSheets.shared?.profiles)
+    ? googleSheets.shared.profiles
+    : [];
+  const requestedId = String(params.profileId ?? "").trim();
+  const activeId = String(
+    googleSheets.shared?.activeProfileId?.toString?.() ?? "",
+  ).trim();
   const profile =
-    (requestedId ? profiles.find((entry: any) => idEquals(entry._id, requestedId)) : null) ??
-    (activeId ? profiles.find((entry: any) => idEquals(entry._id, activeId)) : null) ??
+    (requestedId
+      ? profiles.find((entry: any) => idEquals(entry._id, requestedId))
+      : null) ??
+    (activeId
+      ? profiles.find((entry: any) => idEquals(entry._id, activeId))
+      : null) ??
     profiles[0] ??
     null;
   const connector = Array.isArray(profile?.connectors)
-    ? profile.connectors.find((entry: any) => String(entry?.key ?? '').trim() === key)
+    ? profile.connectors.find(
+        (entry: any) => String(entry?.key ?? "").trim() === key,
+      )
     : null;
   return {
     mapping: mapToPlain(connector?.mapping),
-    transformations: normalizeTransformations(connector?.transformations)
+    transformations: normalizeTransformations(connector?.transformations),
   };
 };
 
@@ -467,14 +556,16 @@ const updateIntegrationDebug = (
   integrationType: IntegrationType,
   refId: string,
   connectorKey: string,
-  debug: DebugResult
+  debug: DebugResult,
 ) => {
   const googleSheets = settingsDoc.googleSheets;
-  if (integrationType === 'oauth') {
-    const source = (googleSheets.oauth?.sources ?? []).find((entry: any) => idEquals(entry._id, refId));
+  if (integrationType === "oauth") {
+    const source = (googleSheets.oauth?.sources ?? []).find((entry: any) =>
+      idEquals(entry._id, refId),
+    );
     if (source) {
       const connector = (source.connectors ?? []).find(
-        (entry: any) => String(entry.key ?? '') === connectorKey
+        (entry: any) => String(entry.key ?? "") === connectorKey,
       );
       if (connector) {
         connector.lastDebugResult = debug;
@@ -485,10 +576,12 @@ const updateIntegrationDebug = (
     return;
   }
 
-  const profile = (googleSheets.shared?.profiles ?? []).find((entry: any) => idEquals(entry._id, refId));
+  const profile = (googleSheets.shared?.profiles ?? []).find((entry: any) =>
+    idEquals(entry._id, refId),
+  );
   if (profile) {
     const connector = (profile.connectors ?? []).find(
-      (entry: any) => String(entry.key ?? '') === connectorKey
+      (entry: any) => String(entry.key ?? "") === connectorKey,
     );
     if (connector) {
       connector.lastDebugResult = debug;
@@ -501,7 +594,7 @@ const updateIntegrationDebug = (
 const runDebug = async (
   companyId: string,
   integrationType: IntegrationType,
-  resolved: ResolvedSheetsConfig
+  resolved: ResolvedSheetsConfig,
 ): Promise<DebugResult> => {
   const now = new Date().toISOString();
   const connectorKey = resolved.connectorKey;
@@ -510,31 +603,37 @@ const runDebug = async (
     let authScopes: string[] | undefined;
     let expiresInSec: number | undefined;
 
-    if (integrationType === 'oauth') {
+    if (integrationType === "oauth") {
       const oauthClient = await getOAuthClientForCompany(companyId);
       const scopeRaw = oauthClient.credentials.scope;
-      if (typeof scopeRaw === 'string' && scopeRaw.trim()) {
+      if (typeof scopeRaw === "string" && scopeRaw.trim()) {
         authScopes = scopeRaw.split(/\s+/).filter(Boolean);
       }
-      if (typeof oauthClient.credentials.expiry_date === 'number') {
-        const remaining = Math.floor((oauthClient.credentials.expiry_date - Date.now()) / 1000);
+      if (typeof oauthClient.credentials.expiry_date === "number") {
+        const remaining = Math.floor(
+          (oauthClient.credentials.expiry_date - Date.now()) / 1000,
+        );
         expiresInSec = remaining;
       }
     }
 
-    const sample = await readSheetSampleByIntegration(companyId, integrationType, {
-      spreadsheetId: resolved.spreadsheetId,
-      sheetName: resolved.sheetName,
-      headerRow: resolved.headerRow
-    });
+    const sample = await readSheetSampleByIntegration(
+      companyId,
+      integrationType,
+      {
+        spreadsheetId: resolved.spreadsheetId,
+        sheetName: resolved.sheetName,
+        headerRow: resolved.headerRow,
+      },
+    );
 
     const compatibility = computeCompatibilityForConnector({
       connectorKey,
       columns: sample.columns,
-      mapping: resolved.mapping
+      mapping: resolved.mapping,
     });
 
-    const mappingOk = compatibility.status !== 'error';
+    const mappingOk = compatibility.status !== "error";
     return {
       ok: mappingOk,
       integrationType,
@@ -542,65 +641,68 @@ const runDebug = async (
       checkedAt: now,
       auth: {
         ok: true,
-        details: 'Auth context available',
+        details: "Auth context available",
         scopes: authScopes,
-        expiresInSec
+        expiresInSec,
       },
       sheet: {
         ok: true,
         spreadsheetId: resolved.spreadsheetId,
         sheetName: resolved.sheetName,
-        details: 'Sheet readable'
+        details: "Sheet readable",
       },
       header: {
         ok: sample.columns.length > 0,
         headerRow: sample.headerRow,
-        columns: sample.columns
+        columns: sample.columns,
       },
       mapping: {
         ok: mappingOk,
-        details: mappingOk ? 'Mapping compatible' : 'Mapping incompatible',
+        details: mappingOk ? "Mapping compatible" : "Mapping incompatible",
         missingTargets: compatibility.missingTargets,
-        duplicateTargets: compatibility.duplicateTargets
+        duplicateTargets: compatibility.duplicateTargets,
       },
       sample: {
         ok: true,
         rowCount: sample.rows.length,
-        details: 'Sample rows fetched'
-      }
+        details: "Sample rows fetched",
+      },
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Debug failed';
+    const message = error instanceof Error ? error.message : "Debug failed";
     return {
       ok: false,
       integrationType,
       connectorKey,
       checkedAt: now,
       auth: {
-        ok: integrationType === 'shared' ? true : false,
-        details: integrationType === 'shared' ? 'Service account auth context available' : message
+        ok: integrationType === "shared" ? true : false,
+        details:
+          integrationType === "shared"
+            ? "Service account auth context available"
+            : message,
       },
       sheet: {
         ok: false,
         spreadsheetId: resolved.spreadsheetId,
         sheetName: resolved.sheetName,
-        details: message
+        details: message,
       },
       header: {
         ok: false,
         headerRow: resolved.headerRow,
-        columns: []
+        columns: [],
       },
       mapping: {
         ok: false,
         details: message,
         missingTargets: [],
-        duplicateTargets: []
+        duplicateTargets: [],
       },
       sample: {
         ok: false,
-        details: message
-      }
+        details: message,
+      },
     };
   }
 };
@@ -621,29 +723,34 @@ export const getSettings = async (req: Request, res: Response) => {
       activeIntegration: googleSheets.activeIntegration ?? null,
       oauth: {
         enabled: Boolean(googleSheets.oauth?.enabled),
-        connectionStatus: googleSheets.oauth?.connectionStatus ?? 'not_connected',
-        activeSourceId: googleSheets.oauth?.activeSourceId?.toString?.() ?? null,
-        activeConnectorKey: googleSheets.oauth?.activeConnectorKey ?? DEFAULT_CONNECTOR_KEY,
+        connectionStatus:
+          googleSheets.oauth?.connectionStatus ?? "not_connected",
+        activeSourceId:
+          googleSheets.oauth?.activeSourceId?.toString?.() ?? null,
+        activeConnectorKey:
+          googleSheets.oauth?.activeConnectorKey ?? DEFAULT_CONNECTOR_KEY,
         sources: (googleSheets.oauth?.sources ?? []).map(toSourceResponse),
         lastDebugResult: googleSheets.oauth?.lastDebugResult ?? null,
-        lastImportAt: googleSheets.oauth?.lastImportAt ?? null
+        lastImportAt: googleSheets.oauth?.lastImportAt ?? null,
       },
       shared: {
         enabled: Boolean(googleSheets.shared?.enabled),
-        activeProfileId: googleSheets.shared?.activeProfileId?.toString?.() ?? null,
-        activeConnectorKey: googleSheets.shared?.activeConnectorKey ?? DEFAULT_CONNECTOR_KEY,
+        activeProfileId:
+          googleSheets.shared?.activeProfileId?.toString?.() ?? null,
+        activeConnectorKey:
+          googleSheets.shared?.activeConnectorKey ?? DEFAULT_CONNECTOR_KEY,
         profiles: (googleSheets.shared?.profiles ?? []).map(toProfileResponse),
         lastDebugResult: googleSheets.shared?.lastDebugResult ?? null,
         lastImportAt: googleSheets.shared?.lastImportAt ?? null,
-        lastScheduledSyncAt: googleSheets.shared?.lastScheduledSyncAt ?? null
+        lastScheduledSyncAt: googleSheets.shared?.lastScheduledSyncAt ?? null,
       },
-      updatedAt: googleSheets.updatedAt ?? null
+      updatedAt: googleSheets.updatedAt ?? null,
     },
     quickbooks: settings.quickbooks,
     lastImportSource: settings.lastImportSource ?? null,
     lastImportAt: settings.lastImportAt ?? null,
     createdAt: settings.createdAt,
-    updatedAt: settings.updatedAt
+    updatedAt: settings.updatedAt,
   };
 
   return ok(res, payload);
@@ -655,50 +762,59 @@ export const activateGoogleSheets = async (req: Request, res: Response) => {
 
   const parsed = activateSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
   try {
-    const settings = await getOrCreateSettings(context.companyId, context.userId);
+    const settings = await getOrCreateSettings(
+      context.companyId,
+      context.userId,
+    );
     ensureGoogleSheetsShape(settings);
 
     const googleSheets = settings.googleSheets as any;
     const integrationType = parsed.data.integrationType;
 
-    const connectorKey = String(
-      parsed.data.connectorKey ??
-        (integrationType === 'oauth'
-          ? googleSheets.oauth?.activeConnectorKey
-          : googleSheets.shared?.activeConnectorKey) ??
-        DEFAULT_CONNECTOR_KEY
-    ).trim() || DEFAULT_CONNECTOR_KEY;
+    const connectorKey =
+      String(
+        parsed.data.connectorKey ??
+          (integrationType === "oauth"
+            ? googleSheets.oauth?.activeConnectorKey
+            : googleSheets.shared?.activeConnectorKey) ??
+          DEFAULT_CONNECTOR_KEY,
+      ).trim() || DEFAULT_CONNECTOR_KEY;
 
     const resolved = await resolveSheetsConfigByRef(context.companyId, {
       integrationType,
-      sourceId: integrationType === 'oauth' ? parsed.data.sourceId : undefined,
-      profileId: integrationType === 'shared' ? parsed.data.profileId : undefined,
-      connectorKey
+      sourceId: integrationType === "oauth" ? parsed.data.sourceId : undefined,
+      profileId:
+        integrationType === "shared" ? parsed.data.profileId : undefined,
+      connectorKey,
     });
 
-    const sample = await readSheetSampleByIntegration(context.companyId, integrationType, {
-      spreadsheetId: resolved.spreadsheetId,
-      sheetName: resolved.sheetName,
-      headerRow: resolved.headerRow
-    });
+    const sample = await readSheetSampleByIntegration(
+      context.companyId,
+      integrationType,
+      {
+        spreadsheetId: resolved.spreadsheetId,
+        sheetName: resolved.sheetName,
+        headerRow: resolved.headerRow,
+      },
+    );
 
     const compatibility = computeCompatibilityForConnector({
       connectorKey: resolved.connectorKey,
       columns: sample.columns,
-      mapping: resolved.mapping
+      mapping: resolved.mapping,
     });
 
-    if (compatibility.status === 'error') {
-      return fail(res, 'Connector is not compatible', 400, compatibility);
+    if (compatibility.status === "error") {
+      return fail(res, "Connector is not compatible", 400, compatibility);
     }
 
     googleSheets.activeIntegration = integrationType;
 
-    if (integrationType === 'oauth') {
+    if (integrationType === "oauth") {
       googleSheets.oauth.enabled = true;
       googleSheets.oauth.activeSourceId = asObjectId(resolved.ref.sourceId);
       googleSheets.oauth.activeConnectorKey = resolved.connectorKey;
@@ -715,14 +831,19 @@ export const activateGoogleSheets = async (req: Request, res: Response) => {
       ok: true,
       activeIntegration: integrationType,
       activeSourceId:
-        integrationType === 'oauth' ? googleSheets.oauth.activeSourceId?.toString?.() ?? null : null,
+        integrationType === "oauth"
+          ? (googleSheets.oauth.activeSourceId?.toString?.() ?? null)
+          : null,
       activeProfileId:
-        integrationType === 'shared' ? googleSheets.shared.activeProfileId?.toString?.() ?? null : null,
+        integrationType === "shared"
+          ? (googleSheets.shared.activeProfileId?.toString?.() ?? null)
+          : null,
       activeConnectorKey: resolved.connectorKey,
-      compatibility
+      compatibility,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to activate connector';
+    const message =
+      error instanceof Error ? error.message : "Failed to activate connector";
     return fail(res, message, toErrorStatus(error));
   }
 };
@@ -733,35 +854,50 @@ export const createOAuthSource = async (req: Request, res: Response) => {
 
   const parsed = createOAuthSourceSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
   try {
-    const settings = await getOrCreateSettings(context.companyId, context.userId);
+    const settings = await getOrCreateSettings(
+      context.companyId,
+      context.userId,
+    );
     ensureGoogleSheetsShape(settings);
 
-    const perConnectorCompatibility: Array<{ key: string; compatibility: CompatibilityReport }> = [];
+    const perConnectorCompatibility: Array<{
+      key: string;
+      compatibility: CompatibilityReport;
+    }> = [];
     const connectors: Array<Record<string, unknown>> = [];
 
     for (const rawConnector of parsed.data.connectors) {
       const connector = normalizeConnectorPayload(rawConnector);
-      const { compatibility } = await validateConnectorCompatibility(context.companyId, 'oauth', {
-        key: connector.key,
-        spreadsheetId: connector.spreadsheetId,
-        sheetName: connector.sheetName,
-        headerRow: connector.headerRow,
-        mapping: connector.mapping
-      });
+      const { compatibility } = await validateConnectorCompatibility(
+        context.companyId,
+        "oauth",
+        {
+          key: connector.key,
+          spreadsheetId: connector.spreadsheetId,
+          sheetName: connector.sheetName,
+          headerRow: connector.headerRow,
+          mapping: connector.mapping,
+        },
+      );
 
-      if (compatibility.status === 'error') {
-        return fail(res, `Connector ${connector.key} is not compatible`, 400, compatibility);
+      if (compatibility.status === "error") {
+        return fail(
+          res,
+          `Connector ${connector.key} is not compatible`,
+          400,
+          compatibility,
+        );
       }
 
       connectors.push({
         ...createDefaultConnector(connector.key),
         ...connector,
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
       });
       perConnectorCompatibility.push({ key: connector.key, compatibility });
     }
@@ -771,7 +907,7 @@ export const createOAuthSource = async (req: Request, res: Response) => {
       name: parsed.data.name.trim(),
       connectors,
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
 
     const googleSheets = settings.googleSheets as any;
@@ -788,10 +924,11 @@ export const createOAuthSource = async (req: Request, res: Response) => {
 
     return ok(res, {
       source: toSourceResponse(source),
-      perConnectorCompatibility
+      perConnectorCompatibility,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create OAuth source';
+    const message =
+      error instanceof Error ? error.message : "Failed to create OAuth source";
     return fail(res, message, toErrorStatus(error));
   }
 };
@@ -800,29 +937,34 @@ export const updateOAuthConnector = async (req: Request, res: Response) => {
   const context = ensureCompanyContext(req, res);
   if (!context) return;
 
-  const sourceId = String(req.params.sourceId ?? '').trim();
-  const connectorKey = String(req.params.connectorKey ?? '').trim();
+  const sourceId = String(req.params.sourceId ?? "").trim();
+  const connectorKey = String(req.params.connectorKey ?? "").trim();
   if (!sourceId || !connectorKey) {
-    return fail(res, 'sourceId and connectorKey are required', 400);
+    return fail(res, "sourceId and connectorKey are required", 400);
   }
 
   const parsed = connectorPatchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
   try {
-    const settings = await getOrCreateSettings(context.companyId, context.userId);
+    const settings = await getOrCreateSettings(
+      context.companyId,
+      context.userId,
+    );
     ensureGoogleSheetsShape(settings);
     const googleSheets = settings.googleSheets as any;
 
-    const source = (googleSheets.oauth.sources ?? []).find((entry: any) => idEquals(entry._id, sourceId));
+    const source = (googleSheets.oauth.sources ?? []).find((entry: any) =>
+      idEquals(entry._id, sourceId),
+    );
     if (!source) {
-      return fail(res, 'OAuth source not found', 404);
+      return fail(res, "OAuth source not found", 404);
     }
 
     const existing = (source.connectors ?? []).find(
-      (entry: any) => String(entry.key ?? '').trim() === connectorKey
+      (entry: any) => String(entry.key ?? "").trim() === connectorKey,
     );
 
     const merged = {
@@ -830,14 +972,20 @@ export const updateOAuthConnector = async (req: Request, res: Response) => {
         key: connectorKey,
         label: parsed.data.label ?? existing?.label,
         enabled: parsed.data.enabled ?? Boolean(existing?.enabled ?? true),
-        spreadsheetId: parsed.data.spreadsheetId ?? String(existing?.spreadsheetId ?? ''),
+        spreadsheetId:
+          parsed.data.spreadsheetId ?? String(existing?.spreadsheetId ?? ""),
         spreadsheetTitle:
           parsed.data.spreadsheetTitle ??
-          (existing?.spreadsheetTitle ? String(existing.spreadsheetTitle) : undefined),
-        sheetName: parsed.data.sheetName ?? String(existing?.sheetName ?? 'Sheet1'),
+          (existing?.spreadsheetTitle
+            ? String(existing.spreadsheetTitle)
+            : undefined),
+        sheetName:
+          parsed.data.sheetName ?? String(existing?.sheetName ?? "Sheet1"),
         headerRow: parsed.data.headerRow ?? Number(existing?.headerRow ?? 1),
         mapping: parsed.data.mapping ?? mapToPlain(existing?.mapping),
-        transformations: parsed.data.transformations ?? normalizeTransformations(existing?.transformations),
+        transformations:
+          parsed.data.transformations ??
+          normalizeTransformations(existing?.transformations),
         mappingConfirmedAt:
           parsed.data.mappingConfirmedAt ??
           (existing?.mappingConfirmedAt
@@ -846,20 +994,29 @@ export const updateOAuthConnector = async (req: Request, res: Response) => {
         mappingHash:
           parsed.data.mappingHash ??
           (existing?.mappingHash ? String(existing.mappingHash) : undefined),
-        schedule: parsed.data.schedule ?? existing?.schedule
-      })
+        schedule: parsed.data.schedule ?? existing?.schedule,
+      }),
     };
 
-    const { compatibility } = await validateConnectorCompatibility(context.companyId, 'oauth', {
-      key: merged.key,
-      spreadsheetId: merged.spreadsheetId,
-      sheetName: merged.sheetName,
-      headerRow: merged.headerRow,
-      mapping: merged.mapping
-    });
+    const { compatibility } = await validateConnectorCompatibility(
+      context.companyId,
+      "oauth",
+      {
+        key: merged.key,
+        spreadsheetId: merged.spreadsheetId,
+        sheetName: merged.sheetName,
+        headerRow: merged.headerRow,
+        mapping: merged.mapping,
+      },
+    );
 
-    if (compatibility.status === 'error') {
-      return fail(res, `Connector ${connectorKey} is not compatible`, 400, compatibility);
+    if (compatibility.status === "error") {
+      return fail(
+        res,
+        `Connector ${connectorKey} is not compatible`,
+        400,
+        compatibility,
+      );
     }
 
     if (existing) {
@@ -879,7 +1036,7 @@ export const updateOAuthConnector = async (req: Request, res: Response) => {
         ...createDefaultConnector(connectorKey),
         ...merged,
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
       });
     }
 
@@ -888,15 +1045,18 @@ export const updateOAuthConnector = async (req: Request, res: Response) => {
     await settings.save();
 
     const connector = (source.connectors ?? []).find(
-      (entry: any) => String(entry.key ?? '').trim() === connectorKey
+      (entry: any) => String(entry.key ?? "").trim() === connectorKey,
     );
 
     return ok(res, {
       connector: connector ? toConnectorResponse(connector) : null,
-      compatibility
+      compatibility,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update OAuth connector';
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to update OAuth connector";
     return fail(res, message, toErrorStatus(error));
   }
 };
@@ -912,9 +1072,10 @@ export const listOAuthSources = async (req: Request, res: Response) => {
   return ok(res, {
     sources: (googleSheets.oauth?.sources ?? []).map(toSourceResponse),
     activeSourceId: googleSheets.oauth?.activeSourceId?.toString?.() ?? null,
-    activeConnectorKey: googleSheets.oauth?.activeConnectorKey ?? DEFAULT_CONNECTOR_KEY,
+    activeConnectorKey:
+      googleSheets.oauth?.activeConnectorKey ?? DEFAULT_CONNECTOR_KEY,
     enabled: Boolean(googleSheets.oauth?.enabled),
-    connectionStatus: googleSheets.oauth?.connectionStatus ?? 'not_connected'
+    connectionStatus: googleSheets.oauth?.connectionStatus ?? "not_connected",
   });
 };
 
@@ -924,35 +1085,50 @@ export const createSharedProfile = async (req: Request, res: Response) => {
 
   const parsed = createSharedProfileSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
   try {
-    const settings = await getOrCreateSettings(context.companyId, context.userId);
+    const settings = await getOrCreateSettings(
+      context.companyId,
+      context.userId,
+    );
     ensureGoogleSheetsShape(settings);
 
-    const perConnectorCompatibility: Array<{ key: string; compatibility: CompatibilityReport }> = [];
+    const perConnectorCompatibility: Array<{
+      key: string;
+      compatibility: CompatibilityReport;
+    }> = [];
     const connectors: Array<Record<string, unknown>> = [];
 
     for (const rawConnector of parsed.data.connectors) {
       const connector = normalizeConnectorPayload(rawConnector);
-      const { compatibility } = await validateConnectorCompatibility(context.companyId, 'shared', {
-        key: connector.key,
-        spreadsheetId: connector.spreadsheetId,
-        sheetName: connector.sheetName,
-        headerRow: connector.headerRow,
-        mapping: connector.mapping
-      });
+      const { compatibility } = await validateConnectorCompatibility(
+        context.companyId,
+        "shared",
+        {
+          key: connector.key,
+          spreadsheetId: connector.spreadsheetId,
+          sheetName: connector.sheetName,
+          headerRow: connector.headerRow,
+          mapping: connector.mapping,
+        },
+      );
 
-      if (compatibility.status === 'error') {
-        return fail(res, `Connector ${connector.key} is not compatible`, 400, compatibility);
+      if (compatibility.status === "error") {
+        return fail(
+          res,
+          `Connector ${connector.key} is not compatible`,
+          400,
+          compatibility,
+        );
       }
 
       connectors.push({
         ...createDefaultConnector(connector.key),
         ...connector,
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
       });
       perConnectorCompatibility.push({ key: connector.key, compatibility });
     }
@@ -962,7 +1138,7 @@ export const createSharedProfile = async (req: Request, res: Response) => {
       name: parsed.data.name.trim(),
       connectors,
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
 
     const googleSheets = settings.googleSheets as any;
@@ -979,10 +1155,13 @@ export const createSharedProfile = async (req: Request, res: Response) => {
 
     return ok(res, {
       profile: toProfileResponse(profile),
-      perConnectorCompatibility
+      perConnectorCompatibility,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create shared profile';
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to create shared profile";
     return fail(res, message, toErrorStatus(error));
   }
 };
@@ -991,29 +1170,34 @@ export const updateSharedConnector = async (req: Request, res: Response) => {
   const context = ensureCompanyContext(req, res);
   if (!context) return;
 
-  const profileId = String(req.params.profileId ?? '').trim();
-  const connectorKey = String(req.params.connectorKey ?? '').trim();
+  const profileId = String(req.params.profileId ?? "").trim();
+  const connectorKey = String(req.params.connectorKey ?? "").trim();
   if (!profileId || !connectorKey) {
-    return fail(res, 'profileId and connectorKey are required', 400);
+    return fail(res, "profileId and connectorKey are required", 400);
   }
 
   const parsed = connectorPatchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
   try {
-    const settings = await getOrCreateSettings(context.companyId, context.userId);
+    const settings = await getOrCreateSettings(
+      context.companyId,
+      context.userId,
+    );
     ensureGoogleSheetsShape(settings);
     const googleSheets = settings.googleSheets as any;
 
-    const profile = (googleSheets.shared.profiles ?? []).find((entry: any) => idEquals(entry._id, profileId));
+    const profile = (googleSheets.shared.profiles ?? []).find((entry: any) =>
+      idEquals(entry._id, profileId),
+    );
     if (!profile) {
-      return fail(res, 'Shared profile not found', 404);
+      return fail(res, "Shared profile not found", 404);
     }
 
     const existing = (profile.connectors ?? []).find(
-      (entry: any) => String(entry.key ?? '').trim() === connectorKey
+      (entry: any) => String(entry.key ?? "").trim() === connectorKey,
     );
 
     const merged = {
@@ -1021,14 +1205,20 @@ export const updateSharedConnector = async (req: Request, res: Response) => {
         key: connectorKey,
         label: parsed.data.label ?? existing?.label,
         enabled: parsed.data.enabled ?? Boolean(existing?.enabled ?? true),
-        spreadsheetId: parsed.data.spreadsheetId ?? String(existing?.spreadsheetId ?? ''),
+        spreadsheetId:
+          parsed.data.spreadsheetId ?? String(existing?.spreadsheetId ?? ""),
         spreadsheetTitle:
           parsed.data.spreadsheetTitle ??
-          (existing?.spreadsheetTitle ? String(existing.spreadsheetTitle) : undefined),
-        sheetName: parsed.data.sheetName ?? String(existing?.sheetName ?? 'Sheet1'),
+          (existing?.spreadsheetTitle
+            ? String(existing.spreadsheetTitle)
+            : undefined),
+        sheetName:
+          parsed.data.sheetName ?? String(existing?.sheetName ?? "Sheet1"),
         headerRow: parsed.data.headerRow ?? Number(existing?.headerRow ?? 1),
         mapping: parsed.data.mapping ?? mapToPlain(existing?.mapping),
-        transformations: parsed.data.transformations ?? normalizeTransformations(existing?.transformations),
+        transformations:
+          parsed.data.transformations ??
+          normalizeTransformations(existing?.transformations),
         mappingConfirmedAt:
           parsed.data.mappingConfirmedAt ??
           (existing?.mappingConfirmedAt
@@ -1037,20 +1227,29 @@ export const updateSharedConnector = async (req: Request, res: Response) => {
         mappingHash:
           parsed.data.mappingHash ??
           (existing?.mappingHash ? String(existing.mappingHash) : undefined),
-        schedule: parsed.data.schedule ?? existing?.schedule
-      })
+        schedule: parsed.data.schedule ?? existing?.schedule,
+      }),
     };
 
-    const { compatibility } = await validateConnectorCompatibility(context.companyId, 'shared', {
-      key: merged.key,
-      spreadsheetId: merged.spreadsheetId,
-      sheetName: merged.sheetName,
-      headerRow: merged.headerRow,
-      mapping: merged.mapping
-    });
+    const { compatibility } = await validateConnectorCompatibility(
+      context.companyId,
+      "shared",
+      {
+        key: merged.key,
+        spreadsheetId: merged.spreadsheetId,
+        sheetName: merged.sheetName,
+        headerRow: merged.headerRow,
+        mapping: merged.mapping,
+      },
+    );
 
-    if (compatibility.status === 'error') {
-      return fail(res, `Connector ${connectorKey} is not compatible`, 400, compatibility);
+    if (compatibility.status === "error") {
+      return fail(
+        res,
+        `Connector ${connectorKey} is not compatible`,
+        400,
+        compatibility,
+      );
     }
 
     if (existing) {
@@ -1071,7 +1270,7 @@ export const updateSharedConnector = async (req: Request, res: Response) => {
         ...createDefaultConnector(connectorKey),
         ...merged,
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
       });
     }
 
@@ -1080,15 +1279,18 @@ export const updateSharedConnector = async (req: Request, res: Response) => {
     await settings.save();
 
     const connector = (profile.connectors ?? []).find(
-      (entry: any) => String(entry.key ?? '').trim() === connectorKey
+      (entry: any) => String(entry.key ?? "").trim() === connectorKey,
     );
 
     return ok(res, {
       connector: connector ? toConnectorResponse(connector) : null,
-      compatibility
+      compatibility,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update shared connector';
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to update shared connector";
     return fail(res, message, toErrorStatus(error));
   }
 };
@@ -1104,8 +1306,9 @@ export const listSharedProfiles = async (req: Request, res: Response) => {
   return ok(res, {
     profiles: (googleSheets.shared?.profiles ?? []).map(toProfileResponse),
     activeProfileId: googleSheets.shared?.activeProfileId?.toString?.() ?? null,
-    activeConnectorKey: googleSheets.shared?.activeConnectorKey ?? DEFAULT_CONNECTOR_KEY,
-    enabled: Boolean(googleSheets.shared?.enabled)
+    activeConnectorKey:
+      googleSheets.shared?.activeConnectorKey ?? DEFAULT_CONNECTOR_KEY,
+    enabled: Boolean(googleSheets.shared?.enabled),
   });
 };
 
@@ -1115,22 +1318,29 @@ export const stageGoogleSheetsChange = async (req: Request, res: Response) => {
 
   const parsed = stageChangeSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
   try {
-    const settings = await getOrCreateSettings(context.companyId, context.userId);
+    const settings = await getOrCreateSettings(
+      context.companyId,
+      context.userId,
+    );
     ensureGoogleSheetsShape(settings);
     const integrationType: IntegrationType = parsed.data.sourceType;
-    const connectorKey = String(parsed.data.connectorKey ?? DEFAULT_CONNECTOR_KEY).trim() || DEFAULT_CONNECTOR_KEY;
+    const connectorKey =
+      String(parsed.data.connectorKey ?? DEFAULT_CONNECTOR_KEY).trim() ||
+      DEFAULT_CONNECTOR_KEY;
     const rawSheetName = parsed.data.sheetName ?? parsed.data.tab;
-    const resolvedSheetName = String(rawSheetName ?? '').trim();
+    const resolvedSheetName = String(rawSheetName ?? "").trim();
     if (!resolvedSheetName) {
-      return fail(res, 'sheetName is required', 400);
+      return fail(res, "sheetName is required", 400);
     }
-    const resolvedSpreadsheetId = String(parsed.data.spreadsheetId ?? '').trim();
+    const resolvedSpreadsheetId = String(
+      parsed.data.spreadsheetId ?? "",
+    ).trim();
     if (!resolvedSpreadsheetId) {
-      return fail(res, 'spreadsheetId is required', 400);
+      return fail(res, "spreadsheetId is required", 400);
     }
 
     const existing = getExistingConnectorMapping({
@@ -1138,12 +1348,17 @@ export const stageGoogleSheetsChange = async (req: Request, res: Response) => {
       integrationType,
       connectorKey,
       sourceId: parsed.data.sourceId,
-      profileId: parsed.data.profileId
+      profileId: parsed.data.profileId,
     });
 
     const mapping =
       parsed.data.mapping != null
-        ? Object.fromEntries(Object.entries(parsed.data.mapping).map(([column, target]) => [String(column), String(target)]))
+        ? Object.fromEntries(
+            Object.entries(parsed.data.mapping).map(([column, target]) => [
+              String(column),
+              String(target),
+            ]),
+          )
         : existing.mapping;
 
     const transformations =
@@ -1151,31 +1366,39 @@ export const stageGoogleSheetsChange = async (req: Request, res: Response) => {
         ? normalizeTransformations(parsed.data.transformations)
         : existing.transformations;
 
-    const sample = await readSheetSampleByIntegration(context.companyId, integrationType, {
-      spreadsheetId: resolvedSpreadsheetId,
-      sheetName: resolvedSheetName,
-      headerRow: parsed.data.headerRow
-    });
-
-    const sampleRowsMatrix = sample.rows.map((row) => sample.columns.map((column) => String(row[column] ?? '')));
-    const suggestions = suggestMappings(sample.columns, sampleRowsMatrix, POS_MAPPING_TARGET_FIELDS).map(
-      (entry, index) => ({
-        col: String.fromCharCode(65 + index),
-        header: entry.sourceHeader,
-        suggestion: entry.targetField,
-        score: entry.score
-      })
+    const sample = await readSheetSampleByIntegration(
+      context.companyId,
+      integrationType,
+      {
+        spreadsheetId: resolvedSpreadsheetId,
+        sheetName: resolvedSheetName,
+        headerRow: parsed.data.headerRow,
+      },
     );
+
+    const sampleRowsMatrix = sample.rows.map((row) =>
+      sample.columns.map((column) => String(row[column] ?? "")),
+    );
+    const suggestions = suggestMappings(
+      sample.columns,
+      sampleRowsMatrix,
+      POS_MAPPING_TARGET_FIELDS,
+    ).map((entry, index) => ({
+      col: String.fromCharCode(65 + index),
+      header: entry.sourceHeader,
+      suggestion: entry.targetField,
+      score: entry.score,
+    }));
 
     const oneToOne = validateColumnMapOneToOne(mapping);
     const compatibility = computeCompatibilityForConnector({
       connectorKey,
       columns: sample.columns,
-      mapping
+      mapping,
     });
 
     if (!oneToOne.ok) {
-      compatibility.status = 'error';
+      compatibility.status = "error";
       compatibility.duplicateTargets = oneToOne.duplicateTargets;
     }
 
@@ -1186,17 +1409,22 @@ export const stageGoogleSheetsChange = async (req: Request, res: Response) => {
         header: sample.columns,
         sampleRows: sampleRowsMatrix.slice(0, 10),
         suggestions,
-        detectedHeaderRow: sample.headerRow
+        detectedHeaderRow: sample.headerRow,
       },
       compatibility,
       mapping,
       transformations,
-      spreadsheetTitle: parsed.data.spreadsheetTitle ? String(parsed.data.spreadsheetTitle).trim() : null,
+      spreadsheetTitle: parsed.data.spreadsheetTitle
+        ? String(parsed.data.spreadsheetTitle).trim()
+        : null,
       sheetName: resolvedSheetName,
-      spreadsheetId: resolvedSpreadsheetId
+      spreadsheetId: resolvedSpreadsheetId,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to stage Google Sheets change';
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to stage Google Sheets change";
     return fail(res, message, toErrorStatus(error));
   }
 };
@@ -1207,31 +1435,42 @@ export const commitGoogleSheetsChange = async (req: Request, res: Response) => {
 
   const parsed = commitChangeSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
   try {
-    const settings = await getOrCreateSettings(context.companyId, context.userId);
+    const settings = await getOrCreateSettings(
+      context.companyId,
+      context.userId,
+    );
     ensureGoogleSheetsShape(settings);
     const googleSheets = settings.googleSheets as any;
     const integrationType: IntegrationType = parsed.data.sourceType;
-    const connectorKey = String(parsed.data.connectorKey ?? DEFAULT_CONNECTOR_KEY).trim() || DEFAULT_CONNECTOR_KEY;
+    const connectorKey =
+      String(parsed.data.connectorKey ?? DEFAULT_CONNECTOR_KEY).trim() ||
+      DEFAULT_CONNECTOR_KEY;
     const rawSheetName = parsed.data.sheetName ?? parsed.data.tab;
-    const resolvedSheetName = String(rawSheetName ?? '').trim();
+    const resolvedSheetName = String(rawSheetName ?? "").trim();
     if (!resolvedSheetName) {
-      return fail(res, 'sheetName is required', 400);
+      return fail(res, "sheetName is required", 400);
     }
-    const resolvedSpreadsheetId = String(parsed.data.spreadsheetId ?? '').trim();
+    const resolvedSpreadsheetId = String(
+      parsed.data.spreadsheetId ?? "",
+    ).trim();
     if (!resolvedSpreadsheetId) {
-      return fail(res, 'spreadsheetId is required', 400);
+      return fail(res, "spreadsheetId is required", 400);
     }
 
-    const { container, containerId } = resolveContainerForIntegration(settings, integrationType, {
-      sourceId: parsed.data.sourceId,
-      profileId: parsed.data.profileId,
-      sourceName: parsed.data.sourceName,
-      profileName: parsed.data.profileName
-    });
+    const { container, containerId } = resolveContainerForIntegration(
+      settings,
+      integrationType,
+      {
+        sourceId: parsed.data.sourceId,
+        profileId: parsed.data.profileId,
+        sourceName: parsed.data.sourceName,
+        profileName: parsed.data.profileName,
+      },
+    );
 
     const containerConnectors = Array.isArray(container.connectors)
       ? (container.connectors as Array<Record<string, unknown>>)
@@ -1240,38 +1479,47 @@ export const commitGoogleSheetsChange = async (req: Request, res: Response) => {
       container.connectors = containerConnectors;
     }
     const mapping = Object.fromEntries(
-      Object.entries(parsed.data.mapping ?? {}).map(([column, target]) => [String(column), String(target)])
+      Object.entries(parsed.data.mapping ?? {}).map(([column, target]) => [
+        String(column),
+        String(target),
+      ]),
     );
-    const transformations = normalizeTransformations(parsed.data.transformations);
+    const transformations = normalizeTransformations(
+      parsed.data.transformations,
+    );
 
     const oneToOne = validateColumnMapOneToOne(mapping);
     if (!oneToOne.ok) {
       return fail(
         res,
-        `One-to-one mapping required. Duplicate target fields: ${oneToOne.duplicateTargets.join(', ')}`,
+        `One-to-one mapping required. Duplicate target fields: ${oneToOne.duplicateTargets.join(", ")}`,
         400,
         {
-          duplicateTargets: oneToOne.duplicateTargets
-        }
+          duplicateTargets: oneToOne.duplicateTargets,
+        },
       );
     }
 
-    const sample = await readSheetSampleByIntegration(context.companyId, integrationType, {
-      spreadsheetId: resolvedSpreadsheetId,
-      sheetName: resolvedSheetName,
-      headerRow: parsed.data.headerRow
-    });
+    const sample = await readSheetSampleByIntegration(
+      context.companyId,
+      integrationType,
+      {
+        spreadsheetId: resolvedSpreadsheetId,
+        sheetName: resolvedSheetName,
+        headerRow: parsed.data.headerRow,
+      },
+    );
     const compatibility = computeCompatibilityForConnector({
       connectorKey,
       columns: sample.columns,
-      mapping
+      mapping,
     });
-    if (compatibility.status === 'error') {
-      return fail(res, 'Connector is not compatible', 400, compatibility);
+    if (compatibility.status === "error") {
+      return fail(res, "Connector is not compatible", 400, compatibility);
     }
 
     const existingIndex = containerConnectors.findIndex(
-      (entry) => String(entry.key ?? '').trim() === connectorKey
+      (entry) => String(entry.key ?? "").trim() === connectorKey,
     );
     const connectorPayload = {
       ...createDefaultConnector(connectorKey),
@@ -1279,46 +1527,61 @@ export const commitGoogleSheetsChange = async (req: Request, res: Response) => {
       label: getConnectorDefinition(connectorKey).label,
       enabled: true,
       spreadsheetId: resolvedSpreadsheetId,
-      spreadsheetTitle: parsed.data.spreadsheetTitle ? String(parsed.data.spreadsheetTitle).trim() : null,
+      spreadsheetTitle: parsed.data.spreadsheetTitle
+        ? String(parsed.data.spreadsheetTitle).trim()
+        : null,
       sheetName: resolvedSheetName,
       headerRow: parsed.data.headerRow,
       mapping,
       transformations,
-      mappingConfirmedAt: parsed.data.mappingConfirmedAt ? new Date(parsed.data.mappingConfirmedAt) : null,
-      mappingHash: parsed.data.mappingHash ? String(parsed.data.mappingHash).trim() : null,
-      updatedAt: new Date()
+      mappingConfirmedAt: parsed.data.mappingConfirmedAt
+        ? new Date(parsed.data.mappingConfirmedAt)
+        : null,
+      mappingHash: parsed.data.mappingHash
+        ? String(parsed.data.mappingHash).trim()
+        : null,
+      updatedAt: new Date(),
     } as Record<string, unknown>;
 
     if (existingIndex >= 0) {
-      const existing = containerConnectors[existingIndex] as Record<string, unknown>;
+      const existing = containerConnectors[existingIndex] as Record<
+        string,
+        unknown
+      >;
       const previousCreatedAt = existing.createdAt;
       containerConnectors[existingIndex] = {
         ...existing,
         ...connectorPayload,
         spreadsheetTitle:
           connectorPayload.spreadsheetTitle ??
-          (existing.spreadsheetTitle ? String(existing.spreadsheetTitle) : null),
+          (existing.spreadsheetTitle
+            ? String(existing.spreadsheetTitle)
+            : null),
         mappingConfirmedAt:
-          connectorPayload.mappingConfirmedAt ?? existing.mappingConfirmedAt ?? null,
+          connectorPayload.mappingConfirmedAt ??
+          existing.mappingConfirmedAt ??
+          null,
         mappingHash:
           connectorPayload.mappingHash ??
           (existing.mappingHash ? String(existing.mappingHash) : null),
-        createdAt: previousCreatedAt ?? existing.createdAt ?? new Date()
+        createdAt: previousCreatedAt ?? existing.createdAt ?? new Date(),
       };
     } else {
       containerConnectors.push({
         ...connectorPayload,
-        createdAt: new Date()
+        createdAt: new Date(),
       });
     }
     container.connectors = containerConnectors;
     const connector = containerConnectors.find(
-      (entry) => String((entry as Record<string, unknown>).key ?? '').trim() === connectorKey
+      (entry) =>
+        String((entry as Record<string, unknown>).key ?? "").trim() ===
+        connectorKey,
     ) as Record<string, unknown>;
 
     if (parsed.data.activate) {
       googleSheets.activeIntegration = integrationType;
-      if (integrationType === 'oauth') {
+      if (integrationType === "oauth") {
         googleSheets.oauth.enabled = true;
         googleSheets.oauth.activeSourceId = asObjectId(containerId);
         googleSheets.oauth.activeConnectorKey = connectorKey;
@@ -1331,8 +1594,8 @@ export const commitGoogleSheetsChange = async (req: Request, res: Response) => {
 
     container.updatedAt = new Date();
     googleSheets.updatedAt = new Date();
-    if (typeof settings.markModified === 'function') {
-      settings.markModified('googleSheets');
+    if (typeof settings.markModified === "function") {
+      settings.markModified("googleSheets");
     }
     await settings.save();
 
@@ -1342,16 +1605,20 @@ export const commitGoogleSheetsChange = async (req: Request, res: Response) => {
       sourceType: integrationType,
       activeIntegration: googleSheets.activeIntegration ?? null,
       activeSourceId: googleSheets.oauth?.activeSourceId?.toString?.() ?? null,
-      activeProfileId: googleSheets.shared?.activeProfileId?.toString?.() ?? null,
+      activeProfileId:
+        googleSheets.shared?.activeProfileId?.toString?.() ?? null,
       activeConnectorKey:
-        integrationType === 'oauth'
-          ? googleSheets.oauth?.activeConnectorKey ?? connectorKey
-          : googleSheets.shared?.activeConnectorKey ?? connectorKey,
+        integrationType === "oauth"
+          ? (googleSheets.oauth?.activeConnectorKey ?? connectorKey)
+          : (googleSheets.shared?.activeConnectorKey ?? connectorKey),
       compatibility,
-      connector: toConnectorResponse(connector)
+      connector: toConnectorResponse(connector),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to commit Google Sheets change';
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to commit Google Sheets change";
     return fail(res, message, toErrorStatus(error));
   }
 };
@@ -1360,18 +1627,18 @@ const resolveForDebug = async (
   companyId: string,
   integrationType: IntegrationType,
   refId: string | undefined,
-  connectorKey?: string
+  connectorKey?: string,
 ) => {
-  const key = String(connectorKey ?? '').trim();
+  const key = String(connectorKey ?? "").trim();
   if (!refId) {
     return resolveActiveSheetsConfig(companyId, key || undefined);
   }
 
   return resolveSheetsConfigByRef(companyId, {
     integrationType,
-    sourceId: integrationType === 'oauth' ? refId : undefined,
-    profileId: integrationType === 'shared' ? refId : undefined,
-    connectorKey: key || undefined
+    sourceId: integrationType === "oauth" ? refId : undefined,
+    profileId: integrationType === "shared" ? refId : undefined,
+    connectorKey: key || undefined,
   });
 };
 
@@ -1381,34 +1648,38 @@ export const debugOAuthConnector = async (req: Request, res: Response) => {
 
   const parsed = debugOAuthSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
   try {
     const resolved = await resolveForDebug(
       context.companyId,
-      'oauth',
+      "oauth",
       parsed.data.sourceId,
-      parsed.data.connectorKey
+      parsed.data.connectorKey,
     );
 
-    const debug = await runDebug(context.companyId, 'oauth', resolved);
+    const debug = await runDebug(context.companyId, "oauth", resolved);
 
-    const settings = await getOrCreateSettings(context.companyId, context.userId);
+    const settings = await getOrCreateSettings(
+      context.companyId,
+      context.userId,
+    );
     ensureGoogleSheetsShape(settings);
     updateIntegrationDebug(
       settings,
-      'oauth',
-      String(resolved.ref.sourceId ?? ''),
+      "oauth",
+      String(resolved.ref.sourceId ?? ""),
       resolved.connectorKey,
-      debug
+      debug,
     );
     (settings.googleSheets as any).updatedAt = new Date();
     await settings.save();
 
     return ok(res, debug);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'OAuth debug failed';
+    const message =
+      error instanceof Error ? error.message : "OAuth debug failed";
     return fail(res, message, toErrorStatus(error));
   }
 };
@@ -1419,34 +1690,38 @@ export const debugSharedConnector = async (req: Request, res: Response) => {
 
   const parsed = debugSharedSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+    return fail(res, "Validation failed", 422, parsed.error.flatten());
   }
 
   try {
     const resolved = await resolveForDebug(
       context.companyId,
-      'shared',
+      "shared",
       parsed.data.profileId,
-      parsed.data.connectorKey
+      parsed.data.connectorKey,
     );
 
-    const debug = await runDebug(context.companyId, 'shared', resolved);
+    const debug = await runDebug(context.companyId, "shared", resolved);
 
-    const settings = await getOrCreateSettings(context.companyId, context.userId);
+    const settings = await getOrCreateSettings(
+      context.companyId,
+      context.userId,
+    );
     ensureGoogleSheetsShape(settings);
     updateIntegrationDebug(
       settings,
-      'shared',
-      String(resolved.ref.profileId ?? ''),
+      "shared",
+      String(resolved.ref.profileId ?? ""),
       resolved.connectorKey,
-      debug
+      debug,
     );
     (settings.googleSheets as any).updatedAt = new Date();
     await settings.save();
 
     return ok(res, debug);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Shared debug failed';
+    const message =
+      error instanceof Error ? error.message : "Shared debug failed";
     return fail(res, message, toErrorStatus(error));
   }
 };
@@ -1459,37 +1734,39 @@ export const markConnectorImported = async (params: {
   connectorKey: string;
   importedAt: Date;
 }) => {
-  const settings = await IntegrationSettingsModel.findOne({ companyId: params.companyId });
+  const settings = await IntegrationSettingsModel.findOne({
+    companyId: params.companyId,
+  });
   if (!settings) return;
 
   ensureGoogleSheetsShape(settings as any);
   const googleSheets = (settings as any).googleSheets;
 
-  if (params.integrationType === 'oauth') {
+  if (params.integrationType === "oauth") {
     const source = (googleSheets.oauth.sources ?? []).find((entry: any) =>
-      idEquals(entry._id, String(params.sourceId ?? ''))
+      idEquals(entry._id, String(params.sourceId ?? "")),
     );
     if (source) {
       const connector = (source.connectors ?? []).find(
-        (entry: any) => String(entry.key ?? '') === params.connectorKey
+        (entry: any) => String(entry.key ?? "") === params.connectorKey,
       );
       if (connector) connector.lastImportAt = params.importedAt;
     }
     googleSheets.oauth.lastImportAt = params.importedAt;
   } else {
     const profile = (googleSheets.shared.profiles ?? []).find((entry: any) =>
-      idEquals(entry._id, String(params.profileId ?? ''))
+      idEquals(entry._id, String(params.profileId ?? "")),
     );
     if (profile) {
       const connector = (profile.connectors ?? []).find(
-        (entry: any) => String(entry.key ?? '') === params.connectorKey
+        (entry: any) => String(entry.key ?? "") === params.connectorKey,
       );
       if (connector) connector.lastImportAt = params.importedAt;
     }
     googleSheets.shared.lastImportAt = params.importedAt;
   }
 
-  settings.lastImportSource = 'google_sheets';
+  settings.lastImportSource = "google_sheets";
   settings.lastImportAt = params.importedAt;
   googleSheets.updatedAt = params.importedAt;
   await settings.save();

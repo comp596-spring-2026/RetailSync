@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import { google } from "googleapis";
 import { Types } from "mongoose";
 import { env } from "../config/env";
+import { createQuickBooksConnectUrlResponse } from "./quickbooksController";
 import { IntegrationSettingsModel } from "../models/IntegrationSettings";
 import { IntegrationSecretModel } from "../models/IntegrationSecret";
 import { POSDailySummaryModel } from "../models/POSDailySummary";
@@ -140,9 +141,25 @@ const ensureSubdocs = (settings: any) => {
       environment: "sandbox",
       realmId: null,
       companyName: null,
+      lastPullStatus: "idle",
+      lastPullAt: null,
+      lastPullCount: 0,
+      lastPullError: null,
+      lastPushStatus: "idle",
+      lastPushAt: null,
+      lastPushCount: 0,
+      lastPushError: null,
       updatedAt: new Date(),
     };
   }
+  if (typeof settings.quickbooks.lastPullStatus !== "string") settings.quickbooks.lastPullStatus = "idle";
+  if (typeof settings.quickbooks.lastPullCount !== "number") settings.quickbooks.lastPullCount = 0;
+  if (typeof settings.quickbooks.lastPullAt === "undefined") settings.quickbooks.lastPullAt = null;
+  if (typeof settings.quickbooks.lastPullError === "undefined") settings.quickbooks.lastPullError = null;
+  if (typeof settings.quickbooks.lastPushStatus !== "string") settings.quickbooks.lastPushStatus = "idle";
+  if (typeof settings.quickbooks.lastPushCount !== "number") settings.quickbooks.lastPushCount = 0;
+  if (typeof settings.quickbooks.lastPushAt === "undefined") settings.quickbooks.lastPushAt = null;
+  if (typeof settings.quickbooks.lastPushError === "undefined") settings.quickbooks.lastPushError = null;
 
   return settings;
 };
@@ -193,6 +210,14 @@ const getOrCreateSettings = async (req: Request) => {
           environment: "sandbox",
           realmId: null,
           companyName: null,
+          lastPullStatus: "idle",
+          lastPullAt: null,
+          lastPullCount: 0,
+          lastPullError: null,
+          lastPushStatus: "idle",
+          lastPushAt: null,
+          lastPushCount: 0,
+          lastPushError: null,
           updatedAt: new Date(),
         },
       },
@@ -620,6 +645,14 @@ export const disconnectQuickbooks = async (req: Request, res: Response) => {
     settings.quickbooks.connected = false;
     settings.quickbooks.realmId = null;
     settings.quickbooks.companyName = null;
+    settings.quickbooks.lastPullStatus = "idle";
+    settings.quickbooks.lastPullAt = null;
+    settings.quickbooks.lastPullCount = 0;
+    settings.quickbooks.lastPullError = null;
+    settings.quickbooks.lastPushStatus = "idle";
+    settings.quickbooks.lastPushAt = null;
+    settings.quickbooks.lastPushCount = 0;
+    settings.quickbooks.lastPushError = null;
     settings.quickbooks.updatedAt = new Date();
     await settings.save();
     return ok(res, toSafeSettings(settings));
@@ -632,9 +665,10 @@ export const disconnectQuickbooks = async (req: Request, res: Response) => {
   }
 };
 
-export const connectQuickbooksPlaceholder = async (
-  _req: Request,
-  res: Response,
-) => {
-  return fail(res, "QuickBooks OAuth is not implemented yet", 501);
+export const connectQuickbooks = async (req: Request, res: Response) => {
+  const returnTo =
+    typeof req.body?.returnTo === "string"
+      ? req.body.returnTo
+      : "/dashboard/settings";
+  return createQuickBooksConnectUrlResponse(req, res, returnTo);
 };

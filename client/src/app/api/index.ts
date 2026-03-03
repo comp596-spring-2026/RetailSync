@@ -9,6 +9,7 @@ export { itemsApi, locationsApi } from "../../modules/inventory/api";
 export { posApi } from "../../modules/pos/api";
 export { rbacApi } from "../../modules/rbac/api";
 export { settingsApi } from "../../modules/settings/api";
+export { accountingApi } from "../../modules/accounting/api";
 export type {
   GoogleSheetMode,
   GoogleSheetSource,

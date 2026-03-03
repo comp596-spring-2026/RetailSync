@@ -2,7 +2,7 @@ import { Button, CircularProgress, Stack } from '@mui/material';
 import BuildCircleIcon from '@mui/icons-material/BuildCircle';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import { ModuleKey } from '@retailsync/shared';
-import { useMemo, useState } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 import { PermissionGate } from '../app/guards';
 import { ConfirmDeleteDialog, CrudEntityDialog, CrudField, NoAccess, PageHeader, SearchableCrudTable } from '../components';
 import { moduleActionsMap } from '../constants/modules';
@@ -13,6 +13,7 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 
 type ModuleShellProps = {
   module: ModuleKey;
+  children?: ReactNode;
 };
 
 type ModuleRecord = {
@@ -51,7 +52,7 @@ const crudFields: CrudField[] = [
   { key: 'notes', label: 'Notes', multiline: true }
 ];
 
-export const ModuleShellPage = ({ module }: ModuleShellProps) => {
+export const ModuleShellPage = ({ module, children }: ModuleShellProps) => {
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, module, 'view');
   const canCreate = hasPermission(permissions, module, 'create');
@@ -109,13 +110,13 @@ export const ModuleShellPage = ({ module }: ModuleShellProps) => {
           prev.map((row) =>
             row.id === selected.id
               ? {
-                  ...row,
-                  name: values.name.trim(),
-                  reference: values.reference.trim(),
-                  status: (values.status as ModuleRecord['status']) || row.status,
-                  notes: values.notes?.trim() ?? '',
-                  updatedAt: new Date().toISOString()
-                }
+                ...row,
+                name: values.name.trim(),
+                reference: values.reference.trim(),
+                status: (values.status as ModuleRecord['status']) || row.status,
+                notes: values.notes?.trim() ?? '',
+                updatedAt: new Date().toISOString()
+              }
               : row
           )
         );
@@ -141,86 +142,93 @@ export const ModuleShellPage = ({ module }: ModuleShellProps) => {
   return (
     <Stack spacing={2}>
       <PageHeader title={title} subtitle="RBAC-aware module shell and action controls" icon={<BuildCircleIcon />} />
-      <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
-        <PermissionGate module={module} action="create">
-          <Button
-            variant="contained"
-            startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <AddCircleOutlineIcon />}
-            disabled={!canCreate || loading}
-            onClick={() => setCreateOpen(true)}
-          >
-            Create Record
-          </Button>
-        </PermissionGate>
-        {moduleActionsMap[module].map((custom) => (
-          <PermissionGate key={custom} module={module} action={`actions:${custom}`}>
-            <Button variant="outlined">{custom}</Button>
-          </PermissionGate>
-        ))}
-      </Stack>
-      <SearchableCrudTable
-        rows={rows}
-        columns={columns}
-        getRowId={(row) => row.id}
-        onEdit={
-          canEdit
-            ? (row) => {
-                setSelected(row);
-                setEditOpen(true);
-              }
-            : undefined
-        }
-        onDelete={
-          canDelete
-            ? (row) => {
-                setSelected(row);
-                setDeleteOpen(true);
-              }
-            : undefined
-        }
-        searchPlaceholder={`Search ${title} records`}
-        emptyLabel="No records yet. Create one to get started."
-      />
-      <CrudEntityDialog
-        open={createOpen}
-        title={`Create ${title} Record`}
-        fields={crudFields}
-        loading={loading}
-        onClose={() => setCreateOpen(false)}
-        onSubmit={(values) => void createRecord(values)}
-      />
-      <CrudEntityDialog
-        open={editOpen}
-        title={`Edit ${title} Record`}
-        fields={crudFields}
-        loading={loading}
-        initialValues={
-          selected
-            ? {
-                name: selected.name,
-                reference: selected.reference,
-                status: selected.status,
-                notes: selected.notes
-              }
-            : undefined
-        }
-        onClose={() => {
-          setEditOpen(false);
-          setSelected(null);
-        }}
-        onSubmit={(values) => void editRecord(values)}
-      />
-      <ConfirmDeleteDialog
-        open={deleteOpen}
-        title={`Delete ${title} record?`}
-        description={selected ? `This will remove "${selected.name}" permanently.` : 'This record will be removed permanently.'}
-        loading={loading}
-        onCancel={() => {
-          setDeleteOpen(false);
-          setSelected(null);
-        }}
-        onConfirm={() => void removeRecord()}
-      />
+
+      {children ? (
+        children
+      ) : (
+        <>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+            <PermissionGate module={module} action="create">
+              <Button
+                variant="contained"
+                startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <AddCircleOutlineIcon />}
+                disabled={!canCreate || loading}
+                onClick={() => setCreateOpen(true)}
+              >
+                Create Record
+              </Button>
+            </PermissionGate>
+            {moduleActionsMap[module].map((custom) => (
+              <PermissionGate key={custom} module={module} action={`actions:${custom}`}>
+                <Button variant="outlined">{custom}</Button>
+              </PermissionGate>
+            ))}
+          </Stack>
+          <SearchableCrudTable
+            rows={rows}
+            columns={columns}
+            getRowId={(row) => row.id}
+            onEdit={
+              canEdit
+                ? (row) => {
+                  setSelected(row);
+                  setEditOpen(true);
+                }
+                : undefined
+            }
+            onDelete={
+              canDelete
+                ? (row) => {
+                  setSelected(row);
+                  setDeleteOpen(true);
+                }
+                : undefined
+            }
+            searchPlaceholder={`Search ${title} records`}
+            emptyLabel="No records yet. Create one to get started."
+          />
+          <CrudEntityDialog
+            open={createOpen}
+            title={`Create ${title} Record`}
+            fields={crudFields}
+            loading={loading}
+            onClose={() => setCreateOpen(false)}
+            onSubmit={(values) => void createRecord(values)}
+          />
+          <CrudEntityDialog
+            open={editOpen}
+            title={`Edit ${title} Record`}
+            fields={crudFields}
+            loading={loading}
+            initialValues={
+              selected
+                ? {
+                  name: selected.name,
+                  reference: selected.reference,
+                  status: selected.status,
+                  notes: selected.notes
+                }
+                : undefined
+            }
+            onClose={() => {
+              setEditOpen(false);
+              setSelected(null);
+            }}
+            onSubmit={(values) => void editRecord(values)}
+          />
+          <ConfirmDeleteDialog
+            open={deleteOpen}
+            title={`Delete ${title} record?`}
+            description={selected ? `This will remove "${selected.name}" permanently.` : 'This record will be removed permanently.'}
+            loading={loading}
+            onCancel={() => {
+              setDeleteOpen(false);
+              setSelected(null);
+            }}
+            onConfirm={() => void removeRecord()}
+          />
+        </>
+      )}
     </Stack>
   );
 };

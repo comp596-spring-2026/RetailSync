@@ -26,6 +26,20 @@ services:
       JWT_REFRESH_SECRET: change-me-refresh-secret
       CLIENT_URL: http://localhost:8080
       NODE_ENV: production
+      QUICKBOOKS_CLIENT_ID: ""
+      QUICKBOOKS_CLIENT_SECRET: ""
+      QUICKBOOKS_INTEGRATION_REDIRECT_URI: http://localhost:4000/api/integrations/quickbooks/callback
+      GCS_BUCKET_NAME: retailsync-accounting-local
+      TASKS_MODE: inline
+      INTERNAL_TASKS_SECRET: local-internal-task-secret
+      INTERNAL_TASKS_ENDPOINT: http://server:4000/api/internal/tasks/run
+      GCP_PROJECT_ID: local
+      GCP_REGION: us-west1
+      TASKS_QUEUE_PIPELINE: pipeline-ocr-dev
+      TASKS_QUEUE_SYNC: sync-integrations-dev
+      TASKS_OIDC_SERVICE_ACCOUNT_EMAIL: local@example.com
+      API_SERVICE_NAME: retailsync-api-local
+      WORKER_SERVICE_NAME: retailsync-worker-local
     depends_on:
       mongo:
         condition: service_healthy

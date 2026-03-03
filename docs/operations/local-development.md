@@ -51,8 +51,11 @@ make start
 
 ## Current Deployment Snapshot
 
-- Deployed API health: `https://retailsync-api-qbdqiyjkbq-uw.a.run.app/health`
-- Deployed API base for client env: `https://retailsync-api-qbdqiyjkbq-uw.a.run.app/api`
+- Production API health: `https://<retailsync-api-url>/health`
+- Production API base for client env: `https://<retailsync-api-url>/api`
+- Production worker service: `retailsync-worker` (internal Cloud Tasks target)
+- Development API service: `retailsync-api-dev`
+- Development worker service: `retailsync-worker-dev`
 
 Useful Docker commands:
 
@@ -70,6 +73,12 @@ For Sheets/service-account and OAuth flows:
 - `GOOGLE_OAUTH_CLIENT_SECRET`
 - `GOOGLE_AUTH_REDIRECT_URI`
 
+For QuickBooks OAuth flow:
+
+- `QUICKBOOKS_CLIENT_ID`
+- `QUICKBOOKS_CLIENT_SECRET`
+- `QUICKBOOKS_INTEGRATION_REDIRECT_URI` (local default: `http://localhost:4000/api/integrations/quickbooks/callback`)
+
 For local service-account Sheets tests, authenticate ADC locally:
 
 ```bash
@@ -77,6 +86,13 @@ gcloud auth application-default login
 ```
 
 Production Cloud Run uses ADC from attached service account and does not require JSON key env variables.
+
+For accounting task processing:
+
+- local default mode is `TASKS_MODE=inline`
+- cloud mode requires `GCP_PROJECT_ID`, `GCP_REGION`, queue names, worker endpoint, and OIDC service account env vars
+- worker endpoint is `/api/internal/tasks/run` and is protected by `x-internal-task-secret`
+- for observability log shortcuts, set `API_SERVICE_NAME` and `WORKER_SERVICE_NAME`
 
 Local convenience fallback is also supported for Sheets calls:
 

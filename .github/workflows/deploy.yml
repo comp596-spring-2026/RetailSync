@@ -1,10 +1,9 @@
-name: Deploy to Production
+name: Deploy (Production)
 
 on:
   push:
     branches:
       - production
-      - development
 
 concurrency:
   group: deploy-production
@@ -16,15 +15,9 @@ permissions:
 
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/production'
     runs-on: ubuntu-latest
     environment: production
-    env:
-      GCP_PROJECT_ID: lively-infinity-488304-m9
-      GCP_REGION: us-west1
-      GAR_LOCATION: us-west1
-      GAR_REPOSITORY: retailsync
-      GAR_IMAGE_NAME: retailsync-api
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,6 +31,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: pnpm
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
@@ -49,63 +43,127 @@ jobs:
         working-directory: ./server
         run: pnpm build
 
-      - name: Build client
-        working-directory: ./client
-        run: pnpm build
-
       - name: Validate required deployment inputs
         run: |
           missing=0
-          for name in FIREBASE_TOKEN WIF_PROVIDER; do
+
+          # Required GitHub variables
+          for name in \
+            WIF_PROVIDER GCP_PROJECT_ID GCP_REGION \
+            GAR_LOCATION GAR_REPOSITORY GAR_IMAGE_NAME \
+            CLOUD_RUN_SERVICE GCP_SERVICE_ACCOUNT GCP_RUNTIME_SERVICE_ACCOUNT \
+            CLIENT_URL TASKS_MODE GCS_BUCKET_NAME TASKS_QUEUE_PIPELINE TASKS_QUEUE_SYNC TASKS_OIDC_SERVICE_ACCOUNT_EMAIL
+          do
             if [ -z "${!name}" ]; then
-              echo "Missing required Actions secret/variable: $name"
+              echo "Missing required GitHub Actions variable: $name"
               missing=1
             fi
           done
+
+          # Required GitHub secret
+          if [ -z "${FIREBASE_TOKEN:-}" ]; then
+            echo "Missing required GitHub Actions secret: FIREBASE_TOKEN"
+            missing=1
+          fi
+
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
         env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          # Vars
           WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GAR_LOCATION: ${{ vars.GAR_LOCATION }}
+          GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
+          GAR_IMAGE_NAME: ${{ vars.GAR_IMAGE_NAME }}
+          CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+          GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+          CLIENT_URL: ${{ vars.CLIENT_URL }}
+          TASKS_MODE: ${{ vars.TASKS_MODE }}
+          GCS_BUCKET_NAME: ${{ vars.GCS_BUCKET_NAME }}
+          TASKS_QUEUE_PIPELINE: ${{ vars.TASKS_QUEUE_PIPELINE }}
+          TASKS_QUEUE_SYNC: ${{ vars.TASKS_QUEUE_SYNC }}
+          TASKS_OIDC_SERVICE_ACCOUNT_EMAIL: ${{ vars.TASKS_OIDC_SERVICE_ACCOUNT_EMAIL }}
+          # Secrets
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
       - name: Authenticate to GCP (OIDC)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          service_account: retailsync-ci-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com
-          create_credentials_file: true
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
       - name: Configure gcloud
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Set gcloud defaults
+        run: |
+          gcloud config set project "${{ vars.GCP_PROJECT_ID }}"
+          gcloud config set run/region "${{ vars.GCP_REGION }}"
 
       - name: Configure Docker auth for Artifact Registry
         run: |
-          gcloud auth configure-docker "${{ env.GAR_LOCATION }}-docker.pkg.dev" --quiet
+          gcloud auth configure-docker "${{ vars.GAR_LOCATION }}-docker.pkg.dev" --quiet
 
       - name: Build and push container
         run: |
-          IMAGE="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.GAR_IMAGE_NAME }}:${{ github.sha }}"
+          IMAGE="${{ vars.GAR_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GAR_REPOSITORY }}/${{ vars.GAR_IMAGE_NAME }}:${{ github.sha }}"
           docker build -f server/Dockerfile -t "$IMAGE" .
           docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Deploy to Cloud Run
+      - name: Ensure Cloud Tasks queues
         run: |
-          IMAGE="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.GAR_IMAGE_NAME }}:${{ github.sha }}"
-          gcloud run deploy retailsync-api \
+          for queue in "${{ vars.TASKS_QUEUE_PIPELINE }}" "${{ vars.TASKS_QUEUE_SYNC }}"; do
+            if gcloud tasks queues describe "$queue" --location "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
+              gcloud tasks queues update "$queue" \
+                --location "${{ vars.GCP_REGION }}" \
+                --max-attempts=8 \
+                --max-retry-duration=3600s \
+                --min-backoff=5s \
+                --max-backoff=120s
+            else
+              gcloud tasks queues create "$queue" \
+                --location "${{ vars.GCP_REGION }}" \
+                --max-attempts=8 \
+                --max-retry-duration=3600s \
+                --min-backoff=5s \
+                --max-backoff=120s
+            fi
+          done
+
+      - name: Deploy API to Cloud Run
+        run: |
+          # Required secrets from Secret Manager
+          secrets_list="MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,GOOGLE_OAUTH_CLIENT_ID=GOOGLE_OAUTH_CLIENT_ID:latest,GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest,GOOGLE_AUTH_REDIRECT_URI=GOOGLE_AUTH_REDIRECT_URI:latest,GOOGLE_INTEGRATION_REDIRECT_URI=GOOGLE_INTEGRATION_REDIRECT_URI:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest,CRON_SECRET=CRON_SECRET:latest,INTERNAL_TASKS_SECRET=INTERNAL_TASKS_SECRET:latest"
+
+          # Optional secrets (QuickBooks) if present
+          for optional_secret in QUICKBOOKS_CLIENT_ID QUICKBOOKS_CLIENT_SECRET QUICKBOOKS_INTEGRATION_REDIRECT_URI; do
+            if gcloud secrets describe "$optional_secret" --project "${{ vars.GCP_PROJECT_ID }}" >/dev/null 2>&1; then
+              secrets_list="$secrets_list,$optional_secret=$optional_secret:latest"
+            fi
+          done
+
+          gcloud run deploy "${{ vars.CLOUD_RUN_SERVICE }}" \
             --image "$IMAGE" \
-            --project "${{ env.GCP_PROJECT_ID }}" \
-            --region ${{ env.GCP_REGION }} \
+            --region "${{ vars.GCP_REGION }}" \
             --platform managed \
-            --service-account "retailsync-run-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-secrets "MONGO_URI=MONGO_URI:latest,JWT_ACCESS_SECRET=JWT_ACCESS_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,GOOGLE_OAUTH_CLIENT_ID=GOOGLE_OAUTH_CLIENT_ID:latest,GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest,GOOGLE_AUTH_REDIRECT_URI=GOOGLE_AUTH_REDIRECT_URI:latest,GOOGLE_INTEGRATION_REDIRECT_URI=GOOGLE_INTEGRATION_REDIRECT_URI:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest,CRON_SECRET=CRON_SECRET:latest" \
-            --set-env-vars "NODE_ENV=production,CLIENT_URL=https://${{ env.GCP_PROJECT_ID }}.web.app" \
+            --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
+            --set-secrets "$secrets_list" \
+            --set-env-vars "NODE_ENV=production,CLIENT_URL=${{ vars.CLIENT_URL }},TASKS_MODE=${{ vars.TASKS_MODE }},GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }},GCP_REGION=${{ vars.GCP_REGION }},GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }},TASKS_QUEUE_PIPELINE=${{ vars.TASKS_QUEUE_PIPELINE }},TASKS_QUEUE_SYNC=${{ vars.TASKS_QUEUE_SYNC }},TASKS_OIDC_SERVICE_ACCOUNT_EMAIL=${{ vars.TASKS_OIDC_SERVICE_ACCOUNT_EMAIL }},API_SERVICE_NAME=${{ vars.CLOUD_RUN_SERVICE }}" \
             --allow-unauthenticated
 
-      - name: Deploy client to Firebase
+          API_URL="$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" --region "${{ vars.GCP_REGION }}" --format='value(status.url)')"
+          echo "API_URL=$API_URL" >> "$GITHUB_ENV"
+
+      - name: Deploy client to Firebase (build with correct API URL)
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          VITE_API_URL: https://retailsync-api-qbdqiyjkbq-uw.a.run.app/api
+          VITE_API_URL: ${{ env.API_URL }}/api
         run: |
           cd client
           pnpm build
@@ -113,5 +171,13 @@ jobs:
 
       - name: Post-deploy smoke test
         run: |
-          sleep 15
-          curl --fail https://retailsync-api-qbdqiyjkbq-uw.a.run.app/health
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail "${{ env.API_URL }}/health"; then
+              echo "Smoke test passed."
+              exit 0
+            fi
+            echo "Waiting for service... attempt $i/10"
+            sleep 6
+          done
+          echo "Smoke test failed."
+          exit 1
