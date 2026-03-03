@@ -18,10 +18,18 @@ export const WeekdayBar = ({ data, height = 260 }: WeekdayBarProps) => {
   const options = withCurrencyTooltip({
     chart: {
       type: 'bar',
-      toolbar: { show: false }
+      toolbar: { show: true }
     },
     xaxis: {
-      categories: data.map((entry) => entry.day)
+      categories: data.map((entry) => entry.day),
+      title: {
+        text: 'Day of Week'
+      }
+    },
+    yaxis: {
+      title: {
+        text: 'Average Sales (USD)'
+      }
     },
     plotOptions: {
       bar: {

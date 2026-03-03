@@ -1,200 +1,120 @@
-# Google Sheets Integration: End-to-End Flow Charts, Buttons, Paths, and Gaps
+# Google Sheets Integration Flows (Current)
 
-This document captures all known user-visible and backend paths for Google Sheets integration in RetailSync, including:
+This document describes the current end-to-end architecture and user flows for Google Sheets integration in RetailSync.
 
-- OAuth sheet integration flow
-- Shared sheet profiles flow (multiple named sheets like `POS Data SHEET`, `EFT SHEET`)
-- POS import modal workflow
-- Sync workflows (manual sync, import commit, cron sync)
-- Debug workflow (step-by-step checks)
-- Coverage matrix and missing scenarios
+## 1) Canonical model
 
----
+Settings are connector-first:
 
-## 1) Top-Level System Flow
+- `googleSheets.activeIntegration`
+- `googleSheets.oauth.sources[].connectors[]`
+- `googleSheets.shared.profiles[].connectors[]`
 
-```mermaid
-flowchart TD
-  A["User opens Settings > Integrations > Google Sheets"] --> B{"Mode selected"}
-  B -->|"OAuth"| C["Connect OAuth / select OAuth source"]
-  B -->|"Shared"| D["Manage sharedSheets[] profiles"]
+Active refs:
 
-  C --> E["Configure sheet + mapping"]
-  D --> E
+- OAuth: `activeSourceId`, `activeConnectorKey`
+- Shared: `activeProfileId`, `activeConnectorKey`
 
-  E --> F["Verify access (tabs + preview)"]
-  F --> G["Save mapping"]
-  G --> H["POS import/sync ready"]
+Connector key for POS is `pos_daily`.
 
-  H --> I["Manual: POS page > Sync from Sheets"]
-  H --> J["Manual: POS import modal > Commit import"]
-  H --> K["Scheduled: /api/cron/sync-sheets"]
-
-  I --> L["Import pipeline: read -> map -> validate -> upsert"]
-  J --> L
-  K --> L
-  L --> M["POSDailySummary updated + IntegrationSettings lastImportAt/source"]
-```
-
----
-
-## 2) Settings UI Button Map and Behavior
-
-### Google Sheets Card Buttons
-
-| Button | Location | Action |
-|---|---|---|
-| `Sync now` | Google Sheets card header | Triggers immediate sync from configured/default profile |
-| `Reset integration` | Google Sheets card header | Clears Google integration state |
-| `Debug` | OAuth block and Shared block | Runs step-by-step diagnostics |
-| `Verify access` | OAuth block and Shared block | Calls verify endpoint for selected/default profile |
-| `Check connection` | OAuth block | Re-check OAuth token status |
-| `Disconnect` | OAuth block | Disconnects OAuth linkage |
-| `Use this mode` | OAuth/Shared block when inactive | Switches active mode |
-| `Change sheet` | Setup inline | Opens files list and allows selecting another sheet |
-| `Save mapping` | Setup inline mapping step | Validates and stores mapping |
-| `New profile` | Shared setup inline | Starts creating new shared profile name |
-
----
-
-## 3) OAuth Flow
+## 2) High-level flow
 
 ```mermaid
 flowchart TD
-  A["User selects OAuth mode"] --> B["GET /api/integrations/google/sheets/start-url"]
-  B --> C["Google consent"]
-  C --> D["/api/integrations/google/sheets/callback"]
-  D --> E["Store OAuth tokens + mark googleSheets.connected=true"]
-  E --> F["User selects OAuth spreadsheet (source)"]
-  F --> G["Preview tab: /api/pos/import/sheets/preview source=oauth"]
-  G --> H["Validate mapping: /api/pos/import/sheets/match"]
-  H --> I["Commit: /api/pos/import/sheets/commit options.spreadsheetId"]
-  I --> J["Upsert POS rows + update integration timestamps"]
+  A["User opens Settings > Google Sheets"] --> B["Choose source: OAuth or Shared"]
+  B --> C["Connect / Verify access"]
+  C --> D["Pick spreadsheet + tab"]
+  D --> E["Preview + mapping validation"]
+  E --> F["stage-change + commit-change"]
+  F --> G["Active connector ready"]
+  G --> H["POS Sync Now or /pos/import/sheets/commit"]
+  H --> I["Read -> map -> validate -> derived eval -> upsert"]
 ```
 
-### OAuth Debug Steps
+## 3) UI ownership
+
+- Settings page owns Google Sheets setup, sheet selection, mapping, and connector persistence.
+- POS Import modal does not maintain a separate Google configuration wizard.
+- From POS Import modal, selecting Google Sheets routes to Settings.
+
+## 4) Settings API flow
 
 ```mermaid
 flowchart TD
-  O1["Check OAuth token"] --> O2["Resolve active OAuth spreadsheet"]
-  O2 --> O3["List tabs"]
-  O3 --> O4["Read preview rows"]
-  O4 --> O5["Validate required mapped fields"]
+  A["Step 1: Source & Connect"] --> B["OAuth status/start-url/callback or Shared verify"]
+  B --> C["Step 2: Spreadsheet and tab"]
+  C --> D["Preview and mapping check"]
+  D --> E["POST /settings/google-sheets/stage-change"]
+  E --> F["POST /settings/google-sheets/commit-change"]
+  F --> G["Optional: POST /settings/google-sheets/activate"]
 ```
 
----
+Key endpoints:
 
-## 4) Shared Profiles Flow (`sharedSheets[]`)
+- `GET /api/settings`
+- `POST /api/settings/google-sheets/stage-change`
+- `POST /api/settings/google-sheets/commit-change`
+- `POST /api/settings/google-sheets/activate`
+- `GET /api/integrations/google/sheets/oauth-status`
+- `GET /api/integrations/google/sheets/files`
+- `GET /api/integrations/sheets/shared-files`
+- `POST /api/integrations/sheets/tabs`
+- `POST /api/settings/google-sheets/shared/verify`
+
+## 5) Runtime import flow
 
 ```mermaid
 flowchart TD
-  A["User opens Shared mode"] --> B["Create/Edit profile (name + spreadsheetId + tab + headerRow)"]
-  B --> C["POST /api/integrations/sheets/config"]
-  C --> D["upsert sharedSheets[] profile"]
-  D --> E["Mirror default profile into legacy sharedConfig (compatibility)"]
-  E --> F["Save mapping for profile"]
-  F --> G["POST /api/integrations/sheets/save-mapping mode=service_account + profileId"]
-  G --> H["Verify profile access"]
-  H --> I["POST /api/integrations/sheets/verify { profileId }"]
-  I --> J["Profile ready for Sync/Import/Cron"]
+  A["POS Sync Now"] --> B["Client builds explicit connector payload if possible"]
+  B --> C["POST /api/pos/import/sheets/commit"]
+  C --> D["Server resolves explicit ref or active connector"]
+  D --> E["Read configured sheet/tab"]
+  E --> F["Validate mapping + derived config"]
+  F --> G["Bulk upsert POSDailySummary by (companyId, date)"]
+  G --> H["Update integration timestamps"]
 ```
 
-### Shared Debug Steps
+Request options for commit:
 
-```mermaid
-flowchart TD
-  S1["Resolve default shared profile"] --> S2["Verify shared sheet access"]
-  S2 --> S3["List tabs"]
-  S3 --> S4["Read preview rows"]
-  S4 --> S5["Validate required mapped fields"]
-```
+- explicit:
+  - `{ connectorKey, integrationType: "oauth", sourceId }`
+  - `{ connectorKey, integrationType: "shared", profileId }`
+- active-resolution:
+  - `{ connectorKey }` or empty body
 
----
+## 6) POS Sync reliability behavior
 
-## 5) POS Import Modal Flow
+POS `Sync Now` client logic:
 
-```mermaid
-flowchart TD
-  A["POS > Import Data"] --> B{"Source"}
-  B -->|"File"| C["Upload -> Confirm -> Commit"]
-  B -->|"Google Sheets"| D{"Configured?"}
+1. parse canonical settings and choose active/usable connector
+2. fallback to legacy shape if present
+3. if local parsing fails, still call commit with `{ connectorKey: "pos_daily" }`
 
-  D -->|"No"| E["Connect -> Pick Sheet -> Tabs -> Mapping -> Confirm"]
-  D -->|"Yes"| F["Google Ready: Import now / Change Sheet"]
+This allows server-side resolver to run and avoids false local “mapping missing” failures.
 
-  E --> G["/api/pos/import/sheets/preview + match + save-mapping + commit"]
-  F --> H["/api/pos/import/sheets/commit with saved mapping"]
-  G --> I["Upsert POS rows"]
-  H --> I
-```
+## 7) Status and action model (UI)
 
----
+Per connector readiness:
 
-## 6) Sync Workflows and Continuity
+- `not_configured`
+- `invalid`
+- `needs_review`
+- `ready`
 
-### Manual Sync Button Flow
+Primary action rules:
 
-```mermaid
-flowchart TD
-  A["User clicks Sync from Sheets"] --> B["Confirm dialog"]
-  B --> C["Start sync progress UI"]
-  C --> D["POST /api/pos/import/sheets/commit (saved mapping path)"]
-  D --> E["Upsert result: imported/upserted/modified"]
-  E --> F["Refresh POS daily table + show summary snackbar"]
-```
+- `not_configured`: Setup sheet
+- `invalid`: Fix setup
+- `needs_review`: Confirm mapping
+- `ready`: Sync now
 
-### Cron Sync Flow
+## 8) Known compatibility layer
 
-```mermaid
-flowchart TD
-  A["POST /api/cron/sync-sheets"] --> B["Acquire job lock"]
-  B --> C["Find configured companies"]
-  C --> D["Read default shared profile sheet"]
-  D --> E["Load saved mapping from profile"]
-  E --> F["Map + importRowsForCompany upsert"]
-  F --> G["Update settings lastImportAt/source"]
-  G --> H["Release lock + return result"]
-```
+Legacy endpoints/fields still exist for compatibility in parts of the codebase:
 
-### Continuity Guarantees (Current)
+- `PUT /api/settings/google-sheets/mode`
+- `PUT /api/settings/google-sheets/source`
+- `POST /api/integrations/sheets/config`
+- `POST /api/integrations/sheets/save-mapping`
 
-- Repeated imports use upsert semantics by date.
-- Existing dates are updated, new dates are inserted.
-- Integration `lastImportAt` and `lastImportSource` are refreshed after successful import.
-
----
-
-## 7) Coverage Matrix (E2E/API)
-
-Implemented in: [sheetsIntegration.e2e.test.ts](/Users/trupal/Projects/RetailSync/server/src/sheetsIntegration.e2e.test.ts)
-
-| Scenario | Covered |
-|---|---|
-| Multi shared profiles can be created (`POS Data SHEET`, `EFT SHEET`) | Yes |
-| Save mapping on shared profile and commit with saved mapping | Yes |
-| Shared import continuity across repeated sync/upsert | Yes |
-| OAuth mode import with explicit spreadsheet override | Yes |
-| Cron sync imports from default shared profile | Yes |
-
----
-
-## 8) Missing or Weak Spots
-
-These are the current gaps discovered while mapping all paths:
-
-1. No explicit `Set Default Profile` button in Shared UI.
-2. No `Delete Profile` path for `sharedSheets[]` entries.
-3. Sync progress UI is client-estimated, not server job progress.
-4. No dedicated import job status endpoint for long-running visibility/retry.
-5. OAuth and Shared mappings are still partially intertwined in some fallback paths (compatibility layer remains).
-6. No strict profile-type gating for non-POS profiles (for example, EFT profile still can be selected where POS schema is expected).
-7. No full browser-level Playwright/Cypress scenario coverage yet (current tests are API e2e with mocked Google APIs).
-
----
-
-## 9) Recommended Next Steps
-
-1. Add backend endpoints and UI for profile default selection and profile deletion.
-2. Add job progress endpoint and wire progress bar to real server state.
-3. Add profile `domain/type` field (for example `pos`, `eft`) and enforce compatibility in import flows.
-4. Add browser E2E suite for UI actions: connect, configure, debug, sync, change profile, and continuity checks.
+New work should target connector-first endpoints and canonical settings.

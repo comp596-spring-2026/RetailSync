@@ -26,10 +26,30 @@ export const MultiStreams = ({ data, height = 300 }: MultiStreamsProps) => {
   const options = withCurrencyTooltip({
     chart: {
       type: 'line',
-      toolbar: { show: false }
+      toolbar: {
+        show: true,
+        tools: {
+          download: true,
+          selection: false,
+          zoom: false,
+          zoomin: false,
+          zoomout: false,
+          pan: false,
+          reset: false
+        }
+      },
+      zoom: { enabled: false }
     },
     xaxis: {
-      type: 'datetime'
+      type: 'datetime',
+      title: {
+        text: 'Date'
+      }
+    },
+    yaxis: {
+      title: {
+        text: 'Revenue (USD)'
+      }
     },
     stroke: {
       curve: 'smooth',

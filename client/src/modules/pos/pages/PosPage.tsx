@@ -27,7 +27,7 @@ import {
 } from '../../../components';
 import { usePos } from '../hooks/usePos';
 import { ImportPOSDataModal } from '../components/ImportPOSDataModal';
-import { fetchSettings, selectSettings } from '../../settings/state';
+import { fetchSettings, selectGoogleSheetsSettings, selectSettings } from '../../settings/state';
 import { hasPermission } from '../../../utils/permissions';
 import { PosAnalyticsViewPage } from './PosAnalyticsViewPage';
 import { PosTableViewPage } from './PosTableViewPage';
@@ -37,7 +37,61 @@ type LastImportSource = 'file' | 'google_sheets' | null;
 
 type PosView = 'table' | 'dashboard';
 
-const resolveSyncConfigured = (settings: ReturnType<typeof selectSettings>): boolean => {
+const hasCanonicalConnectorConfig = (googleSheets: unknown): boolean => {
+  if (!googleSheets || typeof googleSheets !== 'object') return false;
+  const gs = googleSheets as Record<string, unknown>;
+  const activeIntegration = gs.activeIntegration;
+  const oauth = (gs.oauth ?? {}) as Record<string, unknown>;
+  const shared = (gs.shared ?? {}) as Record<string, unknown>;
+  const oauthSources = Array.isArray(oauth.sources) ? oauth.sources : [];
+  const sharedProfiles = Array.isArray(shared.profiles) ? shared.profiles : [];
+
+  const isUsable = (connector: Record<string, unknown> | null) => {
+    if (!connector) return false;
+    const spreadsheetId = String(connector.spreadsheetId ?? '').trim();
+    const mapping = connector.mapping as Record<string, unknown> | undefined;
+    return spreadsheetId.length > 0 && Object.keys(mapping ?? {}).length > 0;
+  };
+
+  const findConnector = (connectors: unknown[], preferredKey: string) => {
+    const list = Array.isArray(connectors) ? connectors : [];
+    const byPreferred = list.find(
+      (entry) => String((entry as Record<string, unknown>)?.key ?? '').trim() === preferredKey,
+    );
+    if (byPreferred) return byPreferred as Record<string, unknown>;
+    const byDefault = list.find(
+      (entry) => String((entry as Record<string, unknown>)?.key ?? '').trim() === 'pos_daily',
+    );
+    return (byDefault ?? null) as Record<string, unknown> | null;
+  };
+
+  const hasUsableInSources = () => {
+    const key = String(oauth.activeConnectorKey ?? 'pos_daily').trim() || 'pos_daily';
+    return oauthSources.some((source) => {
+      const connectorsRaw = (source as Record<string, unknown>)?.connectors;
+      const connectors = Array.isArray(connectorsRaw) ? connectorsRaw : [];
+      return isUsable(findConnector(connectors, key));
+    });
+  };
+  const hasUsableInProfiles = () => {
+    const key = String(shared.activeConnectorKey ?? 'pos_daily').trim() || 'pos_daily';
+    return sharedProfiles.some((profile) => {
+      const connectorsRaw = (profile as Record<string, unknown>)?.connectors;
+      const connectors = Array.isArray(connectorsRaw) ? connectorsRaw : [];
+      return isUsable(findConnector(connectors, key));
+    });
+  };
+
+  if (activeIntegration === 'oauth') return hasUsableInSources();
+  if (activeIntegration === 'shared') return hasUsableInProfiles();
+  return hasUsableInSources() || hasUsableInProfiles();
+};
+
+const resolveSyncConfigured = (
+  settings: ReturnType<typeof selectSettings>,
+  googleSheetsCanonical: ReturnType<typeof selectGoogleSheetsSettings>,
+): boolean => {
+  if (hasCanonicalConnectorConfig(googleSheetsCanonical)) return true;
   const gs = settings?.googleSheets;
   if (!gs) return false;
 
@@ -71,6 +125,7 @@ export const PosPage = () => {
   const navigate = useNavigate();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const settings = useAppSelector(selectSettings);
+  const googleSheetsCanonical = useAppSelector(selectGoogleSheetsSettings);
   const { state, actions } = usePos();
 
   const canView = hasPermission(permissions, 'pos', 'view');
@@ -79,7 +134,7 @@ export const PosPage = () => {
 
   const [openImportModal, setOpenImportModal] = useState(false);
 
-  const syncConfigured = resolveSyncConfigured(settings);
+  const syncConfigured = resolveSyncConfigured(settings, googleSheetsCanonical);
   const lastImportSource = (settings?.lastImportSource ?? null) as LastImportSource;
   const isValidRange =
     Boolean(state.dateRange.from) &&
@@ -115,8 +170,10 @@ export const PosPage = () => {
   const totalGas = state.kpis.gas;
   const totalLottery = state.kpis.lottery;
   const avgDailySales = state.kpis.avgDailySales;
-  const creditPercent = totalSales > 0 ? (totalCredit / totalSales) * 100 : 0;
-  const cashPercent = totalSales > 0 ? (totalCash / totalSales) * 100 : 0;
+  const netIncome = state.kpis.netIncome;
+  const cashDiff = state.kpis.cashDiff;
+  const totalSaleTax = state.totals.saleTax;
+  const effectiveTaxRate = totalSales > 0 ? (totalSaleTax / totalSales) * 100 : 0;
 
   const googleSettingsUrl =
     '/dashboard/settings?open=google_sheets&expand=configure&profile=POS%20DATA%20SHEET';
@@ -232,6 +289,7 @@ export const PosPage = () => {
                     color={syncConfigured ? 'success' : 'primary'}
                     startIcon={primaryAction.loading ? <CircularProgress size={14} /> : primaryAction.icon}
                     onClick={primaryAction.onClick}
+                    aria-label={primaryAction.label}
                     disabled={
                       !canImport ||
                       state.loading.daily ||
@@ -257,12 +315,13 @@ export const PosPage = () => {
           primaryAction={primaryAction}
           totalSales={totalSales}
           avgDailySales={avgDailySales}
-          creditPercent={creditPercent}
-          cashPercent={cashPercent}
+          effectiveTaxRate={effectiveTaxRate}
           totalCredit={totalCredit}
           totalCash={totalCash}
           totalGas={totalGas}
           totalLottery={totalLottery}
+          netIncome={netIncome}
+          cashDiff={cashDiff}
         />
       ) : (
         <PosTableViewPage
@@ -281,6 +340,9 @@ export const PosPage = () => {
       <ImportPOSDataModal
         open={openImportModal}
         onClose={() => setOpenImportModal(false)}
+        navigateToSettings={() => {
+          navigate(googleSettingsUrl);
+        }}
         onImported={async () => {
           await dispatch(fetchSettings());
           await actions.fetchDaily();

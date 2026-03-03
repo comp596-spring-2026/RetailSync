@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Types } from 'mongoose';
 
 const aggregateMock = vi.fn();
 const countDocumentsMock = vi.fn();
@@ -80,6 +81,30 @@ describe('POS dashboard controller helpers', () => {
     expect(payload.data.totalCount).toBe(1);
   });
 
+  it('casts companyId to ObjectId for aggregate match when valid', async () => {
+    const { listPosDailyPaged } = await import('./controllers/posController');
+    const companyId = new Types.ObjectId().toHexString();
+
+    findMock.mockReturnValue({
+      sort: () => ({ skip: () => ({ limit: () => Promise.resolve([]) }) })
+    });
+    countDocumentsMock.mockResolvedValue(0);
+    aggregateMock.mockResolvedValue([]);
+
+    const req = {
+      companyId,
+      query: { page: '1', limit: '100', start: '2026-02-01', end: '2026-02-28' }
+    } as any;
+    const res = createRes() as any;
+
+    await listPosDailyPaged(req, res);
+
+    const pipeline = aggregateMock.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
+    const match = pipeline?.[0]?.$match as { companyId?: unknown };
+    expect(match?.companyId).toBeInstanceOf(Types.ObjectId);
+    expect((match?.companyId as Types.ObjectId).toHexString()).toBe(companyId);
+  });
+
   it('returns overview and uses fallback moving average when window aggregation fails', async () => {
     const { getPosOverview } = await import('./controllers/posController');
 
@@ -145,6 +170,57 @@ describe('POS dashboard controller helpers', () => {
     expect(payload.data.kpis.totalSales).toBe(220);
     expect(Array.isArray(payload.data.sparkline7)).toBe(true);
     expect(payload.data.sparkline7).toHaveLength(2);
+  });
+
+  it('returns weekly trend buckets from Monday to Sunday', async () => {
+    const { getPosTrend } = await import('./controllers/posController');
+
+    findMock.mockReturnValue({
+      select: () => ({
+        sort: () =>
+          Promise.resolve([
+            {
+              date: new Date('2026-02-23T00:00:00.000Z'),
+              totalSales: 100,
+              creditCard: 30,
+              cash: 20,
+              gas: 40,
+              lottery: 10
+            },
+            {
+              date: new Date('2026-02-27T00:00:00.000Z'),
+              totalSales: 50,
+              creditCard: 10,
+              cash: 5,
+              gas: 20,
+              lottery: 8
+            }
+          ])
+      })
+    });
+
+    const req = {
+      companyId: 'company-1',
+      query: { start: '2026-02-23', end: '2026-03-01', granularity: 'weekly' }
+    } as any;
+    const res = createRes() as any;
+
+    await getPosTrend(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const payload = res.status.mock.results[0]?.value?.json.mock.calls[0]?.[0];
+    expect(payload.status).toBe('ok');
+    expect(payload.data.granularity).toBe('weekly');
+    expect(payload.data.data).toHaveLength(1);
+    expect(payload.data.data[0]).toMatchObject({
+      label: 'Week 9 2026',
+      range: '2026-02-23 to 2026-03-01',
+      totalSales: 150,
+      creditCard: 40,
+      cash: 25,
+      gas: 60,
+      lottery: 18
+    });
   });
 
   it('computes moving average fallback helper', async () => {

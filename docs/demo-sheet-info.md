@@ -1,6 +1,7 @@
 # Demo Google Sheet Info (POS Import)
 
-Use this when configuring **Settings → Google Sheets** or the **POS Import → Google Sheets** flow for demos.
+Use this when configuring **Settings -> Google Sheets** for demos.
+From POS Import modal, choosing Google Sheets now routes to Settings (single setup flow).
 
 ## OAuth vs Shared Sheet
 
@@ -57,7 +58,7 @@ Date,High Tax,Low Tax,Sale Tax,Gas,Lottery Sold,Credit Card,Lottery Payout Cash,
 4. **Share** the sheet:
    - **OAuth path**: Sign in with the same Google account used in the app.
    - **Service account path**: Share the sheet with the service account email (e.g. `retailsync-run-sa@...gserviceaccount.com`) as Viewer (or Editor if you need write).
-5. In RetailSync: **Dashboard → Settings → Google Sheets** (or POS Import → Google Sheets) → enter the **Spreadsheet ID** from the sheet URL, set **Sheet name** and **Header row** (usually `Sheet1`, `1`), then **Verify access** and run the import.
+5. In RetailSync: **Dashboard -> Settings -> Google Sheets** -> enter/select the **Spreadsheet ID** from the sheet URL, set **Sheet name** and **Header row** (usually `Sheet1`, `1`), then **Verify access**, save mapping, and run POS sync/import.
 
 ## 6. Spreadsheet ID format
 

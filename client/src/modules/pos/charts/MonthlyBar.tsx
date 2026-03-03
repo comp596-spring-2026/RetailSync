@@ -24,10 +24,18 @@ export const MonthlyBar = ({ data, height = 260 }: MonthlyBarProps) => {
   const options = withCurrencyTooltip({
     chart: {
       type: 'bar',
-      toolbar: { show: false }
+      toolbar: { show: true }
     },
     xaxis: {
-      categories: data.map((entry) => monthLabel(entry.month))
+      categories: data.map((entry) => monthLabel(entry.month)),
+      title: {
+        text: 'Month'
+      }
+    },
+    yaxis: {
+      title: {
+        text: 'Average Sales (USD)'
+      }
     },
     plotOptions: {
       bar: {

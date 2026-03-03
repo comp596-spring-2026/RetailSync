@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { MatchingWizard } from '../components/MatchingWizard';
 
 describe('POS MatchingWizard mapping behavior', () => {
-  it('keeps low-confidence suggestions unmapped', () => {
+  it('shows required field validation when mapping is empty', () => {
     render(
       <MatchingWizard
         headers={['Maybe Date']}
         sampleRows={[['2026-03-01']]}
-        suggestions={[{ col: 'A', header: 'Maybe Date', suggestion: 'date', score: 0.5 }]}
+        suggestions={[]}
         mapping={{}}
         transforms={{}}
         targetFields={[]}
@@ -18,19 +18,16 @@ describe('POS MatchingWizard mapping behavior', () => {
       />,
     );
 
-    expect(screen.getByText('Unmapped')).toBeInTheDocument();
+    expect(screen.getAllByText(/Required field is missing/i).length).toBeGreaterThan(0);
   });
 
-  it('enforces one-to-one auto mapping for confident suggestions', () => {
+  it('normalizes duplicate target assignments to a single mapped target', () => {
     render(
       <MatchingWizard
         headers={['Date 1', 'Date 2']}
         sampleRows={[['2026-03-01', '2026-03-02']]}
-        suggestions={[
-          { col: 'A', header: 'Date 1', suggestion: 'date', score: 0.95 },
-          { col: 'B', header: 'Date 2', suggestion: 'date', score: 0.95 },
-        ]}
-        mapping={{}}
+        suggestions={[]}
+        mapping={{ 'Date 1': 'date', 'Date 2': 'date' }}
         transforms={{}}
         targetFields={[]}
         rowErrors={[]}
@@ -39,7 +36,7 @@ describe('POS MatchingWizard mapping behavior', () => {
       />,
     );
 
-    expect(screen.getAllByText('Mapped')).toHaveLength(1);
-    expect(screen.getAllByText('Unmapped').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('1/10 mapped')).toBeInTheDocument();
+    expect(screen.queryByText(/Duplicate column usage/i)).not.toBeInTheDocument();
   });
 });

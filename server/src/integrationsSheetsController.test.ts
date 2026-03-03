@@ -105,4 +105,230 @@ describe('integrationsSheetsController', () => {
       })
     );
   });
+
+  it('falls back to first available tab when configured sheetName is invalid', async () => {
+    const { verifySharedSheetsConfig } = await import('./controllers/integrationsSheetsController');
+    findOneAndUpdateMock.mockResolvedValue({
+      googleSheets: {
+        sharedConfig: {
+          spreadsheetId: 'sheet-1',
+          sheetName: 'Sheet1'
+        },
+        sharedSheets: [
+          {
+            profileId: 'profile-1',
+            name: 'POS DATA SHEET',
+            spreadsheetId: 'sheet-1',
+            sheetName: 'Sheet1',
+            enabled: true,
+            isDefault: true
+          }
+        ],
+        updatedAt: new Date()
+      },
+      save: vi.fn().mockResolvedValue(undefined)
+    });
+    getMock
+      .mockResolvedValueOnce({
+        data: {
+          properties: { title: 'RetailSync Shared Sheet' },
+          sheets: [{ properties: { sheetId: 1, title: 'CLEAN DATA' } }]
+        }
+      })
+      .mockResolvedValueOnce({ data: { values: [['header']] } });
+
+    const { res, status, json } = createResponse();
+    const req = { user: { companyId: 'company-1', id: 'user-1' } } as unknown as Request;
+
+    await verifySharedSheetsConfig(req, res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(getMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        spreadsheetId: 'sheet-1',
+        range: 'CLEAN DATA!A1:Z6'
+      })
+    );
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: expect.objectContaining({
+          connected: true,
+          sheetName: 'CLEAN DATA'
+        })
+      })
+    );
+  });
+
+  it('verifies shared sheet using sharedConfig spreadsheetId fallback when shared profile id is missing', async () => {
+    const { verifySharedSheetsConfig } = await import('./controllers/integrationsSheetsController');
+    findOneAndUpdateMock.mockResolvedValue({
+      googleSheets: {
+        sharedConfig: {
+          spreadsheetId: 'sheet-1',
+          sheetName: 'Sheet1'
+        },
+        sharedSheets: [
+          {
+            profileId: 'profile-1',
+            name: 'POS DATA SHEET',
+            spreadsheetId: null,
+            sheetName: 'Sheet1',
+            enabled: true,
+            isDefault: true
+          }
+        ],
+        updatedAt: new Date()
+      },
+      save: vi.fn().mockResolvedValue(undefined)
+    });
+    getMock
+      .mockResolvedValueOnce({
+        data: {
+          properties: { title: 'RetailSync Shared Sheet' },
+          sheets: [{ properties: { sheetId: 1, title: 'Sheet1' } }]
+        }
+      })
+      .mockResolvedValueOnce({ data: { values: [['header']] } });
+
+    const { res, status, json } = createResponse();
+    const req = { user: { companyId: 'company-1', id: 'user-1' } } as unknown as Request;
+
+    await verifySharedSheetsConfig(req, res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: expect.objectContaining({
+          connected: true
+        })
+      })
+    );
+  });
+
+  it('returns not_shared when service account has no permission', async () => {
+    const { verifySharedSheetsConfig } = await import('./controllers/integrationsSheetsController');
+    findOneAndUpdateMock.mockResolvedValue({
+      googleSheets: {
+        sharedConfig: {
+          spreadsheetId: 'sheet-1',
+          sheetName: 'Sheet1'
+        },
+        sharedSheets: [
+          {
+            profileId: 'profile-1',
+            name: 'POS DATA SHEET',
+            spreadsheetId: 'sheet-1',
+            sheetName: 'Sheet1',
+            enabled: true,
+            isDefault: true
+          }
+        ],
+        updatedAt: new Date()
+      },
+      save: vi.fn().mockResolvedValue(undefined)
+    });
+    getMock.mockRejectedValueOnce(new Error('403 Forbidden: permission denied'));
+
+    const { res, status, json } = createResponse();
+    const req = { user: { companyId: 'company-1', id: 'user-1' } } as unknown as Request;
+
+    await verifySharedSheetsConfig(req, res);
+
+    expect(status).toHaveBeenCalledWith(403);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'error',
+        message: 'not_shared'
+      })
+    );
+  });
+
+  it('returns not_found when spreadsheet does not exist', async () => {
+    const { verifySharedSheetsConfig } = await import('./controllers/integrationsSheetsController');
+    findOneAndUpdateMock.mockResolvedValue({
+      googleSheets: {
+        sharedConfig: {
+          spreadsheetId: 'sheet-missing',
+          sheetName: 'Sheet1'
+        },
+        sharedSheets: [
+          {
+            profileId: 'profile-1',
+            name: 'POS DATA SHEET',
+            spreadsheetId: 'sheet-missing',
+            sheetName: 'Sheet1',
+            enabled: true,
+            isDefault: true
+          }
+        ],
+        updatedAt: new Date()
+      },
+      save: vi.fn().mockResolvedValue(undefined)
+    });
+    getMock.mockRejectedValueOnce(new Error('404 not found'));
+
+    const { res, status, json } = createResponse();
+    const req = { user: { companyId: 'company-1', id: 'user-1' } } as unknown as Request;
+
+    await verifySharedSheetsConfig(req, res);
+
+    expect(status).toHaveBeenCalledWith(404);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'error',
+        message: 'not_found'
+      })
+    );
+  });
+
+  it('does not fail verification when preview range parsing fails', async () => {
+    const { verifySharedSheetsConfig } = await import('./controllers/integrationsSheetsController');
+    findOneAndUpdateMock.mockResolvedValue({
+      googleSheets: {
+        sharedConfig: {
+          spreadsheetId: 'sheet-1',
+          sheetName: 'CLEAN DATA'
+        },
+        sharedSheets: [
+          {
+            profileId: 'profile-1',
+            name: 'POS DATA SHEET',
+            spreadsheetId: 'sheet-1',
+            sheetName: 'CLEAN DATA',
+            enabled: true,
+            isDefault: true
+          }
+        ],
+        updatedAt: new Date()
+      },
+      save: vi.fn().mockResolvedValue(undefined)
+    });
+    getMock
+      .mockResolvedValueOnce({
+        data: {
+          properties: { title: 'RetailSync Shared Sheet' },
+          sheets: [{ properties: { sheetId: 1, title: 'CLEAN DATA' } }]
+        }
+      })
+      .mockRejectedValueOnce(new Error('Unable to parse range: CLEAN DATA!A1:Z6'));
+
+    const { res, status, json } = createResponse();
+    const req = { user: { companyId: 'company-1', id: 'user-1' } } as unknown as Request;
+
+    await verifySharedSheetsConfig(req, res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: expect.objectContaining({
+          connected: true,
+          preview: []
+        })
+      })
+    );
+  });
 });

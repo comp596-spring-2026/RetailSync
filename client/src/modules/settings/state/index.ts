@@ -18,3 +18,20 @@ export {
   verifySharedSheetThunk
 } from './settingsSlice';
 export type { GoogleSheetsSettings, IntegrationSettings } from './settingsSlice';
+export {
+  computeMappingHash,
+  selectActionAvailability,
+  selectActiveConnector,
+  selectActiveConnectorKey,
+  selectActiveIntegration,
+  selectActiveProfile,
+  selectActiveProfileId,
+  selectActiveSource,
+  selectActiveSourceId,
+  selectGoogleSheetsSettings,
+  selectLastSyncInfo,
+  selectMappingReadiness,
+  selectMappingSummary,
+  selectSettingsRoot,
+  selectSheetInfoDisplay,
+} from './selectors/googleSheetsSelectors';

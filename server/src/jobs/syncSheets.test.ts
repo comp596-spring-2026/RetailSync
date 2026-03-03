@@ -1,21 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const findSettingsMock = vi.fn();
-const findOneAndUpdateSettingsMock = vi.fn();
+const updateOneSettingsMock = vi.fn();
 const findOneLockMock = vi.fn();
 const updateOneLockMock = vi.fn();
 const readSharedSheetRowsMock = vi.fn();
 const parseRowsWithHeaderRowMock = vi.fn();
-const importRowsForCompanyMock = vi.fn();
+const importEvaluatedRowsForCompanyMock = vi.fn();
+const markConnectorImportedMock = vi.fn();
 
 vi.mock('../models/IntegrationSettings', () => ({
   IntegrationSettingsModel: {
     find: (...args: unknown[]) => ({
       lean: () => findSettingsMock(...args)
     }),
-    findOneAndUpdate: (...args: unknown[]) => ({
-      lean: () => findOneAndUpdateSettingsMock(...args)
-    })
+    updateOne: (...args: unknown[]) => updateOneSettingsMock(...args)
   }
 }));
 
@@ -31,7 +30,11 @@ vi.mock('../models/JobLock', () => ({
 vi.mock('../controllers/posController', () => ({
   readSharedSheetRows: (...args: unknown[]) => readSharedSheetRowsMock(...args),
   parseRowsWithHeaderRow: (...args: unknown[]) => parseRowsWithHeaderRowMock(...args),
-  importRowsForCompany: (...args: unknown[]) => importRowsForCompanyMock(...args)
+  importEvaluatedRowsForCompany: (...args: unknown[]) => importEvaluatedRowsForCompanyMock(...args)
+}));
+
+vi.mock('../controllers/googleSheetsController', () => ({
+  markConnectorImported: (...args: unknown[]) => markConnectorImportedMock(...args)
 }));
 
 describe('runSheetsSync', () => {
@@ -40,6 +43,8 @@ describe('runSheetsSync', () => {
     // default: no active lock
     findOneLockMock.mockResolvedValue(null);
     updateOneLockMock.mockResolvedValue(undefined);
+    updateOneSettingsMock.mockResolvedValue(undefined);
+    markConnectorImportedMock.mockResolvedValue(undefined);
   });
 
   it('skips when lock is active', async () => {
@@ -84,28 +89,76 @@ describe('runSheetsSync', () => {
       {
         companyId: 'company-1',
         googleSheets: {
-          sharedConfig: {
-            spreadsheetId: 'sheet-1',
-            sheetName: 'Sheet1',
-            headerRow: 1,
+          activeIntegration: 'shared',
+          shared: {
             enabled: true,
-            columnsMap: { Date: 'date' }
+            activeProfileId: 'profile-1',
+            activeConnectorKey: 'pos_daily',
+            lastScheduledSyncAt: null,
+            profiles: [
+              {
+                _id: 'profile-1',
+                connectors: [
+                  {
+                    key: 'pos_daily',
+                    enabled: true,
+                    schedule: { enabled: false }
+                  }
+                ]
+              }
+            ]
           }
         }
       }
     ]);
 
     readSharedSheetRowsMock.mockResolvedValueOnce({
-      source: { spreadsheetId: 'sheet-1', sheetName: 'Sheet1', headerRow: 1 },
+      source: {
+        spreadsheetId: 'sheet-1',
+        sheetName: 'Sheet1',
+        profileName: 'POS Daily',
+        headerRow: 1,
+        mapping: {
+          Date: 'date',
+          highTax: 'highTax',
+          lowTax: 'lowTax',
+          saleTax: 'saleTax',
+          gas: 'gas',
+          lottery: 'lottery',
+          creditCard: 'creditCard',
+          lotteryPayout: 'lotteryPayout',
+          cashExpenses: 'cashExpenses'
+        }
+      },
       rawRows: [
-        ['Date', 'Total'],
-        ['2024-01-01', '100']
+        [
+          'Date',
+          'highTax',
+          'lowTax',
+          'saleTax',
+          'gas',
+          'lottery',
+          'creditCard',
+          'lotteryPayout',
+          'cashExpenses'
+        ],
+        ['2024-01-01', '100', '50', '10', '20', '10', '140', '2', '1']
       ],
       rowCount: 2
     });
 
     parseRowsWithHeaderRowMock.mockReturnValueOnce([
-      { Date: '2024-01-01', Total: '100' }
+      {
+        Date: '2024-01-01',
+        highTax: '100',
+        lowTax: '50',
+        saleTax: '10',
+        gas: '20',
+        lottery: '10',
+        creditCard: '140',
+        lotteryPayout: '2',
+        cashExpenses: '1'
+      }
     ]);
 
     const result = await runSheetsSync({ source: 'dry-run', dryRun: true });
@@ -113,8 +166,8 @@ describe('runSheetsSync', () => {
     expect(result.ok).toBe(true);
     expect(result.succeeded).toBe(0);
     expect(result.skipped).toBe(1);
-    expect(importRowsForCompanyMock).not.toHaveBeenCalled();
-    expect(findOneAndUpdateSettingsMock).not.toHaveBeenCalled();
+    expect(importEvaluatedRowsForCompanyMock).not.toHaveBeenCalled();
+    expect(updateOneSettingsMock).not.toHaveBeenCalled();
 
     const companyResult = result.companies[0];
     expect(companyResult.companyId).toBe('company-1');
@@ -126,47 +179,89 @@ describe('runSheetsSync', () => {
   it('imports rows and updates IntegrationSettings on success', async () => {
     const { runSheetsSync } = await import('./syncSheets');
 
-    const now = new Date();
-
     findSettingsMock.mockResolvedValueOnce([
       {
         companyId: 'company-1',
         googleSheets: {
-          sharedConfig: {
-            spreadsheetId: 'sheet-1',
-            sheetName: 'Sheet1',
-            headerRow: 1,
+          activeIntegration: 'shared',
+          shared: {
             enabled: true,
-            columnsMap: { Date: 'date' }
+            activeProfileId: 'profile-1',
+            activeConnectorKey: 'pos_daily',
+            lastScheduledSyncAt: null,
+            profiles: [
+              {
+                _id: 'profile-1',
+                connectors: [
+                  {
+                    key: 'pos_daily',
+                    enabled: true,
+                    schedule: { enabled: false }
+                  }
+                ]
+              }
+            ]
           }
         }
       }
     ]);
 
     readSharedSheetRowsMock.mockResolvedValueOnce({
-      source: { spreadsheetId: 'sheet-1', sheetName: 'Sheet1', headerRow: 1 },
+      source: {
+        spreadsheetId: 'sheet-1',
+        sheetName: 'Sheet1',
+        profileName: 'POS Daily',
+        headerRow: 1,
+        mapping: {
+          Date: 'date',
+          highTax: 'highTax',
+          lowTax: 'lowTax',
+          saleTax: 'saleTax',
+          gas: 'gas',
+          lottery: 'lottery',
+          creditCard: 'creditCard',
+          lotteryPayout: 'lotteryPayout',
+          cashExpenses: 'cashExpenses'
+        }
+      },
       rawRows: [
-        ['Date', 'Total'],
-        ['2024-01-01', '100']
+        [
+          'Date',
+          'highTax',
+          'lowTax',
+          'saleTax',
+          'gas',
+          'lottery',
+          'creditCard',
+          'lotteryPayout',
+          'cashExpenses'
+        ],
+        ['2024-01-01', '100', '50', '10', '20', '10', '140', '2', '1']
       ],
       rowCount: 2
     });
 
     parseRowsWithHeaderRowMock.mockReturnValueOnce([
-      { Date: '2024-01-01', Total: '100' }
+      {
+        Date: '2024-01-01',
+        highTax: '100',
+        lowTax: '50',
+        saleTax: '10',
+        gas: '20',
+        lottery: '10',
+        creditCard: '140',
+        lotteryPayout: '2',
+        cashExpenses: '1'
+      }
     ]);
 
-    importRowsForCompanyMock.mockResolvedValueOnce({
+    importEvaluatedRowsForCompanyMock.mockResolvedValueOnce({
       ok: true as const,
       data: {
         imported: 1,
         upserted: 1,
         modified: 0
       }
-    });
-
-    findOneAndUpdateSettingsMock.mockResolvedValueOnce({
-      lastImportAt: now
     });
 
     const result = await runSheetsSync({ source: 'sheets-cron' });
@@ -181,9 +276,9 @@ describe('runSheetsSync', () => {
     expect(companyResult.importedCount).toBe(1);
     expect(companyResult.upsertedCount).toBe(1);
     expect(companyResult.modifiedCount).toBe(0);
-    expect(companyResult.lastImportAt).toEqual(now);
+    expect(companyResult.lastImportAt).toBeTruthy();
 
-    expect(importRowsForCompanyMock).toHaveBeenCalledWith(
+    expect(importEvaluatedRowsForCompanyMock).toHaveBeenCalledWith(
       'company-1',
       expect.any(Array),
       'google_sheets',
@@ -191,14 +286,21 @@ describe('runSheetsSync', () => {
         importBindingKey: expect.any(String)
       })
     );
-    expect(findOneAndUpdateSettingsMock).toHaveBeenCalledWith(
+    expect(markConnectorImportedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyId: 'company-1',
+        integrationType: 'shared',
+        profileId: 'profile-1',
+        connectorKey: 'pos_daily'
+      })
+    );
+    expect(updateOneSettingsMock).toHaveBeenCalledWith(
       { companyId: 'company-1' },
       expect.objectContaining({
         $set: expect.objectContaining({
-          lastImportSource: 'google_sheets'
+          'googleSheets.shared.lastScheduledSyncAt': expect.any(Date)
         })
-      }),
-      expect.any(Object)
+      })
     );
   });
 });

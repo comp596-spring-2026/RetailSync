@@ -1,41 +1,68 @@
 import { PosDailySummaryInput, posDailyQuerySchema, posDailySummarySchema } from '@retailsync/shared';
 import { parse } from 'csv-parse/sync';
 import { Request, Response } from 'express';
+import { Types } from 'mongoose';
 import XLSX from 'xlsx';
 import { z } from 'zod';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { ImportJobModel } from '../models/ImportJob';
 import { POSDailySummaryModel } from '../models/POSDailySummary';
 import { getSheetsClientForCompany } from '../integrations/google/sheets.client';
+import { markConnectorImported } from './googleSheetsController';
 import { fail, ok } from '../utils/apiResponse';
 import { suggestMappings } from '../utils/matching';
-import { buildRange, escapeSheetName, normalizeRows } from '../utils/sheetsRange';
-import { ensureSharedSheets, isEmptyRecord, normalizeStringRecord, pickDefaultSharedSheet, upsertSharedSheet } from '../utils/sharedSheets';
-import { buildSheetsBindingKey } from '../utils/sheetsBinding';
+import { buildRange, normalizeRows } from '../utils/sheetsRange';
+import { DEFAULT_CONNECTOR_KEY } from '../utils/sheetsConnectors';
+import {
+  computeCompatibilityForConnector,
+  validateColumnMapOneToOne
+} from '../utils/sheetsCompatibility';
+import {
+  buildFullSheetRange,
+  readSheetSampleOAuth,
+  readSheetSampleShared,
+  SheetsHttpError
+} from '../utils/sheetsClient';
+import {
+  resolveActiveSheetsConfig,
+  resolveSheetsConfigByRef,
+  SheetsConfigError
+} from '../utils/sheetsSourceResolver';
+import {
+  evaluateConfiguredPosRow,
+  validateDerivedConfiguration
+} from '../utils/posDerivedEvaluator';
 
 type CsvRow = Record<string, string | undefined>;
 
 const previewRequestSchema = z.object({
-  source: z.enum(['service', 'oauth', 'file']).default('service'),
+  integrationType: z.enum(['oauth', 'shared']).optional(),
+  sourceId: z.string().optional(),
+  profileId: z.string().optional(),
+  connectorKey: z.string().optional(),
+  useActive: z.boolean().optional(),
   spreadsheetId: z.string().min(5).optional(),
-  headerRow: z.coerce.number().int().min(1).default(1),
-  tab: z.string().min(1).optional(),
-  maxRows: z.coerce.number().int().min(1).max(100).default(20)
-});
-
-const matchMappingSchema = z.object({
-  mapping: z.record(z.string(), z.string()).default({}),
-  transforms: z.record(z.string(), z.any()).optional(),
-  validateSample: z.boolean().optional(),
-  spreadsheetId: z.string().min(5).optional(),
+  sheetName: z.string().min(1).optional(),
   headerRow: z.coerce.number().int().min(1).optional(),
+  mapping: z.record(z.string(), z.string()).optional(),
+  transformations: z.record(z.string(), z.unknown()).optional(),
+  maxRows: z.coerce.number().int().min(1).max(100).default(20),
+  source: z.enum(['service', 'oauth', 'file']).optional(),
   tab: z.string().min(1).optional()
 });
 
+const matchMappingSchema = z.object({
+  connectorKey: z.string().default(DEFAULT_CONNECTOR_KEY),
+  mapping: z.record(z.string(), z.string()).default({}),
+  columns: z.array(z.string()).default([]),
+  transformations: z.record(z.string(), z.unknown()).optional()
+});
+
 const commitImportSchema = z.object({
-  mapping: z.record(z.string(), z.string()),
-  transforms: z.record(z.string(), z.any()).optional(),
-  options: z.record(z.string(), z.any()).optional()
+  connectorKey: z.string().default(DEFAULT_CONNECTOR_KEY),
+  integrationType: z.enum(['oauth', 'shared']).optional(),
+  sourceId: z.string().optional(),
+  profileId: z.string().optional()
 });
 
 const clearPosDataSchema = z.object({
@@ -54,6 +81,9 @@ const optionalDateRangeSchema = z.object({
 const posPagedDailyQuerySchema = optionalDateRangeSchema.extend({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(500).default(100)
+});
+const posTrendQuerySchema = optionalDateRangeSchema.extend({
+  granularity: z.enum(['daily', 'weekly']).default('daily')
 });
 
 type DateRangeBounds = {
@@ -74,9 +104,11 @@ const TARGET_FIELDS = [
   'lottery',
   'creditCard',
   'lotteryPayout',
+  'creditPlusLottery',
+  'cashDiff',
+  // Backward-compatible aliases still accepted in mapping
   'clTotal',
   'cash',
-  'cashPayout',
   'cashExpenses',
   'notes'
 ];
@@ -140,6 +172,28 @@ const parseIsoEnd = (iso: string) => {
   const end = new Date(start);
   end.setUTCHours(23, 59, 59, 999);
   return end;
+};
+
+const toAggregateCompanyId = (companyId: string) =>
+  Types.ObjectId.isValid(companyId) ? new Types.ObjectId(companyId) : companyId;
+
+const startOfUtcDay = (date: Date) =>
+  new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+
+const getIsoWeekUtc = (date: Date) => {
+  const value = startOfUtcDay(date);
+  const day = value.getUTCDay() || 7;
+  value.setUTCDate(value.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(value.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((value.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return { week, year: value.getUTCFullYear() };
+};
+
+const getMondayUtc = (date: Date) => {
+  const monday = startOfUtcDay(date);
+  const dayFromMonday = (monday.getUTCDay() + 6) % 7;
+  monday.setUTCDate(monday.getUTCDate() - dayFromMonday);
+  return monday;
 };
 
 const resolveDateRange = (input: { start?: string; end?: string }) => {
@@ -397,15 +451,38 @@ export const parseRowsWithHeaderRow = (rows: string[][], headerRow: number) => {
     });
 };
 
-const toSheetsErrorStatus = (message: string) => {
-  const normalized = message.toLowerCase();
-  if (normalized.includes('permission') || normalized.includes('forbidden') || normalized.includes('403')) {
+const toSheetsErrorStatus = (error: unknown) => {
+  if (error instanceof SheetsConfigError) return error.statusCode;
+  if (error instanceof SheetsHttpError) return error.statusCode;
+
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (message.includes('permission') || message.includes('forbidden') || message.includes('403')) {
     return 403;
   }
-  if (normalized.includes('not found') || normalized.includes('404')) {
+  if (
+    message.includes('tab_not_found') ||
+    message.includes('unable to parse range') ||
+    message.includes('not found') ||
+    message.includes('404')
+  ) {
     return 404;
   }
   return 400;
+};
+
+const toSheetsErrorMessage = (error: unknown) => {
+  const message = error instanceof Error ? error.message : 'Sheets request failed';
+  const normalized = message.toLowerCase();
+  if (normalized.includes('tab_not_found') || normalized.includes('unable to parse range')) {
+    return 'tab_not_found';
+  }
+  if (normalized.includes('not found') || normalized.includes('404')) {
+    return 'not_found';
+  }
+  if (normalized.includes('permission') || normalized.includes('forbidden') || normalized.includes('403')) {
+    return 'forbidden';
+  }
+  return message;
 };
 
 const parseCsvFileRows = (buffer: Buffer) => {
@@ -428,181 +505,93 @@ const parseXlsxRows = (buffer: Buffer) => {
   }) as CsvRow[];
 };
 
-const normalizeTargetValue = (target: string) => {
-  const trimmed = String(target ?? '').trim();
-  if (!trimmed) return '';
-  if (trimmed.startsWith('custom:')) {
-    return `custom:${trimmed.replace(/^custom:/, '').trim().toLowerCase()}`;
-  }
-  return trimmed.toLowerCase();
+const resolveLegacyIntegrationType = (source?: string): 'oauth' | 'shared' | undefined => {
+  if (!source) return undefined;
+  if (source === 'oauth') return 'oauth';
+  if (source === 'service') return 'shared';
+  return undefined;
 };
 
-const getDuplicateTargets = (mapping: Record<string, string>) => {
-  const counts = new Map<string, number>();
-  for (const value of Object.values(mapping)) {
-    if (!value) continue;
-    const key = normalizeTargetValue(value);
-    if (!key) continue;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+const resolveConfigFromRequest = async (
+  companyId: string,
+  params: {
+    integrationType?: 'oauth' | 'shared';
+    sourceId?: string;
+    profileId?: string;
+    connectorKey?: string;
+    source?: string;
   }
-  return Array.from(counts.entries())
-    .filter(([, count]) => count > 1)
-    .map(([key]) => key);
+) => {
+  const integrationType = params.integrationType ?? resolveLegacyIntegrationType(params.source);
+  const connectorKey = String(params.connectorKey ?? '').trim() || DEFAULT_CONNECTOR_KEY;
+
+  if (!integrationType) {
+    return resolveActiveSheetsConfig(companyId, connectorKey);
+  }
+
+  return resolveSheetsConfigByRef(companyId, {
+    integrationType,
+    sourceId: params.sourceId,
+    profileId: params.profileId,
+    connectorKey
+  });
 };
 
-const getSharedSheetsSourceForCompany = async (companyId: string) => {
-  const settings = await IntegrationSettingsModel.findOne({ companyId }).lean();
-  const googleSheets = (settings?.googleSheets ?? {}) as Record<string, unknown>;
-  const profile = pickDefaultSharedSheet(googleSheets);
-  const spreadsheetId = profile?.spreadsheetId?.trim() ?? '';
-  const sheetName = profile?.sheetName?.trim() || 'Sheet1';
-  const headerRow = Number(profile?.headerRow ?? 1);
-  const enabled = Boolean(profile?.enabled);
+const readRowsForResolvedConfig = async (
+  companyId: string,
+  resolved: Awaited<ReturnType<typeof resolveActiveSheetsConfig>>,
+  opts?: { limitRows?: number; sheetNameOverride?: string }
+) => {
+  const authMode = resolved.integrationType === 'oauth' ? 'oauth' : 'service_account';
+  const sheets = await getSheetsClientForCompany(authMode, companyId);
+  const sheetName = String(opts?.sheetNameOverride ?? resolved.sheetName).trim() || resolved.sheetName;
+  const limitRows = opts?.limitRows;
+  const range =
+    typeof limitRows === 'number'
+      ? buildRange(sheetName, resolved.headerRow, Math.min(Math.max(limitRows, 1), 200))
+      : buildFullSheetRange(sheetName, resolved.headerRow);
 
-  if (!enabled) {
-    throw new Error('Shared Sheets integration is disabled for this company');
-  }
-  if (!spreadsheetId) {
-    throw new Error('Shared Sheets integration is missing spreadsheetId');
-  }
-  if (!Number.isFinite(headerRow) || headerRow < 1) {
-    throw new Error('Shared Sheets integration has invalid headerRow');
-  }
-
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: resolved.spreadsheetId,
+    range
+  });
+  const rawRows = normalizeRows(response.data.values as unknown[][] | undefined);
   return {
-    profileId: profile?.profileId ?? null,
-    profileName: profile?.name ?? null,
-    spreadsheetId,
-    sheetName,
-    headerRow,
-    settingsId: settings?._id?.toString() ?? null,
-    mode: 'service_account'
+    rawRows,
+    rowCount: rawRows.length,
+    sheetName
   };
 };
 
 export const readSharedSheetRows = async (
   companyId: string,
-  opts?: { tab?: string; maxRows?: number }
+  opts?: { tab?: string; maxRows?: number; profileId?: string; connectorKey?: string }
 ) => {
-  const source = await getSharedSheetsSourceForCompany(companyId);
-  const authMode = source.mode === 'oauth' ? 'oauth' : 'service_account';
-  const sheets = await getSheetsClientForCompany(authMode, companyId);
-  const selectedTab = opts?.tab?.trim() || source.sheetName;
-
-  const metadata = await sheets.spreadsheets.get({
-    spreadsheetId: source.spreadsheetId,
-    fields: 'sheets(properties(title))'
+  const resolved = await resolveSheetsConfigByRef(companyId, {
+    integrationType: 'shared',
+    profileId: opts?.profileId,
+    connectorKey: opts?.connectorKey
   });
-  const tabs = (metadata.data.sheets ?? [])
-    .map((sheet) => sheet.properties?.title)
-    .filter((tab): tab is string => Boolean(tab));
-  if (!tabs.includes(selectedTab)) {
-    throw new Error('tab_not_found');
-  }
-
-  const hasMaxRows = opts?.maxRows !== undefined;
-  const maxRows = hasMaxRows ? Math.min(Math.max(Number(opts.maxRows), 1), 100) : undefined;
-  const range = maxRows
-    ? buildRange(selectedTab, source.headerRow, maxRows)
-    : `${escapeSheetName(selectedTab)}!A${source.headerRow}:Z`;
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: source.spreadsheetId,
-    range
+  const { rawRows, rowCount, sheetName } = await readRowsForResolvedConfig(companyId, resolved, {
+    limitRows: opts?.maxRows,
+    sheetNameOverride: opts?.tab
   });
-  const rawRows = normalizeRows(response.data.values as unknown[][] | undefined);
+
   return {
-    source: { ...source, sheetName: selectedTab },
+    source: {
+      integrationType: 'shared' as const,
+      connectorKey: resolved.connectorKey,
+      profileId: resolved.ref.profileId ?? null,
+      profileName: resolved.ref.profileName ?? null,
+      spreadsheetId: resolved.spreadsheetId,
+      sheetName,
+      headerRow: resolved.headerRow,
+      mapping: resolved.mapping,
+      transformations: resolved.transformations
+    },
     rawRows,
-    rowCount: rawRows.length
+    rowCount
   };
-};
-
-const readSheetRowsDirect = async (
-  companyId: string,
-  opts: { spreadsheetId: string; tab?: string; headerRow: number; maxRows?: number; authMode: 'oauth' | 'service_account' }
-) => {
-  const spreadsheetId = opts.spreadsheetId.trim();
-  const headerRow = Number(opts.headerRow ?? 1);
-  if (!spreadsheetId) {
-    throw new Error('spreadsheet_id_missing');
-  }
-  if (!Number.isFinite(headerRow) || headerRow < 1) {
-    throw new Error('invalid_header_row');
-  }
-
-  const sheets = await getSheetsClientForCompany(opts.authMode, companyId);
-  const metadata = await sheets.spreadsheets.get({
-    spreadsheetId,
-    fields: 'sheets(properties(title))'
-  });
-  const tabs = (metadata.data.sheets ?? [])
-    .map((sheet) => sheet.properties?.title)
-    .filter((tab): tab is string => Boolean(tab));
-
-  const selectedTab = (opts.tab?.trim() || tabs[0] || '').trim();
-  if (!selectedTab) {
-    throw new Error('no_tabs_found');
-  }
-  if (!tabs.includes(selectedTab)) {
-    throw new Error('tab_not_found');
-  }
-
-  const hasMaxRows = opts.maxRows !== undefined;
-  const maxRows = hasMaxRows ? Math.min(Math.max(Number(opts.maxRows), 1), 100) : undefined;
-  const range = maxRows
-    ? buildRange(selectedTab, headerRow, maxRows)
-    : `${escapeSheetName(selectedTab)}!A${headerRow}:Z`;
-
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
-  const rawRows = normalizeRows(response.data.values as unknown[][] | undefined);
-  return {
-    source: { spreadsheetId, sheetName: selectedTab, headerRow, settingsId: null, profileId: null, mode: opts.authMode === 'oauth' ? 'oauth' : 'service_account' },
-    rawRows,
-    rowCount: rawRows.length
-  };
-};
-
-const applyMappingAndTransforms = (
-  header: string[],
-  sampleRows: string[][],
-  mapping: Record<string, string>,
-  transforms?: Record<string, unknown>
-) => {
-  const rowErrors: Array<{ rowIndex: number; errors: Array<{ col: string; message: string }> }> = [];
-  const correctedPreview = sampleRows.slice(0, 3).map((row, rowIndex) => {
-    const out: Record<string, string> = {};
-    for (const [sourceHeader, targetField] of Object.entries(mapping)) {
-      const colIndex = header.findIndex((item) => item.trim() === sourceHeader.trim());
-      if (colIndex < 0) {
-        rowErrors.push({
-          rowIndex,
-          errors: [{ col: sourceHeader, message: 'source header not found in preview header' }]
-        });
-        continue;
-      }
-      let value = String(row[colIndex] ?? '');
-      const transform = transforms?.[targetField];
-      if (transform && typeof transform === 'object') {
-        const typed = transform as Record<string, unknown>;
-        if (typed.trim === true) value = value.trim();
-        if (typed.type === 'number') {
-          const normalized = Number(value.replace(/,/g, ''));
-          if (Number.isNaN(normalized)) {
-            rowErrors.push({
-              rowIndex,
-              errors: [{ col: sourceHeader, message: 'value is not numeric' }]
-            });
-          } else {
-            value = String(normalized);
-          }
-        }
-      }
-      out[targetField] = value;
-    }
-    return out;
-  });
-
-  return { rowErrors, correctedPreview };
 };
 
 export const importRowsForCompany = async (
@@ -644,6 +633,27 @@ export const importRowsForCompany = async (
   }
 
   const normalizedRows = validatedRows.map((row) => (row as { index: number; data: PosDailySummaryInput }).data);
+  return upsertPosRowsForCompany(companyId, normalizedRows, importSource, opts);
+};
+
+const upsertPosRowsForCompany = async (
+  companyId: string,
+  normalizedRows: PosDailySummaryInput[],
+  importSource: 'file' | 'google_sheets' | 'manual',
+  opts?: {
+    importBindingKey?: string | null;
+    derivedFields?: string[];
+    sourceRef?: {
+      mode?: string | null;
+      profileName?: string | null;
+      spreadsheetId?: string | null;
+      sheetName?: string | null;
+      sourceId?: string | null;
+      importJobId?: string | null;
+      reason?: string | null;
+    };
+  }
+) => {
   if (normalizedRows.length === 0) {
     return {
       ok: false as const,
@@ -695,6 +705,47 @@ export const importRowsForCompany = async (
   };
 };
 
+export const importEvaluatedRowsForCompany = async (
+  companyId: string,
+  rows: PosDailySummaryInput[],
+  importSource: 'file' | 'google_sheets' | 'manual' = 'manual',
+  opts?: {
+    importBindingKey?: string | null;
+    derivedFields?: string[];
+    sourceRef?: {
+      mode?: string | null;
+      profileName?: string | null;
+      spreadsheetId?: string | null;
+      sheetName?: string | null;
+      sourceId?: string | null;
+      importJobId?: string | null;
+      reason?: string | null;
+    };
+  }
+) => {
+  const validatedRows = rows.map((row, index) => {
+    const parsed = posDailySummarySchema.safeParse(row);
+    if (!parsed.success) {
+      return { index, error: parsed.error.flatten() };
+    }
+    return { index, data: parsed.data };
+  });
+
+  const validationError = validatedRows.find((row) => 'error' in row);
+  if (validationError && 'error' in validationError) {
+    return {
+      ok: false as const,
+      error: {
+        rowIndex: validationError.index,
+        issues: validationError.error
+      }
+    };
+  }
+
+  const normalizedRows = validatedRows.map((row) => (row as { index: number; data: PosDailySummaryInput }).data);
+  return upsertPosRowsForCompany(companyId, normalizedRows, importSource, opts);
+};
+
 export const importPosCsv = async (req: Request, res: Response) => {
   if (!req.companyId) {
     return fail(res, 'Company onboarding required', 403);
@@ -709,7 +760,7 @@ export const importPosCsv = async (req: Request, res: Response) => {
     sourceRef: { mode: 'file', reason: 'CSV file import' }
   });
   if (!result.ok) {
-    return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
+    return fail(res, ('message' in result.error ? result.error.message : 'Validation failed'), 422, result.error);
   }
 
   await IntegrationSettingsModel.updateOne(
@@ -743,7 +794,7 @@ export const importPosFile = async (req: Request, res: Response) => {
     sourceRef: { mode: 'file', reason: 'File import' }
   });
   if (!result.ok) {
-    return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
+    return fail(res, ('message' in result.error ? result.error.message : 'Validation failed'), 422, result.error);
   }
 
   await IntegrationSettingsModel.updateOne(
@@ -776,7 +827,7 @@ export const importPosRows = async (req: Request, res: Response) => {
     sourceRef: { mode: 'file', reason: 'Rows import' }
   });
   if (!result.ok) {
-    return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
+    return fail(res, ('message' in result.error ? result.error.message : 'Validation failed'), 422, result.error);
   }
 
   return ok(res, result.data);
@@ -794,61 +845,102 @@ export const previewPosImportFromSharedSheet = async (req: Request, res: Respons
 
   try {
     const spreadsheetIdOverride = parsed.data.spreadsheetId?.trim() ?? '';
-    const headerRow = Number(parsed.data.headerRow ?? 1);
-    if (spreadsheetIdOverride) {
-      const { source: sharedSource, rawRows, rowCount } = await readSheetRowsDirect(req.companyId, {
-        spreadsheetId: spreadsheetIdOverride,
-        tab: parsed.data.tab,
-        headerRow,
-        authMode: parsed.data.source === 'oauth' ? 'oauth' : 'service_account',
-        maxRows: parsed.data.maxRows
-      });
+    const sheetName = String(parsed.data.sheetName ?? parsed.data.tab ?? 'Sheet1').trim() || 'Sheet1';
+    const integrationType =
+      parsed.data.integrationType ?? resolveLegacyIntegrationType(parsed.data.source) ?? 'shared';
 
-      const header = rawRows[0] ?? [];
-      const sampleRows = rawRows.slice(1, 11);
-      const suggestions = suggestMappings(header, sampleRows, TARGET_FIELDS).map((entry, index) => ({
-        col: String.fromCharCode(65 + index),
-        header: entry.sourceHeader,
-        suggestion: entry.targetField,
-        score: entry.score
-      }));
+    if (spreadsheetIdOverride) {
+      const sample =
+        integrationType === 'oauth'
+          ? await readSheetSampleOAuth(
+              req.companyId,
+              spreadsheetIdOverride,
+              sheetName,
+              Number(parsed.data.headerRow ?? 1),
+              parsed.data.maxRows
+            )
+          : await readSheetSampleShared(
+              req.companyId,
+              spreadsheetIdOverride,
+              sheetName,
+              Number(parsed.data.headerRow ?? 1),
+              parsed.data.maxRows
+            );
+      const sampleRowsMatrix = sample.rows.map((entry) =>
+        sample.columns.map((column) => String(entry[column] ?? ''))
+      );
+      const suggestions = suggestMappings(sample.columns, sampleRowsMatrix, TARGET_FIELDS).map(
+        (entry, index) => ({
+          col: String.fromCharCode(65 + index),
+          header: entry.sourceHeader,
+          suggestion: entry.targetField,
+          score: entry.score
+        })
+      );
 
       return ok(res, {
-        spreadsheetId: sharedSource.spreadsheetId,
-        sheetName: sharedSource.sheetName,
-        headerRow: sharedSource.headerRow,
-        header,
-        sampleRows,
-        rowCount,
+        integrationType,
+        connectorKey: parsed.data.connectorKey ?? DEFAULT_CONNECTOR_KEY,
+        spreadsheetId: spreadsheetIdOverride,
+        sheetName,
+        detectedHeaderRow: sample.headerRow,
+        columns: sample.columns,
+        sampleRows: sampleRowsMatrix.slice(0, 10),
+        rowCount: sample.rows.length,
         suggestions
       });
     }
 
-    const { source, rawRows, rowCount } = await readSharedSheetRows(req.companyId, {
-      tab: parsed.data.tab,
-      maxRows: parsed.data.maxRows
+    const resolved = await resolveConfigFromRequest(req.companyId, {
+      integrationType: parsed.data.integrationType,
+      sourceId: parsed.data.sourceId,
+      profileId: parsed.data.profileId,
+      connectorKey: parsed.data.connectorKey,
+      source: parsed.data.source
     });
-    const header = rawRows[0] ?? [];
-    const sampleRows = rawRows.slice(1, 11);
-    const suggestions = suggestMappings(header, sampleRows, TARGET_FIELDS).map((entry, index) => ({
-      col: String.fromCharCode(65 + index),
-      header: entry.sourceHeader,
-      suggestion: entry.targetField,
-      score: entry.score
-    }));
+    const sample =
+      resolved.integrationType === 'oauth'
+        ? await readSheetSampleOAuth(
+            req.companyId,
+            resolved.spreadsheetId,
+            String(parsed.data.sheetName ?? parsed.data.tab ?? resolved.sheetName),
+            resolved.headerRow,
+            parsed.data.maxRows
+          )
+        : await readSheetSampleShared(
+            req.companyId,
+            resolved.spreadsheetId,
+            String(parsed.data.sheetName ?? parsed.data.tab ?? resolved.sheetName),
+            resolved.headerRow,
+            parsed.data.maxRows
+          );
+
+    const sampleRowsMatrix = sample.rows.map((entry) =>
+      sample.columns.map((column) => String(entry[column] ?? ''))
+    );
+    const suggestions = suggestMappings(sample.columns, sampleRowsMatrix, TARGET_FIELDS).map(
+      (entry, index) => ({
+        col: String.fromCharCode(65 + index),
+        header: entry.sourceHeader,
+        suggestion: entry.targetField,
+        score: entry.score
+      })
+    );
 
     return ok(res, {
-      spreadsheetId: source.spreadsheetId,
-      sheetName: source.sheetName,
-      headerRow: source.headerRow,
-      header,
-      sampleRows,
-      rowCount,
+      integrationType: resolved.integrationType,
+      connectorKey: resolved.connectorKey,
+      spreadsheetId: resolved.spreadsheetId,
+      sheetName: resolved.sheetName,
+      detectedHeaderRow: sample.headerRow,
+      columns: sample.columns,
+      sampleRows: sampleRowsMatrix.slice(0, 10),
+      rowCount: sample.rows.length,
       suggestions
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Shared Sheets preview failed';
-    const statusCode = toSheetsErrorStatus(message);
+    const message = toSheetsErrorMessage(error);
+    const statusCode = toSheetsErrorStatus(error);
     return fail(res, message, statusCode);
   }
 };
@@ -862,68 +954,25 @@ export const matchPosImportMapping = async (req: Request, res: Response) => {
   if (!parsed.success) {
     return fail(res, 'Validation failed', 422, parsed.error.flatten());
   }
-  const duplicateTargets = getDuplicateTargets(parsed.data.mapping);
-  if (duplicateTargets.length > 0) {
-    return fail(
-      res,
-      `One-to-one mapping required. Duplicate target fields: ${duplicateTargets.join(', ')}`,
-      400
-    );
-  }
 
-  try {
-    const spreadsheetIdOverride = parsed.data.spreadsheetId?.trim() ?? '';
-    const headerRowOverride = parsed.data.headerRow;
-    if (spreadsheetIdOverride) {
-      const { source, rawRows } = await readSheetRowsDirect(req.companyId, {
-        spreadsheetId: spreadsheetIdOverride,
-        tab: parsed.data.tab,
-        headerRow: Number(headerRowOverride ?? 1),
-        authMode: 'oauth',
-        maxRows: 20
-      });
-      const header = rawRows[0] ?? [];
-      const sampleRows = rawRows.slice(1, 11);
-      const { rowErrors, correctedPreview } = applyMappingAndTransforms(
-        header,
-        sampleRows,
-        parsed.data.mapping,
-        parsed.data.transforms
-      );
+  const oneToOne = validateColumnMapOneToOne(parsed.data.mapping);
+  const compatibility = computeCompatibilityForConnector({
+    connectorKey: parsed.data.connectorKey,
+    columns: parsed.data.columns,
+    mapping: parsed.data.mapping
+  });
+  const derivedValidation = validateDerivedConfiguration({
+    headers: parsed.data.columns,
+    mapping: parsed.data.mapping,
+    transformations: parsed.data.transformations
+  });
 
-      return ok(res, {
-        spreadsheetId: source.spreadsheetId,
-        sheetName: source.sheetName,
-        valid: rowErrors.length === 0,
-        rowErrors,
-        correctedPreview
-      });
-    }
-
-    const { source, rawRows } = await readSharedSheetRows(req.companyId, {
-      tab: parsed.data.tab,
-      maxRows: 20
-    });
-    const header = rawRows[0] ?? [];
-    const sampleRows = rawRows.slice(1, 11);
-    const { rowErrors, correctedPreview } = applyMappingAndTransforms(
-      header,
-      sampleRows,
-      parsed.data.mapping,
-      parsed.data.transforms
-    );
-
-    return ok(res, {
-      spreadsheetId: source.spreadsheetId,
-      sheetName: source.sheetName,
-      valid: rowErrors.length === 0,
-      rowErrors,
-      correctedPreview
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Shared Sheets match failed';
-    return fail(res, message, toSheetsErrorStatus(message));
-  }
+  return ok(res, {
+    connectorKey: parsed.data.connectorKey,
+    valid: oneToOne.ok && compatibility.status !== 'error' && derivedValidation.ok,
+    compatibility,
+    derivedValidation
+  });
 };
 
 export const commitPosImportFromSharedSheet = async (req: Request, res: Response) => {
@@ -937,207 +986,111 @@ export const commitPosImportFromSharedSheet = async (req: Request, res: Response
   }
 
   try {
-    const selectedTab = (parsedCommit.data.options?.tab as string) || undefined;
-    const selectedSpreadsheetId = String(parsedCommit.data.options?.spreadsheetId ?? '').trim() || undefined;
-    const selectedHeaderRowRaw = parsedCommit.data.options?.headerRow;
-    const selectedHeaderRow = selectedHeaderRowRaw !== undefined ? Number(selectedHeaderRowRaw) : undefined;
+    if (parsedCommit.data.connectorKey !== 'pos_daily') {
+      return fail(res, 'Unsupported connector', 400);
+    }
 
-    const readResult = selectedSpreadsheetId
-      ? await readSheetRowsDirect(req.companyId, {
-          spreadsheetId: selectedSpreadsheetId,
-          tab: selectedTab,
-          headerRow: Number(selectedHeaderRow ?? 1),
-          authMode: 'oauth'
-        })
-      : await readSharedSheetRows(req.companyId, { tab: selectedTab });
+    const resolved =
+      parsedCommit.data.integrationType != null
+        ? await resolveSheetsConfigByRef(req.companyId, {
+            integrationType: parsedCommit.data.integrationType,
+            sourceId: parsedCommit.data.sourceId,
+            profileId: parsedCommit.data.profileId,
+            connectorKey: parsedCommit.data.connectorKey
+          })
+        : await resolveActiveSheetsConfig(req.companyId, parsedCommit.data.connectorKey);
 
-    const { source, rawRows } = readResult;
-    const parsedRows = parseRowsWithHeaderRow(rawRows, source.headerRow);
+    const { rawRows } = await readRowsForResolvedConfig(req.companyId, resolved);
+    const columns = rawRows[Math.max(0, resolved.headerRow - 1)] ?? [];
+    const compatibility = computeCompatibilityForConnector({
+      connectorKey: resolved.connectorKey,
+      columns,
+      mapping: resolved.mapping
+    });
+    if (compatibility.status === 'error') {
+      return fail(res, 'Connector mapping is not compatible', 400, compatibility);
+    }
+    const derivedValidation = validateDerivedConfiguration({
+      headers: columns,
+      mapping: resolved.mapping,
+      transformations: resolved.transformations
+    });
+    if (!derivedValidation.ok) {
+      return fail(res, 'Derived mapping configuration is invalid', 400, {
+        compatibility,
+        derivedValidation
+      });
+    }
+
+    const parsedRows = parseRowsWithHeaderRow(rawRows, resolved.headerRow);
     if (parsedRows.length === 0) {
-      return fail(res, 'No data rows found in shared sheet', 400);
+      return fail(res, 'No data rows found in configured sheet', 400);
     }
 
-    let effectiveMapping = parsedCommit.data.mapping;
-    let effectiveTransforms = parsedCommit.data.transforms ?? {};
-
-    const resolveSavedMappingAndTransforms = async () => {
-      const settings = await IntegrationSettingsModel.findOne({ companyId: req.companyId }).lean();
-      const googleSheets = (settings?.googleSheets ?? {}) as Record<string, unknown>;
-      ensureSharedSheets(googleSheets);
-
-      const requestedMode = String(parsedCommit.data.options?.mode ?? '').trim();
-      const requestedProfileId = String(parsedCommit.data.options?.profileId ?? '').trim();
-      const requestedProfileName = String(parsedCommit.data.options?.profileName ?? '').trim().toUpperCase();
-      const requestedSourceId = String(parsedCommit.data.options?.sourceId ?? '').trim();
-
-      if (requestedMode === 'oauth' || selectedSpreadsheetId) {
-        const sources = ((googleSheets as any).sources ?? []) as Array<Record<string, unknown>>;
-        const source =
-          (requestedSourceId
-            ? sources.find((entry) => String(entry.sourceId ?? '') === requestedSourceId)
-            : null)
-          ?? (requestedProfileName
-            ? sources.find((entry) => String(entry.name ?? '').trim().toUpperCase() === requestedProfileName)
-            : null)
-          ?? sources.find((entry) => String(entry.spreadsheetId ?? '').trim() === (selectedSpreadsheetId ?? ''))
-          ?? sources.find((entry) => entry.active === true)
-          ?? sources[0]
-          ?? null;
-        return {
-          mapping: normalizeStringRecord(source?.mapping),
-          transforms: (source?.transformations as Record<string, unknown> | undefined) ?? {},
-          profileName: String(source?.name ?? (requestedProfileName || 'POS DATA SHEET'))
-        };
+    const evaluatedRows: PosDailySummaryInput[] = [];
+    for (let index = 0; index < parsedRows.length; index += 1) {
+      const evaluated = evaluateConfiguredPosRow({
+        row: parsedRows[index],
+        mapping: resolved.mapping,
+        transformations: resolved.transformations
+      });
+      if (!evaluated.ok) {
+        const sheetRow = resolved.headerRow + index + 1;
+        return fail(res, `Row ${index + 1} (sheet row ${sheetRow}): ${evaluated.reason}`, 422, {
+          rowIndex: index,
+          sheetRow,
+          reason: evaluated.reason,
+          ...(evaluated.details ? { details: evaluated.details } : {})
+        });
       }
-
-      const profiles = ((googleSheets as any).sharedSheets ?? []) as Array<Record<string, unknown>>;
-      const profile =
-        (requestedProfileId
-          ? profiles.find((entry) => String(entry.profileId ?? '') === requestedProfileId)
-          : null)
-        ?? (requestedProfileName
-          ? profiles.find((entry) => String(entry.name ?? '').trim().toUpperCase() === requestedProfileName)
-          : null)
-        ?? (source.profileId
-          ? profiles.find((entry) => String(entry.profileId ?? '') === String(source.profileId))
-          : null)
-        ?? pickDefaultSharedSheet(googleSheets);
-
-      const columnsMap = normalizeStringRecord((profile as any)?.columnsMap);
-      const lastMap = normalizeStringRecord((profile as any)?.lastMapping?.columnsMap);
-      return {
-        mapping: !isEmptyRecord(columnsMap) ? columnsMap : lastMap,
-        transforms: ((profile as any)?.lastMapping?.transformations as Record<string, unknown> | undefined) ?? {},
-        profileName: String((profile as any)?.name ?? 'POS DATA SHEET')
-      };
-    };
-
-    let resolvedProfileName =
-      String(parsedCommit.data.options?.profileName ?? '').trim()
-      || (('profileName' in source && typeof source.profileName === 'string')
-        ? String(source.profileName).trim()
-        : '')
-      || 'POS DATA SHEET';
-
-    if (isEmptyRecord(effectiveMapping) || isEmptyRecord(effectiveTransforms)) {
-      const fallback = await resolveSavedMappingAndTransforms();
-      if (isEmptyRecord(effectiveMapping)) {
-        effectiveMapping = fallback.mapping;
-      }
-      if (isEmptyRecord(effectiveTransforms)) {
-        effectiveTransforms = fallback.transforms;
-      }
-      resolvedProfileName = resolvedProfileName || fallback.profileName;
+      evaluatedRows.push(evaluated.row);
     }
+    const refId = resolved.integrationType === 'oauth' ? resolved.ref.sourceId : resolved.ref.profileId;
+    const importBindingKey = `sheets:${resolved.integrationType}:${String(refId ?? '')}:${resolved.connectorKey}:${resolved.spreadsheetId}:${resolved.sheetName}`;
+    const derivedFields = (
+      Object.entries(derivedValidation.derivedConfig)
+        .map(([key]) => key)
+    );
 
-    if (isEmptyRecord(effectiveMapping)) {
-      return fail(res, 'No saved field mapping found. Map columns first, then import.', 400);
-    }
-    const duplicateTargets = getDuplicateTargets(effectiveMapping);
-    if (duplicateTargets.length > 0) {
-      return fail(
-        res,
-        `One-to-one mapping required. Duplicate target fields: ${duplicateTargets.join(', ')}`,
-        400
-      );
-    }
-
-    const mappedRows = parsedRows.map((row) => {
-      const out: Record<string, string | undefined> = {};
-      for (const [sourceHeader, targetField] of Object.entries(effectiveMapping)) {
-        if (!targetField) continue;
-        const normalizedTargetField = targetField.startsWith('custom:') ? targetField.replace(/^custom:/, '').trim() : targetField;
-        if (!normalizedTargetField) continue;
-        const raw = row[sourceHeader];
-        if (raw === undefined) continue;
-        let value = String((raw ?? '')).trim();
-        out[normalizedTargetField] = value;
-      }
-      return out;
-    });
-
-    const selectedProfileName = resolvedProfileName || 'POS DATA SHEET';
-    const selectedMode = selectedSpreadsheetId || String(parsedCommit.data.options?.mode ?? '').trim() === 'oauth'
-      ? 'oauth'
-      : 'service_account';
-    const importBindingKey = buildSheetsBindingKey({
-      mode: selectedMode,
-      profileName: selectedProfileName,
-      spreadsheetId: source.spreadsheetId,
-      sheetName: source.sheetName
-    });
-    const derivedFields = Array.isArray((effectiveTransforms as Record<string, unknown>).__derivedFields)
-      ? ((effectiveTransforms as Record<string, unknown>).__derivedFields as unknown[])
-          .map((value) => String(value))
-          .filter(Boolean)
-      : undefined;
-
-    const result = await importRowsForCompany(req.companyId, mappedRows, 'google_sheets', {
+    const result = await importEvaluatedRowsForCompany(req.companyId, evaluatedRows, 'google_sheets', {
       importBindingKey,
       derivedFields,
       sourceRef: {
-        mode: selectedMode,
-        profileName: selectedProfileName,
-        spreadsheetId: source.spreadsheetId,
-        sheetName: source.sheetName,
-        sourceId: String(parsedCommit.data.options?.sourceId ?? '') || null,
-        reason: 'Mapped sheet import'
+        mode: resolved.integrationType,
+        profileName: resolved.ref.profileName ?? resolved.ref.sourceName ?? null,
+        spreadsheetId: resolved.spreadsheetId,
+        sheetName: resolved.sheetName,
+        sourceId: String(refId ?? ''),
+        reason: `Connector import (${resolved.connectorKey})`
       }
     });
     if (!result.ok) {
-      return fail(res, result.error.message ?? 'Validation failed', 422, result.error);
+      return fail(res, ('message' in result.error ? result.error.message : 'Validation failed'), 422, result.error);
     }
 
-    const settingsIdToUpdate = source.settingsId
-      ? source.settingsId
-      : (await IntegrationSettingsModel.findOne({ companyId: req.companyId }).select('_id').lean())?._id?.toString() ?? null;
-
-    if (settingsIdToUpdate) {
-      const settingsDoc = await IntegrationSettingsModel.findById(settingsIdToUpdate);
-      if (settingsDoc?.googleSheets) {
-        const googleSheets = settingsDoc.googleSheets as unknown as Record<string, unknown>;
-        ensureSharedSheets(googleSheets);
-        upsertSharedSheet(googleSheets, {
-          profileId: (source.profileId as string | null) ?? undefined,
-          profileName: selectedSpreadsheetId ? 'POS Data SHEET' : undefined,
-          spreadsheetId: selectedSpreadsheetId ?? source.spreadsheetId,
-          sheetName: source.sheetName,
-          headerRow: source.headerRow,
-          enabled: true,
-          columnsMap: effectiveMapping,
-          lastImportAt: new Date(),
-          lastMapping: {
-            columnsMap: effectiveMapping,
-            transformations: effectiveTransforms,
-            createdAt: new Date(),
-            createdBy: req.user.id
-          }
-        });
-        settingsDoc.googleSheets.connected = true;
-        if (selectedMode === 'oauth') {
-          const targetName = String(parsedCommit.data.options?.profileName ?? '').trim().toUpperCase();
-          const sourceByName = settingsDoc.googleSheets.sources.find(
-            (entry: any) => String(entry.name ?? '').trim().toUpperCase() === targetName
-          );
-          if (sourceByName) {
-            sourceByName.transformations = effectiveTransforms as any;
-          }
-        }
-        settingsDoc.googleSheets.updatedAt = new Date();
-        settingsDoc.lastImportSource = 'google_sheets';
-        settingsDoc.lastImportAt = new Date();
-        await settingsDoc.save();
-      }
-    }
+    const importedAt = new Date();
+    await markConnectorImported({
+      companyId: req.companyId,
+      integrationType: resolved.integrationType,
+      sourceId: resolved.ref.sourceId,
+      profileId: resolved.ref.profileId,
+      connectorKey: resolved.connectorKey,
+      importedAt
+    });
 
     const importJob = await ImportJobModel.create({
       companyId: req.companyId,
       createdBy: req.user.id,
-      source: source.mode === 'oauth' ? 'oauth' : 'service',
+      source: resolved.integrationType === 'oauth' ? 'oauth' : 'service',
       status: 'processing',
-      mapping: effectiveMapping,
-      transforms: effectiveTransforms,
-      options: parsedCommit.data.options ?? {}
+      mapping: resolved.mapping,
+      transforms: resolved.transformations,
+      options: {
+        connectorKey: resolved.connectorKey,
+        integrationType: resolved.integrationType,
+        sourceId: resolved.ref.sourceId,
+        profileId: resolved.ref.profileId
+      }
     });
 
     await ImportJobModel.updateOne(
@@ -1149,13 +1102,16 @@ export const commitPosImportFromSharedSheet = async (req: Request, res: Response
       jobId: importJob._id.toString(),
       result: {
         ...result.data,
-        spreadsheetId: source.spreadsheetId,
-        sheetName: source.sheetName
-      }
+        integrationType: resolved.integrationType,
+        connectorKey: resolved.connectorKey,
+        spreadsheetId: resolved.spreadsheetId,
+        sheetName: resolved.sheetName
+      },
+      ref: resolved.ref
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Shared Sheets commit failed';
-    return fail(res, message, toSheetsErrorStatus(message));
+    const message = toSheetsErrorMessage(error);
+    return fail(res, message, toSheetsErrorStatus(error));
   }
 };
 
@@ -1180,6 +1136,97 @@ export const listPosDaily = async (req: Request, res: Response) => {
   return ok(res, rows);
 };
 
+export const getPosTrend = async (req: Request, res: Response) => {
+  if (!req.companyId) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  const parsed = posTrendQuerySchema.safeParse(req.query ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  const bounds = resolveDateRange(parsed.data);
+  if (!bounds) {
+    return fail(res, 'Invalid start/end date range', 400);
+  }
+
+  const rows = await POSDailySummaryModel.find({
+    companyId: req.companyId,
+    date: { $gte: bounds.start, $lte: bounds.end }
+  })
+    .select('date totalSales creditCard cash gas lottery')
+    .sort({ date: 1 });
+
+  if (parsed.data.granularity === 'weekly') {
+    const weekly = new Map<
+      string,
+      {
+        label: string;
+        range: string;
+        sortKey: number;
+        totalSales: number;
+        creditCard: number;
+        cash: number;
+        gas: number;
+        lottery: number;
+      }
+    >();
+
+    for (const row of rows) {
+      const date = startOfUtcDay(row.date);
+      const { week, year } = getIsoWeekUtc(date);
+      const monday = getMondayUtc(date);
+      const sunday = new Date(monday);
+      sunday.setUTCDate(monday.getUTCDate() + 6);
+      const key = `${year}-${String(week).padStart(2, '0')}`;
+      const bucket = weekly.get(key) ?? {
+        label: `Week ${week} ${year}`,
+        range: `${monday.toISOString().slice(0, 10)} to ${sunday.toISOString().slice(0, 10)}`,
+        sortKey: monday.getTime(),
+        totalSales: 0,
+        creditCard: 0,
+        cash: 0,
+        gas: 0,
+        lottery: 0
+      };
+      bucket.totalSales += Number(row.totalSales ?? 0);
+      bucket.creditCard += Number(row.creditCard ?? 0);
+      bucket.cash += Number(row.cash ?? 0);
+      bucket.gas += Number(row.gas ?? 0);
+      bucket.lottery += Number(row.lottery ?? 0);
+      weekly.set(key, bucket);
+    }
+
+    const data = Array.from(weekly.values())
+      .sort((a, b) => a.sortKey - b.sortKey)
+      .map(({ sortKey: _sortKey, ...entry }) => entry);
+
+    return ok(res, {
+      granularity: 'weekly',
+      data,
+      start: bounds.startIso,
+      end: bounds.endIso
+    });
+  }
+
+  const data = rows.map((row) => ({
+    x: row.date.toISOString(),
+    totalSales: Number(row.totalSales ?? 0),
+    creditCard: Number(row.creditCard ?? 0),
+    cash: Number(row.cash ?? 0),
+    gas: Number(row.gas ?? 0),
+    lottery: Number(row.lottery ?? 0)
+  }));
+
+  return ok(res, {
+    granularity: 'daily',
+    data,
+    start: bounds.startIso,
+    end: bounds.endIso
+  });
+};
+
 export const listPosDailyPaged = async (req: Request, res: Response) => {
   if (!req.companyId) {
     return fail(res, 'Company onboarding required', 403);
@@ -1201,6 +1248,10 @@ export const listPosDailyPaged = async (req: Request, res: Response) => {
     companyId: req.companyId,
     date: { $gte: bounds.start, $lte: bounds.end }
   };
+  const aggregateFilter = {
+    ...filter,
+    companyId: toAggregateCompanyId(req.companyId)
+  };
 
   const [data, totalCount, totalsAgg] = await Promise.all([
     POSDailySummaryModel.find(filter).sort({ date: -1 }).skip(skip).limit(limit),
@@ -1218,7 +1269,7 @@ export const listPosDailyPaged = async (req: Request, res: Response) => {
       lowTax: number;
       saleTax: number;
     }>([
-      { $match: filter },
+      { $match: aggregateFilter },
       {
         $group: {
           _id: null,
@@ -1282,6 +1333,10 @@ export const getPosOverview = async (req: Request, res: Response) => {
     companyId: req.companyId,
     date: { $gte: bounds.start, $lte: bounds.end }
   };
+  const aggregateFilter = {
+    ...filter,
+    companyId: toAggregateCompanyId(req.companyId)
+  };
 
   const [totalsAgg, orderedRows] = await Promise.all([
     POSDailySummaryModel.aggregate<{
@@ -1296,7 +1351,7 @@ export const getPosOverview = async (req: Request, res: Response) => {
       cashPayout: number;
       count: number;
     }>([
-      { $match: filter },
+      { $match: aggregateFilter },
       {
         $group: {
           _id: null,
@@ -1339,7 +1394,7 @@ export const getPosOverview = async (req: Request, res: Response) => {
   let sparkline7: MovingAveragePoint[] = [];
   try {
     const windowRows = await POSDailySummaryModel.aggregate<{ x: Date; y: number }>([
-      { $match: filter },
+      { $match: aggregateFilter },
       { $sort: { date: 1 } },
       {
         $setWindowFields: {

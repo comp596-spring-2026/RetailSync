@@ -50,6 +50,9 @@ const syncScheduleSchema = z.object({
 const toSheetsError = (error: unknown) => {
   const message = error instanceof Error ? error.message : 'Google Sheets request failed';
   const normalized = message.toLowerCase();
+  if (normalized.includes('tab_not_found') || normalized.includes('unable to parse range')) {
+    return { message: 'tab_not_found', statusCode: 404, shareStatus: 'unknown' as const };
+  }
   if (normalized.includes('permission') || normalized.includes('forbidden') || normalized.includes('403')) {
     return { message: 'not_shared', statusCode: 403, shareStatus: 'no_permission' as const };
   }
@@ -222,6 +225,10 @@ export const listSpreadsheetTabs = async (req: Request, res: Response) => {
     updatedAt: new Date()
   }) as any;
   settings.googleSheets = googleSheets;
+  const legacySharedConfigSpreadsheetId =
+    typeof googleSheets.sharedConfig?.spreadsheetId === 'string'
+      ? googleSheets.sharedConfig.spreadsheetId.trim()
+      : '';
   ensureSharedSheets(googleSheets);
   const profileId = typeof (req.body as any)?.profileId === 'string' ? (req.body as any).profileId.trim() : '';
   const bodyAuthMode = typeof (req.body as any)?.authMode === 'string'
@@ -230,13 +237,24 @@ export const listSpreadsheetTabs = async (req: Request, res: Response) => {
   const requestedAuthMode = bodyAuthMode === 'oauth' || bodyAuthMode === 'service_account'
     ? bodyAuthMode
     : null;
+  const sharedProfiles = Array.isArray(googleSheets.sharedSheets) ? (googleSheets.sharedSheets as any[]) : [];
+  const defaultProfile = pickDefaultSharedSheet(googleSheets);
   const activeProfile = profileId
-    ? (googleSheets.sharedSheets as any[]).find((profile) => profile.profileId === profileId) ?? null
-    : pickDefaultSharedSheet(googleSheets);
+    ? sharedProfiles.find((profile) => profile.profileId === profileId) ?? defaultProfile
+    : defaultProfile;
+  const fallbackProfileWithSpreadsheet = sharedProfiles.find(
+    (profile) => typeof profile?.spreadsheetId === 'string' && profile.spreadsheetId.trim().length > 0
+  );
+  const fallbackSharedConfigSpreadsheetId = legacySharedConfigSpreadsheetId;
   const bodyId = typeof (req.body as any)?.spreadsheetId === 'string' ? (req.body as any).spreadsheetId.trim() : '';
   const queryId = typeof req.query?.spreadsheetId === 'string' ? req.query.spreadsheetId.trim() : '';
   const overrideId = bodyId || queryId;
-  const spreadsheetId = overrideId || activeProfile?.spreadsheetId?.trim() || '';
+  const spreadsheetId =
+    overrideId ||
+    activeProfile?.spreadsheetId?.trim() ||
+    fallbackSharedConfigSpreadsheetId ||
+    fallbackProfileWithSpreadsheet?.spreadsheetId?.trim() ||
+    '';
   if (!spreadsheetId) {
     return fail(res, 'No spreadsheet configured', 400);
   }
@@ -448,6 +466,29 @@ export const deleteGoogleSheetsSourceBinding = async (req: Request, res: Respons
     googleSheets.syncSchedule.enabled = false;
   }
 
+  // Clear connector-first canonical config as well.
+  googleSheets.activeIntegration = null;
+  googleSheets.oauth = {
+    ...(googleSheets.oauth ?? {}),
+    enabled: false,
+    connectionStatus: 'not_connected',
+    activeSourceId: null,
+    activeConnectorKey: 'pos_daily',
+    sources: [],
+    lastDebugResult: null,
+    lastImportAt: null
+  };
+  googleSheets.shared = {
+    ...(googleSheets.shared ?? {}),
+    enabled: false,
+    activeProfileId: null,
+    activeConnectorKey: 'pos_daily',
+    profiles: [],
+    lastDebugResult: null,
+    lastScheduledSyncAt: null,
+    lastImportAt: null
+  };
+
   let deletedRows = 0;
   if (parsed.data.deleteType === 'hard') {
     const deleteResult = await POSDailySummaryModel.deleteMany({
@@ -475,28 +516,66 @@ export const deleteGoogleSheetsSourceBinding = async (req: Request, res: Respons
 
 /** List spreadsheets shared with the service account (for Shared Sheet flow). */
 export const listSharedWithServiceAccountSpreadsheets = async (req: Request, res: Response) => {
-  if (!req.user?.companyId) {
+  const companyId = req.user?.companyId;
+  const userId = req.user?.id;
+  if (!companyId || !userId) {
     return fail(res, 'Company onboarding required', 403);
   }
 
   try {
-    const drive = getDriveClientForServiceAccount();
-    const q = "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
-    const response = await drive.files.list({
-      q,
-      orderBy: 'modifiedTime desc',
-      pageSize: 100,
-      fields: 'files(id,name,mimeType,modifiedTime)'
-    });
+    const settings = await getOrCreateSettings(companyId, userId);
+    const googleSheets = (settings.googleSheets ?? {
+      sharedSheets: [],
+      sharedConfig: { spreadsheetId: null }
+    }) as any;
+    ensureSharedSheets(googleSheets);
 
-    const files = (response.data.files ?? [])
-      .filter((f) => !!f.id && !!f.name && f.mimeType === 'application/vnd.google-apps.spreadsheet')
-      .map((f) => ({
-        id: f.id as string,
-        name: f.name as string,
-        mimeType: f.mimeType ?? null,
-        modifiedTime: f.modifiedTime ?? null
-      }));
+    const configuredIds = new Set<string>();
+    for (const profile of Array.isArray(googleSheets.sharedSheets) ? googleSheets.sharedSheets : []) {
+      const id = typeof profile?.spreadsheetId === 'string' ? profile.spreadsheetId.trim() : '';
+      if (id) configuredIds.add(id);
+    }
+    const legacyId =
+      typeof googleSheets.sharedConfig?.spreadsheetId === 'string'
+        ? googleSheets.sharedConfig.spreadsheetId.trim()
+        : '';
+    if (legacyId) configuredIds.add(legacyId);
+
+    if (configuredIds.size === 0) {
+      return ok(res, { files: [] });
+    }
+
+    const drive = getDriveClientForServiceAccount();
+    const files = (
+      await Promise.all(
+        Array.from(configuredIds).map(async (fileId) => {
+          try {
+            const response = await drive.files.get({
+              fileId,
+              supportsAllDrives: true,
+              fields: 'id,name,mimeType,modifiedTime'
+            });
+            const file = response.data;
+            if (!file?.id || !file?.name || file.mimeType !== 'application/vnd.google-apps.spreadsheet') {
+              return null;
+            }
+            return {
+              id: file.id as string,
+              name: file.name as string,
+              mimeType: file.mimeType ?? null,
+              modifiedTime: file.modifiedTime ?? null
+            };
+          } catch {
+            return null;
+          }
+        })
+      )
+    ).filter(Boolean) as Array<{
+      id: string;
+      name: string;
+      mimeType: string | null;
+      modifiedTime: string | null;
+    }>;
 
     return ok(res, { files });
   } catch (error) {
@@ -532,33 +611,78 @@ export const verifySharedSheetsConfig = async (req: Request, res: Response) => {
     updatedAt: new Date()
   }) as any;
   settings.googleSheets = googleSheets;
+  const legacySharedConfigSpreadsheetId =
+    typeof googleSheets.sharedConfig?.spreadsheetId === 'string'
+      ? googleSheets.sharedConfig.spreadsheetId.trim()
+      : '';
+  const legacySharedConfigSheetName =
+    typeof googleSheets.sharedConfig?.sheetName === 'string'
+      ? googleSheets.sharedConfig.sheetName.trim()
+      : '';
+  const legacySharedConfigHeaderRow = Number(googleSheets.sharedConfig?.headerRow ?? 1);
   ensureSharedSheets(googleSheets);
   const bodyProfileId = typeof (req.body as any)?.profileId === 'string' ? (req.body as any).profileId.trim() : '';
-  const targetProfile = bodyProfileId
-    ? (googleSheets.sharedSheets as any[]).find((sheet) => sheet.profileId === bodyProfileId)
-    : pickDefaultSharedSheet(googleSheets);
-  const spreadsheetId = targetProfile?.spreadsheetId?.trim() ?? '';
-  const sheetName = targetProfile?.sheetName?.trim() || 'Sheet1';
-  const headerRow = Number(targetProfile?.headerRow ?? 1);
+  const bodySpreadsheetId = typeof (req.body as any)?.spreadsheetId === 'string'
+    ? String((req.body as any).spreadsheetId).trim()
+    : '';
+  const bodySpreadsheetUrl = typeof (req.body as any)?.spreadsheetUrl === 'string'
+    ? String((req.body as any).spreadsheetUrl).trim()
+    : '';
+  const bodySpreadsheetIdResolved = bodySpreadsheetId || (bodySpreadsheetUrl ? extractSpreadsheetId(bodySpreadsheetUrl) ?? '' : '');
+  const sharedProfiles = Array.isArray(googleSheets.sharedSheets) ? (googleSheets.sharedSheets as any[]) : [];
+  const defaultProfile = pickDefaultSharedSheet(googleSheets);
+  const targetProfile =
+    (bodyProfileId
+      ? sharedProfiles.find((sheet) => sheet.profileId === bodyProfileId) ?? null
+      : null) ??
+    defaultProfile;
+  const fallbackProfileWithSpreadsheet = sharedProfiles.find(
+    (profile) => typeof profile?.spreadsheetId === 'string' && profile.spreadsheetId.trim().length > 0
+  );
+  const fallbackSharedConfigSpreadsheetId = legacySharedConfigSpreadsheetId;
+  const spreadsheetId =
+    bodySpreadsheetIdResolved ||
+    targetProfile?.spreadsheetId?.trim() ||
+    fallbackSharedConfigSpreadsheetId ||
+    fallbackProfileWithSpreadsheet?.spreadsheetId?.trim() ||
+    '';
+  const sheetName =
+    targetProfile?.sheetName?.trim() ||
+    legacySharedConfigSheetName ||
+    fallbackProfileWithSpreadsheet?.sheetName?.trim() ||
+    'Sheet1';
+  const headerRow = Math.max(
+    1,
+    Number(
+      targetProfile?.headerRow ??
+        legacySharedConfigHeaderRow ??
+        fallbackProfileWithSpreadsheet?.headerRow ??
+        1
+    )
+  );
 
   if (!spreadsheetId) {
     return fail(res, 'Shared sheets config is missing spreadsheetId', 400);
   }
 
+  // If the caller passed a spreadsheetId/URL explicitly, persist it into the target profile
+  // before verify so subsequent tab/preview/import calls resolve the same active sheet.
+  if (bodySpreadsheetIdResolved && bodySpreadsheetIdResolved !== targetProfile?.spreadsheetId) {
+    upsertSharedSheet(googleSheets, {
+      profileId: targetProfile?.profileId,
+      profileName: targetProfile?.name,
+      spreadsheetId: bodySpreadsheetIdResolved,
+      enabled: targetProfile?.enabled ?? true
+    });
+  }
+
   try {
     const authMode: 'service_account' = 'service_account';
     const sheets = await getSheetsClientForCompany(authMode, companyId);
-
-    const [metaRes, valuesRes] = await Promise.all([
-      sheets.spreadsheets.get({
-        spreadsheetId,
-        fields: 'spreadsheetId,properties(title),sheets(properties(sheetId,title))'
-      }),
-      sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: `${sheetName}!A1:Z${Math.min(headerRow + 5, 20)}`
-      })
-    ]);
+    const metaRes = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: 'spreadsheetId,properties(title),sheets(properties(sheetId,title))'
+    });
 
     const spreadsheetTitle = (metaRes.data.properties as any)?.title ?? null;
     const availableTabs = (metaRes.data.sheets ?? []).map((s) => {
@@ -566,8 +690,28 @@ export const verifySharedSheetsConfig = async (req: Request, res: Response) => {
       return { sheetId: p?.sheetId ?? 0, sheetName: (p?.title as string) ?? '' };
     });
 
-    const rawRows = (valuesRes.data.values ?? []).map((row) => row.map((c) => String(c ?? '')));
-    const preview = rawRows.slice(0, 10);
+    const resolvedSheetName =
+      availableTabs.some((tab) => tab.sheetName === sheetName)
+        ? sheetName
+        : (availableTabs[0]?.sheetName || sheetName);
+
+    let preview: string[][] = [];
+    if (resolvedSheetName) {
+      try {
+        const valuesRes = await sheets.spreadsheets.values.get({
+          spreadsheetId,
+          range: `${resolvedSheetName}!A1:Z${Math.min(headerRow + 5, 20)}`
+        });
+        const rawRows = (valuesRes.data.values ?? []).map((row) => row.map((c) => String(c ?? '')));
+        preview = rawRows.slice(0, 10);
+      } catch (previewError) {
+        // Range parse issues should not fail access verification; keep preview empty.
+        const parseMessage = previewError instanceof Error ? previewError.message.toLowerCase() : '';
+        if (!parseMessage.includes('unable to parse range')) {
+          throw previewError;
+        }
+      }
+    }
 
     googleSheets.connected = true;
     upsertSharedSheet(googleSheets, {
@@ -575,7 +719,7 @@ export const verifySharedSheetsConfig = async (req: Request, res: Response) => {
       profileName: targetProfile?.name,
       spreadsheetId,
       spreadsheetTitle,
-      sheetName,
+      sheetName: resolvedSheetName || sheetName,
       headerRow,
       shareStatus: 'shared',
       availableTabs,
@@ -590,6 +734,7 @@ export const verifySharedSheetsConfig = async (req: Request, res: Response) => {
       shareStatus: 'shared',
       spreadsheetTitle,
       tabs: availableTabs,
+      sheetName: resolvedSheetName || sheetName,
       preview,
       connected: true,
       serviceAccountEmail: googleSheets.serviceAccountEmail || SERVICE_ACCOUNT_EMAIL,

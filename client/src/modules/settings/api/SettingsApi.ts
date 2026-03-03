@@ -20,6 +20,45 @@ export class SettingsApi {
     return api.get('/settings');
   }
 
+  getGoogleSheetsSummary(connectorKey = 'pos_daily') {
+    return api.get('/settings/google-sheets/summary', { params: { connectorKey } });
+  }
+
+  stageGoogleSheetsChange(payload: {
+    connectorKey: string;
+    sourceType: 'oauth' | 'shared';
+    sourceId?: string;
+    profileId?: string;
+    spreadsheetId: string;
+    spreadsheetTitle?: string;
+    sheetName: string;
+    headerRow?: number;
+    mapping?: Record<string, string>;
+    transformations?: Record<string, unknown>;
+  }) {
+    return api.post('/settings/google-sheets/stage-change', payload);
+  }
+
+  commitGoogleSheetsChange(payload: {
+    connectorKey: string;
+    sourceType: 'oauth' | 'shared';
+    sourceId?: string;
+    profileId?: string;
+    sourceName?: string;
+    profileName?: string;
+    spreadsheetId: string;
+    spreadsheetTitle?: string;
+    sheetName: string;
+    headerRow?: number;
+    mapping?: Record<string, string>;
+    transformations?: Record<string, unknown>;
+    mappingConfirmedAt?: string | null;
+    mappingHash?: string | null;
+    activate?: boolean;
+  }) {
+    return api.post('/settings/google-sheets/commit-change', payload);
+  }
+
   getGoogleSheetsSyncOverview() {
     return api.get<{
       data: {
@@ -89,8 +128,8 @@ export class SettingsApi {
     return api.post('/integrations/sheets/config', payload);
   }
 
-  verifySharedSheet(payload?: { profileId?: string }) {
-    return api.post('/integrations/sheets/verify', payload ?? {});
+  verifySharedSheet(payload?: { profileId?: string; spreadsheetId?: string; spreadsheetUrl?: string }) {
+    return api.post('/settings/google-sheets/shared/verify', payload ?? {});
   }
 
   saveGoogleSheetsSyncSchedule(payload: { enabled: boolean; hour: number; minute: number; timezone: string }) {

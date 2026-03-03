@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Request, Response } from "express";
 import { google } from "googleapis";
+import { Types } from "mongoose";
 import { env } from "../config/env";
 import { IntegrationSettingsModel } from "../models/IntegrationSettings";
 import { IntegrationSecretModel } from "../models/IntegrationSecret";
@@ -266,10 +267,13 @@ export const getGoogleSheetsSyncOverview = async (req: Request, res: Response) =
   if (!companyId) {
     return fail(res, "Company onboarding required", 403);
   }
+  const aggregateCompanyId = Types.ObjectId.isValid(companyId)
+    ? new Types.ObjectId(companyId)
+    : companyId;
 
   try {
     const [overview] = await POSDailySummaryModel.aggregate([
-      { $match: { companyId: req.companyId, source: "google_sheets" } },
+      { $match: { companyId: aggregateCompanyId, source: "google_sheets" } },
       {
         $group: {
           _id: null,
@@ -287,7 +291,7 @@ export const getGoogleSheetsSyncOverview = async (req: Request, res: Response) =
     ]);
 
     const byProfile = await POSDailySummaryModel.aggregate([
-      { $match: { companyId: req.companyId, source: "google_sheets" } },
+      { $match: { companyId: aggregateCompanyId, source: "google_sheets" } },
       {
         $group: {
           _id: { $ifNull: ["$sourceRef.profileName", "UNSPECIFIED"] },
@@ -569,6 +573,27 @@ export const resetGoogleSheetsIntegration = async (req: Request, res: Response) 
       settings.googleSheets.sharedConfig.lastImportAt = null;
     }
     settings.googleSheets.sources = [];
+    settings.googleSheets.activeIntegration = null;
+    settings.googleSheets.oauth = {
+      ...(settings.googleSheets.oauth ?? {}),
+      enabled: false,
+      connectionStatus: "not_connected",
+      activeSourceId: null,
+      activeConnectorKey: "pos_daily",
+      sources: [],
+      lastDebugResult: null,
+      lastImportAt: null,
+    };
+    settings.googleSheets.shared = {
+      ...(settings.googleSheets.shared ?? {}),
+      enabled: false,
+      activeProfileId: null,
+      activeConnectorKey: "pos_daily",
+      profiles: [],
+      lastDebugResult: null,
+      lastImportAt: null,
+      lastScheduledSyncAt: null,
+    };
     ensureSharedSheets(settings.googleSheets);
     settings.googleSheets.updatedAt = new Date();
     await settings.save();

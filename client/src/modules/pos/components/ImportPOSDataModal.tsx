@@ -85,9 +85,11 @@ const TARGET_FIELDS = [
   'lottery',
   'creditCard',
   'lotteryPayout',
+  'creditPlusLottery',
+  'cashDiff',
+  'cashPayout',
   'clTotal',
   'cash',
-  'cashPayout',
   'cashExpenses',
   'notes'
 ];
@@ -100,8 +102,7 @@ const REQUIRED_TARGET_FIELDS = [
   'gas',
   'lottery',
   'creditCard',
-  'lotteryPayout',
-  'cashExpenses'
+  'lotteryPayout'
 ];
 
 const TARGET_LABELS: Record<string, string> = {
@@ -113,7 +114,8 @@ const TARGET_LABELS: Record<string, string> = {
   lottery: 'Lottery',
   creditCard: 'Credit Card',
   lotteryPayout: 'Lottery Payout',
-  cashExpenses: 'Cash Expenses'
+  creditPlusLottery: 'Credit + Lottery',
+  cashDiff: 'Cash Diff'
 };
 
 const normalizeTargetValue = (target: string) => {
@@ -174,6 +176,166 @@ const formatBytes = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+};
+
+type LegacyGoogleSheetsView = {
+  mode: GoogleAuthMode;
+  serviceAccountEmail: string;
+  connected: boolean;
+  sources: Array<{
+    sourceId: string;
+    name: string;
+    spreadsheetTitle?: string | null;
+    spreadsheetId: string;
+    range: string;
+    mapping: Record<string, string>;
+    transformations?: Record<string, unknown>;
+    active: boolean;
+  }>;
+  sharedSheets: Array<{
+    profileId: string;
+    name: string;
+    spreadsheetId: string | null;
+    spreadsheetTitle?: string | null;
+    sheetName: string;
+    headerRow: number;
+    enabled: boolean;
+    columnsMap?: Record<string, string>;
+    lastMapping?: {
+      columnsMap?: Record<string, string>;
+      transformations?: Record<string, unknown>;
+    } | null;
+    lastImportAt?: string | null;
+    isDefault?: boolean;
+  }>;
+  sharedConfig?: {
+    spreadsheetId: string | null;
+    sheetName: string;
+    headerRow: number;
+    enabled: boolean;
+    columnsMap?: Record<string, string>;
+    lastMapping?: {
+      columnsMap?: Record<string, string>;
+      transformations?: Record<string, unknown>;
+    } | null;
+    lastImportAt?: string | null;
+  };
+};
+
+const asStringRecord = (value: unknown): Record<string, string> => {
+  if (!value || typeof value !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, String(item ?? '')]),
+  );
+};
+
+const normalizeGoogleSheetsForPos = (raw: unknown): LegacyGoogleSheetsView | null => {
+  const gs = (raw ?? null) as any;
+  if (!gs || typeof gs !== 'object') return null;
+
+  // Legacy shape support.
+  const hasLegacyKeys =
+    'mode' in gs || 'sources' in gs || 'sharedSheets' in gs || 'sharedConfig' in gs;
+  if (hasLegacyKeys) {
+    return {
+      mode: gs.mode === 'oauth' ? 'oauth' : 'service_account',
+      serviceAccountEmail: typeof gs.serviceAccountEmail === 'string' ? gs.serviceAccountEmail : '',
+      connected: Boolean(gs.connected),
+      sources: Array.isArray(gs.sources) ? gs.sources : [],
+      sharedSheets: Array.isArray(gs.sharedSheets) ? gs.sharedSheets : [],
+      sharedConfig: gs.sharedConfig ?? undefined,
+    };
+  }
+
+  // New connector-based shape support.
+  if (!gs.oauth && !gs.shared) return null;
+
+  const activeIntegration = gs.activeIntegration === 'oauth' ? 'oauth' : 'service_account';
+  const oauth = gs.oauth ?? {};
+  const shared = gs.shared ?? {};
+  const oauthSourcesRaw = Array.isArray(oauth.sources) ? oauth.sources : [];
+  const sharedProfilesRaw = Array.isArray(shared.profiles) ? shared.profiles : [];
+  const activeOauthConnectorKey = String(oauth.activeConnectorKey ?? 'pos_daily');
+  const activeSharedConnectorKey = String(shared.activeConnectorKey ?? 'pos_daily');
+  const activeSourceId = String(oauth.activeSourceId ?? '');
+  const activeProfileId = String(shared.activeProfileId ?? '');
+
+  const toSource = (source: any) => {
+    const sourceId = String(source?.id ?? source?._id ?? '');
+    const connectors = Array.isArray(source?.connectors) ? source.connectors : [];
+    const connector =
+      connectors.find((entry: any) => String(entry?.key ?? '') === activeOauthConnectorKey) ??
+      connectors.find((entry: any) => String(entry?.key ?? '') === 'pos_daily') ??
+      connectors[0];
+    const sheetName = String(connector?.sheetName ?? 'Sheet1') || 'Sheet1';
+    return {
+      sourceId,
+      name: String(source?.name ?? 'POS DATA SHEET'),
+      spreadsheetTitle: String(source?.name ?? 'POS DATA SHEET'),
+      spreadsheetId: String(connector?.spreadsheetId ?? ''),
+      range: `${sheetName}!A1:Z`,
+      mapping: asStringRecord(connector?.mapping),
+      transformations:
+        connector?.transformations && typeof connector.transformations === 'object'
+          ? (connector.transformations as Record<string, unknown>)
+          : {},
+      active: Boolean(activeSourceId && sourceId && activeSourceId === sourceId),
+    };
+  };
+
+  const toSharedProfile = (profile: any) => {
+    const profileId = String(profile?.id ?? profile?._id ?? '');
+    const connectors = Array.isArray(profile?.connectors) ? profile.connectors : [];
+    const connector =
+      connectors.find((entry: any) => String(entry?.key ?? '') === activeSharedConnectorKey) ??
+      connectors.find((entry: any) => String(entry?.key ?? '') === 'pos_daily') ??
+      connectors[0];
+    return {
+      profileId,
+      name: String(profile?.name ?? 'POS DATA SHEET'),
+      spreadsheetId: connector?.spreadsheetId ? String(connector.spreadsheetId) : null,
+      spreadsheetTitle: String(profile?.name ?? 'POS DATA SHEET'),
+      sheetName: String(connector?.sheetName ?? 'Sheet1') || 'Sheet1',
+      headerRow: Number(connector?.headerRow ?? 1),
+      enabled: Boolean(connector?.enabled ?? true),
+      columnsMap: asStringRecord(connector?.mapping),
+      lastMapping: {
+        columnsMap: asStringRecord(connector?.mapping),
+        transformations:
+          connector?.transformations && typeof connector.transformations === 'object'
+            ? (connector.transformations as Record<string, unknown>)
+            : {},
+      },
+      lastImportAt: connector?.lastImportAt ? String(connector.lastImportAt) : null,
+      isDefault: Boolean(activeProfileId && profileId && activeProfileId === profileId),
+    };
+  };
+
+  const sources: LegacyGoogleSheetsView['sources'] = oauthSourcesRaw.map(toSource);
+  const sharedSheets: LegacyGoogleSheetsView['sharedSheets'] = sharedProfilesRaw.map(toSharedProfile);
+  const activeShared =
+    sharedSheets.find((profile) => profile.isDefault) ??
+    sharedSheets[0] ??
+    null;
+
+  return {
+    mode: activeIntegration,
+    serviceAccountEmail: typeof gs.serviceAccountEmail === 'string' ? gs.serviceAccountEmail : '',
+    connected: String(oauth.connectionStatus ?? '') === 'connected',
+    sources,
+    sharedSheets,
+    sharedConfig: activeShared
+      ? {
+          spreadsheetId: activeShared.spreadsheetId,
+          sheetName: activeShared.sheetName,
+          headerRow: activeShared.headerRow,
+          enabled: activeShared.enabled,
+          columnsMap: activeShared.columnsMap,
+          lastMapping: activeShared.lastMapping,
+          lastImportAt: activeShared.lastImportAt,
+        }
+      : undefined,
+  };
 };
 
 export const ImportPOSDataModal = ({ open, onClose, onImported, navigateToSettings }: ImportPOSDataModalProps) => {
@@ -254,7 +416,7 @@ export const ImportPOSDataModal = ({ open, onClose, onImported, navigateToSettin
   /* ── API actions ── */
 
   const syncSettingsFromRedux = () => {
-    const gs = settingsFromRedux?.googleSheets;
+    const gs = normalizeGoogleSheetsForPos(settingsFromRedux?.googleSheets);
     if (!gs) return;
     setConfiguredMode(gs.mode === 'oauth' ? 'oauth' : 'service_account');
     if (gs.serviceAccountEmail) setServiceAccountEmail(gs.serviceAccountEmail);
@@ -263,7 +425,7 @@ export const ImportPOSDataModal = ({ open, onClose, onImported, navigateToSettin
     } else {
       setSpreadsheetInput('');
     }
-    const activeSource = gs.sources.find((source) => source.active) ?? gs.sources[0];
+    const activeSource = gs.sources?.find((source) => source.active) ?? gs.sources?.[0];
     setLastOAuthSpreadsheetId(activeSource?.spreadsheetId ? extractSpreadsheetId(activeSource.spreadsheetId) : '');
     setGoogleConnected(Boolean(gs.connected));
     const sharedProfile =
@@ -527,7 +689,10 @@ export const ImportPOSDataModal = ({ open, onClose, onImported, navigateToSettin
       setBusy(true);
       setError(null);
       const settingsRes = await settingsApi.get();
-      const gs = settingsRes.data?.data?.googleSheets as any;
+      const gs = normalizeGoogleSheetsForPos(settingsRes.data?.data?.googleSheets);
+      if (!gs) {
+        throw new Error('Google Sheets settings are not available.');
+      }
       const parseRangeTab = (range?: string) => {
         if (!range) return "Sheet1";
         const tab = String(range).split("!")[0]?.trim();

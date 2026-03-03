@@ -1,14 +1,19 @@
 import { Types } from 'mongoose';
+import { markConnectorImported } from '../controllers/googleSheetsController';
+import {
+  importEvaluatedRowsForCompany,
+  parseRowsWithHeaderRow,
+  readSharedSheetRows
+} from '../controllers/posController';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { JobLockModel } from '../models/JobLock';
-import {
-  readSharedSheetRows,
-  parseRowsWithHeaderRow,
-  importRowsForCompany
-} from '../controllers/posController';
-import { ensureSharedSheets, isEmptyRecord, normalizeStringRecord, pickDefaultSharedSheet } from '../utils/sharedSheets';
+import { computeCompatibilityForConnector } from '../utils/sheetsCompatibility';
+import { DEFAULT_CONNECTOR_KEY } from '../utils/sheetsConnectors';
 import { parseUtcOffsetToMinutes } from '../utils/utcOffset';
-import { buildSheetsBindingKey } from '../utils/sheetsBinding';
+import {
+  evaluateConfiguredPosRow,
+  validateDerivedConfiguration
+} from '../utils/posDerivedEvaluator';
 
 export type RunSheetsSyncArgs = {
   source: string;
@@ -36,6 +41,13 @@ export type SheetsSyncResult = {
   skipped: number;
   source: string;
   companies: CompanySyncResult[];
+};
+
+type ConnectorSchedule = {
+  enabled?: boolean;
+  frequency?: 'hourly' | 'daily' | 'weekly' | 'manual';
+  timeOfDay?: string;
+  dayOfWeek?: number;
 };
 
 const LOCK_KEY = 'sheets-sync';
@@ -78,13 +90,6 @@ const releaseLock = async () => {
   );
 };
 
-type SheetsSyncSchedule = {
-  enabled?: boolean;
-  hour?: number;
-  minute?: number;
-  timezone?: string;
-};
-
 const getLocalDateParts = (date: Date, offsetMinutes: number) => {
   const shifted = new Date(date.getTime() + offsetMinutes * 60_000);
   return {
@@ -92,29 +97,68 @@ const getLocalDateParts = (date: Date, offsetMinutes: number) => {
     month: shifted.getUTCMonth() + 1,
     day: shifted.getUTCDate(),
     hour: shifted.getUTCHours(),
-    minute: shifted.getUTCMinutes()
+    minute: shifted.getUTCMinutes(),
+    weekday: shifted.getUTCDay()
   };
 };
 
-const isScheduleDue = (schedule: SheetsSyncSchedule | undefined, lastScheduledSyncAt: Date | null, now = new Date()) => {
+const parseTimeOfDay = (timeOfDay?: string) => {
+  if (!timeOfDay) return { hour: 2, minute: 0 };
+  const [hh, mm] = String(timeOfDay).split(':');
+  const hour = Number(hh);
+  const minute = Number(mm);
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return { hour: 2, minute: 0 };
+  if (!Number.isFinite(minute) || minute < 0 || minute > 59) return { hour: 2, minute: 0 };
+  return { hour, minute };
+};
+
+const isScheduleDue = (
+  schedule: ConnectorSchedule | undefined,
+  lastScheduledSyncAt: Date | null,
+  now = new Date()
+) => {
   if (!schedule?.enabled) return true;
-  const timezone = schedule.timezone || DEFAULT_SYNC_UTC_OFFSET;
-  const offsetMinutes = parseUtcOffsetToMinutes(timezone) ?? parseUtcOffsetToMinutes(DEFAULT_SYNC_UTC_OFFSET) ?? 0;
-  const targetHour = Number.isFinite(schedule.hour) ? Number(schedule.hour) : 2;
-  const targetMinute = Number.isFinite(schedule.minute) ? Number(schedule.minute) : 0;
+
+  const offsetMinutes =
+    parseUtcOffsetToMinutes(DEFAULT_SYNC_UTC_OFFSET) ??
+    parseUtcOffsetToMinutes('UTC+00:00') ??
+    0;
 
   const nowParts = getLocalDateParts(now, offsetMinutes);
+  const { hour: targetHour, minute: targetMinute } = parseTimeOfDay(schedule.timeOfDay);
   const nowMinutes = nowParts.hour * 60 + nowParts.minute;
   const targetMinutes = targetHour * 60 + targetMinute;
+
+  if (schedule.frequency === 'manual') return false;
   if (nowMinutes < targetMinutes) return false;
 
+  if (schedule.frequency === 'weekly' && Number.isFinite(schedule.dayOfWeek)) {
+    if (nowParts.weekday !== Number(schedule.dayOfWeek)) return false;
+  }
+
   if (!lastScheduledSyncAt) return true;
+
   const lastParts = getLocalDateParts(lastScheduledSyncAt, offsetMinutes);
   const sameDay =
     lastParts.year === nowParts.year &&
     lastParts.month === nowParts.month &&
     lastParts.day === nowParts.day;
-  return !sameDay;
+
+  if (schedule.frequency === 'hourly') {
+    const sameHour = sameDay && lastParts.hour === nowParts.hour;
+    return !sameHour;
+  }
+
+  if (schedule.frequency === 'daily') {
+    return !sameDay;
+  }
+
+  if (schedule.frequency === 'weekly') {
+    const lastWeekday = lastParts.weekday;
+    return !(sameDay && lastWeekday === nowParts.weekday);
+  }
+
+  return true;
 };
 
 export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArgs): Promise<SheetsSyncResult> => {
@@ -140,10 +184,9 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
   try {
     const settingsList = await IntegrationSettingsModel.find({
       companyId: { $exists: true },
-      $or: [
-        { 'googleSheets.sharedSheets.enabled': true, 'googleSheets.sharedSheets.spreadsheetId': { $ne: null } },
-        { 'googleSheets.sharedConfig.enabled': true, 'googleSheets.sharedConfig.spreadsheetId': { $ne: null } }
-      ]
+      'googleSheets.activeIntegration': 'shared',
+      'googleSheets.shared.enabled': true,
+      'googleSheets.shared.activeProfileId': { $ne: null }
     }).lean();
 
     if (settingsList.length === 0) {
@@ -167,39 +210,111 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
     }
 
     for (const settings of settingsList) {
-      const companyId = (settings.companyId as Types.ObjectId).toString();
-      const result: CompanySyncResult = {
-        companyId,
-        ok: false
-      };
+      const companyId =
+        settings.companyId instanceof Types.ObjectId
+          ? settings.companyId.toString()
+          : String(settings.companyId);
+
+      const result: CompanySyncResult = { companyId, ok: false };
 
       try {
-        const schedule = ((settings as any)?.googleSheets?.syncSchedule ?? {}) as SheetsSyncSchedule;
-        const lastScheduledSyncAt = ((settings as any)?.googleSheets?.lastScheduledSyncAt as Date | null | undefined) ?? null;
-        if (!isScheduleDue(schedule, lastScheduledSyncAt, new Date())) {
-          const hour = String(schedule.hour ?? 2).padStart(2, '0');
-          const minute = String(schedule.minute ?? 0).padStart(2, '0');
+        const googleSheets = (settings as any).googleSheets ?? {};
+        const shared = googleSheets.shared ?? {};
+        const activeProfileId = shared.activeProfileId?.toString?.() ?? String(shared.activeProfileId ?? '');
+        const activeConnectorKey = String(shared.activeConnectorKey ?? DEFAULT_CONNECTOR_KEY) || DEFAULT_CONNECTOR_KEY;
+
+        const profile = (shared.profiles ?? []).find((entry: any) => {
+          const id = entry?._id?.toString?.() ?? String(entry?._id ?? '');
+          return id === activeProfileId;
+        });
+
+        if (!profile) {
           result.ok = true;
           result.skipped = true;
-          result.reason = `Not due by schedule (${schedule.timezone ?? DEFAULT_SYNC_UTC_OFFSET} ${hour}:${minute})`;
+          result.reason = 'Active shared profile not found';
           skipped += 1;
           companies.push(result);
           continue;
         }
 
-        const { source: sharedSource, rawRows, rowCount } = await readSharedSheetRows(companyId);
+        const connector = (profile.connectors ?? []).find(
+          (entry: any) => String(entry?.key ?? '') === activeConnectorKey
+        );
+
+        if (!connector || connector.enabled !== true) {
+          result.ok = true;
+          result.skipped = true;
+          result.reason = 'Active connector not configured or disabled';
+          skipped += 1;
+          companies.push(result);
+          continue;
+        }
+
+        if (activeConnectorKey !== 'pos_daily') {
+          result.ok = true;
+          result.skipped = true;
+          result.reason = `Connector ${activeConnectorKey} importer not implemented in v1`;
+          skipped += 1;
+          companies.push(result);
+          continue;
+        }
+
+        const schedule = (connector.schedule ?? {}) as ConnectorSchedule;
+        const lastScheduledSyncAt = (shared.lastScheduledSyncAt as Date | null | undefined) ?? null;
+        if (!isScheduleDue(schedule, lastScheduledSyncAt, new Date())) {
+          result.ok = true;
+          result.skipped = true;
+          result.reason = 'Not due by schedule';
+          skipped += 1;
+          companies.push(result);
+          continue;
+        }
+
+        const { source: sharedSource, rawRows, rowCount } = await readSharedSheetRows(companyId, {
+          profileId: activeProfileId,
+          connectorKey: activeConnectorKey
+        });
         result.rowCount = rowCount;
 
         if (rowCount === 0) {
           result.ok = true;
           result.skipped = true;
-          result.reason = 'No data rows found in shared sheet';
+          result.reason = 'No rows in sheet';
           skipped += 1;
           companies.push(result);
           continue;
         }
 
-        const parsedRows = parseRowsWithHeaderRow(rawRows, sharedSource.headerRow);
+        const headerIndex = Math.max(0, Number(sharedSource.headerRow ?? 1) - 1);
+        const columns = rawRows[headerIndex] ?? [];
+        const mapping = sharedSource.mapping ?? {};
+        const compatibility = computeCompatibilityForConnector({
+          connectorKey: activeConnectorKey,
+          columns,
+          mapping
+        });
+
+        if (compatibility.status === 'error') {
+          result.ok = false;
+          result.reason = 'Connector mapping incompatible';
+          failed += 1;
+          companies.push(result);
+          continue;
+        }
+        const derivedValidation = validateDerivedConfiguration({
+          headers: columns,
+          mapping,
+          transformations: sharedSource.transformations ?? {}
+        });
+        if (!derivedValidation.ok) {
+          result.ok = false;
+          result.reason = `Derived mapping invalid: ${derivedValidation.errors.join(', ')}`;
+          failed += 1;
+          companies.push(result);
+          continue;
+        }
+
+        const parsedRows = parseRowsWithHeaderRow(rawRows, Number(sharedSource.headerRow ?? 1));
         if (parsedRows.length === 0) {
           result.ok = true;
           result.skipped = true;
@@ -209,98 +324,81 @@ export const runSheetsSync = async ({ source, dryRun = false }: RunSheetsSyncArg
           continue;
         }
 
-        const googleSheets = ((settings as any)?.googleSheets ?? {}) as Record<string, unknown>;
-        const profile = pickDefaultSharedSheet(googleSheets) ?? (ensureSharedSheets(googleSheets)[0] ?? null);
-        const columnsMap = normalizeStringRecord(profile?.columnsMap);
-        const lastMap = normalizeStringRecord(profile?.lastMapping?.columnsMap);
-        const effectiveMapping = !isEmptyRecord(columnsMap) ? columnsMap : lastMap;
-        const effectiveTransforms =
-          ((profile?.lastMapping?.transformations as Record<string, unknown> | undefined) ?? {});
-
-        if (isEmptyRecord(effectiveMapping)) {
-          result.ok = true;
-          result.skipped = true;
-          result.reason = 'No saved field mapping found';
-          skipped += 1;
-          companies.push(result);
-          continue;
-        }
-
         if (dryRun) {
           result.ok = true;
           result.skipped = true;
-          result.importedCount = parsedRows.length;
           result.reason = 'dryRun';
+          result.importedCount = parsedRows.length;
           skipped += 1;
           companies.push(result);
           continue;
         }
 
-        const mappedRows = parsedRows.map((row) => {
-          const out: Record<string, string | undefined> = {};
-          for (const [sourceHeader, targetField] of Object.entries(effectiveMapping)) {
-            if (!targetField) continue;
-            const normalizedTargetField = targetField.startsWith('custom:')
-              ? targetField.replace(/^custom:/, '').trim()
-              : targetField;
-            if (!normalizedTargetField) continue;
-            const raw = row[sourceHeader];
-            if (raw === undefined) continue;
-            let value = String((raw ?? '')).trim();
-            out[normalizedTargetField] = value;
+        const evaluatedRows = [];
+        let evaluationError: string | null = null;
+        for (let index = 0; index < parsedRows.length; index += 1) {
+          const evaluated = evaluateConfiguredPosRow({
+            row: parsedRows[index],
+            mapping,
+            transformations: sharedSource.transformations ?? {}
+          });
+          if (!evaluated.ok) {
+            evaluationError = `Row ${index + 1}: ${evaluated.reason}`;
+            break;
           }
-          return out;
-        });
+          evaluatedRows.push(evaluated.row);
+        }
+        if (evaluationError) {
+          result.ok = false;
+          result.reason = evaluationError;
+          failed += 1;
+          companies.push(result);
+          continue;
+        }
+        const importBindingKey = `sheets:shared:${activeProfileId}:${activeConnectorKey}:${sharedSource.spreadsheetId}:${sharedSource.sheetName}`;
+        const derivedFields = Object.entries(derivedValidation.derivedConfig)
+          .map(([key]) => key);
 
-        const derivedFields = Array.isArray((effectiveTransforms as Record<string, unknown>).__derivedFields)
-          ? ((effectiveTransforms as Record<string, unknown>).__derivedFields as unknown[])
-              .map((value) => String(value))
-              .filter(Boolean)
-          : undefined;
-        const importBindingKey = buildSheetsBindingKey({
-          mode: 'service_account',
-          profileName: profile?.name ?? 'POS DATA SHEET',
-          spreadsheetId: sharedSource.spreadsheetId,
-          sheetName: sharedSource.sheetName
-        });
-
-        const importResult = await importRowsForCompany(companyId, mappedRows, 'google_sheets', {
+        const importResult = await importEvaluatedRowsForCompany(companyId, evaluatedRows, 'google_sheets', {
           importBindingKey,
           derivedFields,
           sourceRef: {
-            mode: 'service_account',
-            profileName: profile?.name ?? 'POS DATA SHEET',
+            mode: 'shared',
+            profileName: sharedSource.profileName ?? null,
             spreadsheetId: sharedSource.spreadsheetId,
             sheetName: sharedSource.sheetName,
+            sourceId: activeProfileId,
             reason: 'Scheduled sync'
           }
         });
+
         if (!importResult.ok) {
           result.ok = false;
-          result.reason = importResult.error?.message ?? 'Validation failed';
+          result.reason = 'message' in importResult.error ? importResult.error.message : 'Validation failed';
           failed += 1;
           companies.push(result);
           continue;
         }
 
+        const importedAt = new Date();
+        await markConnectorImported({
+          companyId,
+          integrationType: 'shared',
+          profileId: activeProfileId,
+          connectorKey: activeConnectorKey,
+          importedAt
+        });
+
+        await IntegrationSettingsModel.updateOne(
+          { companyId },
+          { $set: { 'googleSheets.shared.lastScheduledSyncAt': importedAt } }
+        );
+
         result.ok = true;
         result.importedCount = importResult.data.imported;
         result.upsertedCount = importResult.data.upserted;
         result.modifiedCount = importResult.data.modified;
-
-        const updateRes = await IntegrationSettingsModel.findOneAndUpdate(
-          { companyId },
-          {
-            $set: {
-              lastImportSource: 'google_sheets',
-              lastImportAt: new Date(),
-              'googleSheets.lastScheduledSyncAt': new Date()
-            }
-          },
-          { new: true }
-        ).lean();
-
-        result.lastImportAt = updateRes?.lastImportAt ?? null;
+        result.lastImportAt = importedAt;
         succeeded += 1;
         companies.push(result);
       } catch (err) {

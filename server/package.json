@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node --import tsx src/index.ts",
     "seed:pos": "tsx src/scripts/seedPosSample.ts",
+    "db:cleanup:google-sheets": "tsx src/scripts/cleanupGoogleSheetsDb.ts",
     "test": "pnpm run test:unit",
     "test:unit": "vitest run --exclude src/**/*.e2e.test.ts --exclude src/**/*.integration.test.ts --exclude src/tenantIsolation.test.ts --exclude src/auth.refresh.test.ts --exclude src/inventoryLedger.immutability.test.ts --exclude src/posAndReports.test.ts",
     "test:integration": "vitest run src/tenantIsolation.test.ts src/auth.refresh.test.ts src/inventoryLedger.immutability.test.ts src/posAndReports.test.ts",

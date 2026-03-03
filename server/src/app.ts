@@ -20,6 +20,7 @@ import cronRoutes from "./routes/cronRoutes";
 import debugSheetsRoutes from "./routes/debug.sheets.routes";
 import integrationGoogleSheetsRoutes from "./routes/integrationGoogleSheetsRoutes";
 import integrationsSheetsRoutes from "./routes/integrationsSheetsRoutes";
+import googleSheetsIntegrationRoutes from "./routes/googleSheetsIntegrationRoutes";
 import { notFound } from "./middleware/notFound";
 import { errorHandler } from "./middleware/errorHandler";
 import { withRequestContext } from "./config/requestContext";
@@ -137,6 +138,7 @@ export const createApp = () => {
   app.use("/api/sheets", sheetsRoutes);
   app.use("/api/google", googleRoutes);
   app.use("/api/integrations/google/sheets", integrationGoogleSheetsRoutes);
+  app.use("/api/integrations/google-sheets", googleSheetsIntegrationRoutes);
   app.use("/api/integrations/sheets", integrationsSheetsRoutes);
   app.use("/api/debug/sheets", debugSheetsRoutes);
   app.use("/api/settings", settingsRoutes);
