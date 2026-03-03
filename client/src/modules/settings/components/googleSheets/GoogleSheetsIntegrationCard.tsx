@@ -582,7 +582,6 @@ export const GoogleSheetsIntegrationCard = ({
     () => rows.some((row) => row.activeSource !== null),
     [rows],
   );
-  const configuredConnectorCount = rows.filter((row) => row.hasAnyConfig).length;
   const readyConnectorCount = rows.filter((row) => row.summary.authorityState === "active_ready").length;
   const activeSourceLabel = (() => {
     const activeRow = rows.find((row) => row.summary.authorityState === "active_ready");
