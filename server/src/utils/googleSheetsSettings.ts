@@ -382,7 +382,6 @@ export const ensureGoogleSheetsShape = (settingsDoc: any) => {
         gs.updatedAt = new Date();
       }
       return gs;
-      return settingsDoc.googleSheets;
     }
   }
 };
