@@ -7,7 +7,6 @@ export {
   fetchOverview,
   importCsv,
   restoreState,
-  selectPosState,
   setDateRange,
   setIconOnly,
   setLimit,
@@ -15,4 +14,15 @@ export {
   setView,
   syncGoogleSheet
 } from './posSlice';
+export {
+  selectPosChartsData,
+  selectPosDateRange,
+  selectPosError,
+  selectPosKpis,
+  selectPosLastSyncStatus,
+  selectPosLoading,
+  selectPosRecords,
+  selectPosState,
+  selectPosView
+} from './posSelectors';
 export type { PosDateRange, PosState, PosView } from './posSlice';

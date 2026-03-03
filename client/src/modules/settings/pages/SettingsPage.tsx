@@ -61,6 +61,8 @@ import {
   selectSettingsIsBusy,
 } from "../state";
 
+const OAUTH_WIZARD_RESUME_KEY = "retailsync.googleSheets.oauthResumeWizard";
+
 const REQUIRED_FIELDS = [
   "date",
   "highTax",
@@ -153,6 +155,18 @@ export const SettingsPage = () => {
       setExpandGoogleConfigureSection(true);
     }
     if (status === "connected") {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          OAUTH_WIZARD_RESUME_KEY,
+          JSON.stringify({
+            profileName: "POS DATA SHEET",
+            step: 1,
+            source: "oauth",
+            reason: "oauth_callback_connected",
+          }),
+        );
+      }
+      setExpandGoogleConfigureSection(true);
       dispatch(
         showSnackbar({
           message:
@@ -160,21 +174,54 @@ export const SettingsPage = () => {
           severity: "success",
         }),
       );
+      console.info("[GoogleSheets OAuth] callback connected; resuming wizard at step 2.");
       void dispatch(fetchSettings()).finally(() => {
         navigate("/dashboard/settings", { replace: true });
       });
       return;
     }
     if (status === "error") {
-      dispatch(
-        showSnackbar({
-          message: getAppErrorMessage(
-            reason,
-            "Google Sheets connection error.",
-          ),
-          severity: "error",
-        }),
-      );
+      console.error("[GoogleSheets OAuth] callback error", {
+        reason: reason ?? "unknown",
+        query: location.search,
+      });
+      void dispatch(fetchSettings()).then((action) => {
+        const payload = (action as { payload?: { googleSheets?: { oauth?: { connectionStatus?: string } } } }).payload;
+        const connected = payload?.googleSheets?.oauth?.connectionStatus === "connected";
+        if (connected) {
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(
+              OAUTH_WIZARD_RESUME_KEY,
+              JSON.stringify({
+                profileName: "POS DATA SHEET",
+                step: 1,
+                source: "oauth",
+                reason: "oauth_callback_error_but_connected",
+              }),
+            );
+          }
+          setExpandGoogleConfigureSection(true);
+          dispatch(
+            showSnackbar({
+              message: "Google Sheets connected. Continue with sheet selection.",
+              severity: "success",
+            }),
+          );
+          console.info("[GoogleSheets OAuth] callback returned error but settings show connected; resuming wizard.");
+        } else {
+          dispatch(
+            showSnackbar({
+              message: getAppErrorMessage(
+                reason,
+                "Google Sheets connection error.",
+              ),
+              severity: "error",
+            }),
+          );
+        }
+        navigate("/dashboard/settings", { replace: true });
+      });
+      return;
     }
     if (openSection || expandParam || status) {
       navigate("/dashboard/settings", { replace: true });

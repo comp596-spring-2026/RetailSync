@@ -37,31 +37,60 @@ const findLocalServiceAccountPath = () => {
   return null;
 };
 
-export function getSheetsClient() {
-  const isProduction = process.env.NODE_ENV === 'production';
-  const localCredsPath = isProduction ? null : findLocalServiceAccountPath();
+type ServiceAccountCredentials = Record<string, unknown>;
 
-  const auth = localCredsPath
-    ? new google.auth.GoogleAuth({
-        scopes: SHEETS_SCOPES,
-        credentials: JSON.parse(fs.readFileSync(localCredsPath, 'utf-8'))
-      })
-    : new google.auth.GoogleAuth({ scopes: SHEETS_SCOPES });
+const parseServiceAccountJson = (value: string): ServiceAccountCredentials => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is empty');
+  }
+  try {
+    return JSON.parse(trimmed) as ServiceAccountCredentials;
+  } catch {
+    try {
+      const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+      return JSON.parse(decoded) as ServiceAccountCredentials;
+    } catch {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON (or base64-encoded JSON)');
+    }
+  }
+};
+
+const resolveServiceAccountCredentials = (): ServiceAccountCredentials | null => {
+  if (env.googleServiceAccountJson) {
+    return parseServiceAccountJson(env.googleServiceAccountJson);
+  }
+  const localCredsPath = findLocalServiceAccountPath();
+  if (!localCredsPath) return null;
+  return JSON.parse(fs.readFileSync(localCredsPath, 'utf-8')) as ServiceAccountCredentials;
+};
+
+const createServiceAccountAuth = (scopes: string[]) => {
+  const credentials = resolveServiceAccountCredentials();
+  if (credentials) {
+    return new google.auth.GoogleAuth({ scopes, credentials });
+  }
+
+  if (env.nodeEnv === 'production') {
+    // In production, allow workload identity / ADC (should resolve to service account runtime identity).
+    return new google.auth.GoogleAuth({ scopes });
+  }
+
+  throw new Error(
+    'Service account credentials not configured for shared mode. ' +
+      `Provide credentials/${LOCAL_SERVICE_ACCOUNT_FILE} or GOOGLE_SERVICE_ACCOUNT_JSON.`
+  );
+};
+
+export function getSheetsClient() {
+  const auth = createServiceAccountAuth(SHEETS_SCOPES);
 
   return google.sheets({ version: 'v4', auth });
 }
 
 /** Drive client with service account (for listing spreadsheets shared with the SA). */
 export function getDriveClientForServiceAccount() {
-  const isProduction = process.env.NODE_ENV === 'production';
-  const localCredsPath = isProduction ? null : findLocalServiceAccountPath();
-
-  const auth = localCredsPath
-    ? new google.auth.GoogleAuth({
-        scopes: [DRIVE_READ_SCOPE],
-        credentials: JSON.parse(fs.readFileSync(localCredsPath, 'utf-8'))
-      })
-    : new google.auth.GoogleAuth({ scopes: [DRIVE_READ_SCOPE] });
+  const auth = createServiceAccountAuth([DRIVE_READ_SCOPE]);
 
   return google.drive({ version: 'v3', auth });
 }

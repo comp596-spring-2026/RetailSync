@@ -79,6 +79,32 @@ export type PosDailyPagedResponse = {
   end: string;
 };
 
+export type PosTrendDailyPoint = {
+  x: string;
+  totalSales: number;
+  creditCard: number;
+  cash: number;
+  gas: number;
+  lottery: number;
+};
+
+export type PosTrendWeeklyPoint = {
+  label: string;
+  range: string;
+  totalSales: number;
+  creditCard: number;
+  cash: number;
+  gas: number;
+  lottery: number;
+};
+
+export type PosTrendResponse = {
+  granularity: 'daily' | 'weekly';
+  data: PosTrendDailyPoint[] | PosTrendWeeklyPoint[];
+  start: string;
+  end: string;
+};
+
 export class PosApi {
   importCsv(file: File) {
     const formData = new FormData();
@@ -128,7 +154,11 @@ export class PosApi {
   }
 
   commitImport(payload: {
-    mapping: Record<string, string>;
+    connectorKey?: string;
+    integrationType?: 'oauth' | 'shared';
+    sourceId?: string;
+    profileId?: string;
+    mapping?: Record<string, string>;
     transforms?: Record<string, unknown>;
     options?: Record<string, unknown>;
   }) {
@@ -153,6 +183,10 @@ export class PosApi {
 
   overview(payload: { start?: string; end?: string }) {
     return api.get<{ data: PosOverviewResponse }>('/pos/overview', { params: payload });
+  }
+
+  trend(payload: { start?: string; end?: string; granularity?: 'daily' | 'weekly' }) {
+    return api.get<{ data: PosTrendResponse }>('/pos/trend', { params: payload });
   }
 
   exportCsv(payload: { start?: string; end?: string }) {

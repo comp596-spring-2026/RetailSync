@@ -35,4 +35,4 @@ export {
   WonderLoader
 } from './ui';
 export type { LoadingEmptyStateWrapperProps } from './ui';
-export { MonthlyBar, MultiStreams, RevenueDonut, StackedComposition, TotalSalesLine, WeekdayBar } from './charts';
+export { MonthlyBar, MultiStreams, RevenueDonut, TotalSalesLine, WeekdayBar } from './charts';

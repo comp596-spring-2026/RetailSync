@@ -52,5 +52,6 @@ export const env = {
   googleOAuthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
   googleAuthRedirectUri: process.env.GOOGLE_AUTH_REDIRECT_URI,
   googleIntegrationRedirectUri: process.env.GOOGLE_INTEGRATION_REDIRECT_URI,
+  googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
   cronSecret: process.env.CRON_SECRET,
 };

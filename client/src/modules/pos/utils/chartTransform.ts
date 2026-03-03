@@ -10,8 +10,19 @@ export const currency = new Intl.NumberFormat('en-US', {
 
 const baseChartOptions: ApexOptions = {
   chart: {
-    toolbar: { show: false },
-    zoom: { enabled: false },
+    toolbar: {
+      show: true,
+      tools: {
+        download: true,
+        selection: true,
+        zoom: true,
+        zoomin: true,
+        zoomout: true,
+        pan: true,
+        reset: true
+      }
+    },
+    zoom: { enabled: true, type: 'x', autoScaleYaxis: true },
     animations: { enabled: true }
   },
   grid: {
@@ -34,6 +45,8 @@ export const withCurrencyTooltip = (options: ApexOptions): ApexOptions => ({
   ...baseChartOptions,
   ...options,
   tooltip: {
+    ...((baseChartOptions.tooltip as Record<string, unknown>) ?? {}),
+    ...((options.tooltip as Record<string, unknown>) ?? {}),
     y: {
       formatter: (value: number) => currency.format(Number(value ?? 0))
     }

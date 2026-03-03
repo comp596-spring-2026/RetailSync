@@ -99,6 +99,7 @@ Sheets read helper:
 Google Sheets integration (OAuth-specific):
 
 - `GET /integrations/google/sheets/oauth-status`
+  - Returns: `{ ok, reason, email, scopes, expiresInSec }`
 - `GET /integrations/google/sheets/start-url`
 - `GET /integrations/google/sheets/files`
 - `GET /integrations/google/sheets/start`
@@ -114,6 +115,41 @@ Shared/service-account sheets integration:
 - `POST /integrations/sheets/save-mapping`
 - `POST /integrations/sheets/sync-schedule`
 - `POST /integrations/sheets/delete-source`
+- `POST /integrations/sheets/oauth/debug`
+- `POST /integrations/sheets/shared/debug`
+
+Connector-first settings endpoints (preferred):
+
+- `POST /settings/google-sheets/activate`
+- `GET /settings/google-sheets/oauth/sources`
+- `POST /settings/google-sheets/oauth/sources`
+- `PUT /settings/google-sheets/oauth/sources/:sourceId/connectors/:connectorKey`
+- `GET /settings/google-sheets/shared/profiles`
+- `POST /settings/google-sheets/shared/profiles`
+- `PUT /settings/google-sheets/shared/profiles/:profileId/connectors/:connectorKey`
+- `POST /settings/google-sheets/stage-change`
+- `POST /settings/google-sheets/commit-change`
+
+Legacy-compatible settings endpoints (still present):
+
+- `PUT /settings/google-sheets/mode`
+- `PUT /settings/google-sheets/source`
+- `POST /settings/google-sheets/test`
+- `POST /settings/google-sheets/reset`
+- `POST /settings/google-sheets/shared/verify`
+
+POS Google Sheets runtime flow:
+
+1. Configure connector in Settings (OAuth or Shared) using connector-first endpoints.
+2. Optional validation:
+   - `POST /pos/import/sheets/preview`
+   - `POST /pos/import/sheets/match`
+3. Import / sync:
+   - `POST /pos/import/sheets/commit`
+   - Body can include explicit ref:
+     - `{ connectorKey, integrationType: "oauth", sourceId }`
+     - `{ connectorKey, integrationType: "shared", profileId }`
+   - Or omit ref to use active integration + active connector from settings.
 
 Debug endpoints:
 
@@ -123,6 +159,15 @@ Debug endpoints:
 ## Settings
 
 - `GET /settings`
+- `POST /settings/google-sheets/activate`
+- `GET /settings/google-sheets/oauth/sources`
+- `POST /settings/google-sheets/oauth/sources`
+- `PUT /settings/google-sheets/oauth/sources/:sourceId/connectors/:connectorKey`
+- `GET /settings/google-sheets/shared/profiles`
+- `POST /settings/google-sheets/shared/profiles`
+- `PUT /settings/google-sheets/shared/profiles/:profileId/connectors/:connectorKey`
+- `POST /settings/google-sheets/stage-change`
+- `POST /settings/google-sheets/commit-change`
 - `GET /settings/google-sheets/sync-overview`
 - `POST /settings/google-sheets/test`
 - `PUT /settings/google-sheets/mode`

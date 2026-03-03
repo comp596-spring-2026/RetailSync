@@ -4,11 +4,10 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { IntegrationSecretModel } from '../models/IntegrationSecret';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
-import { encryptJson } from '../utils/encryption';
+import { decryptJson, encryptJson } from '../utils/encryption';
 import { fail, ok } from '../utils/apiResponse';
 import { google } from 'googleapis';
-const SERVICE_ACCOUNT_EMAIL =
-  'retailsync-run-sa@lively-infinity-488304-m9.iam.gserviceaccount.com';
+import { ensureGoogleSheetsShape, getOrCreateSettings } from '../utils/googleSheetsSettings';
 const sheetsOauthStateCookie = 'googleSheetsOAuthState';
 const SHEETS_SCOPES = [
   'openid',
@@ -44,6 +43,9 @@ const buildGoogleOauthUrl = (req: Request) => {
   if (!req.user?.id || !req.user.companyId) {
     return { error: 'Unauthorized' as const };
   }
+  if (!env.encryptionKey) {
+    return { error: 'ENCRYPTION_KEY is missing on the server.' as const };
+  }
 
   const oauthClient = getOAuthClient();
   if (!oauthClient) {
@@ -65,7 +67,8 @@ const buildGoogleOauthUrl = (req: Request) => {
   });
   const url = oauthClient.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
+    // Force account chooser so users can switch Google accounts during reconnect.
+    prompt: 'consent select_account',
     scope: [...SHEETS_SCOPES],
     state: signedState
   });
@@ -110,9 +113,32 @@ export const getGoogleSheetsConnectUrl = async (req: Request, res: Response) => 
 const settingsRedirectBase = `${env.clientUrl}/dashboard/settings`;
 
 const redirectWithStatus = (res: Response, status: 'connected' | 'error', reason?: string) => {
+  if (status === 'connected') {
+    console.info('[GoogleSheets OAuth] callback success', { status, reason: reason ?? null });
+  } else {
+    console.error('[GoogleSheets OAuth] callback failed', { status, reason: reason ?? 'unknown' });
+  }
   const qs = new URLSearchParams({ googleSheets: status });
   if (reason) qs.set('reason', reason);
   return res.redirect(`${settingsRedirectBase}?${qs.toString()}`);
+};
+
+const extractOauthCallbackReason = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('missing encryption_key')) return 'encryption_key_missing';
+  if (normalized.includes('encryption_key must be base64')) return 'encryption_key_invalid';
+  if (normalized.includes('invalid_grant')) return 'google_invalid_grant';
+  if (normalized.includes('redirect_uri_mismatch')) return 'google_redirect_uri_mismatch';
+  if (normalized.includes('invalid_client')) return 'google_invalid_client';
+  if (normalized.includes('access_denied')) return 'google_access_denied';
+  if (normalized.includes('unauthorized_client')) return 'google_unauthorized_client';
+  if (normalized.includes('would create a conflict') || normalized.includes('conflictingupdateoperators')) {
+    return 'google_settings_conflict';
+  }
+  if (normalized.includes('e11000')) return 'google_settings_conflict';
+  return 'google_oauth_callback_failed';
 };
 
 export const googleSheetsCallback = async (req: Request, res: Response) => {
@@ -175,25 +201,6 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
       }
     }
 
-    await IntegrationSecretModel.findOneAndUpdate(
-      { companyId: parsedState.companyId, provider: 'google_oauth' },
-      {
-        $set: {
-          encryptedPayload: encryptJson(
-            {
-              accessToken: tokens.access_token,
-              refreshToken: refreshTokenToStore,
-              expiryDate: tokens.expiry_date ?? null,
-              scope: tokens.scope ?? null,
-              tokenType: tokens.token_type ?? null,
-            },
-            env.encryptionKey,
-          ),
-        },
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
-
     // Fetch OAuth user email for connectedEmail
     oauthClient.setCredentials({
       access_token: tokens.access_token,
@@ -217,43 +224,38 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
       // non-fatal
     }
 
-    await IntegrationSettingsModel.findOneAndUpdate(
-      { companyId: parsedState.companyId },
+    await IntegrationSecretModel.findOneAndUpdate(
+      { companyId: parsedState.companyId, provider: 'google_oauth' },
       {
         $set: {
-          ownerUserId: parsedState.userId,
-          'googleSheets.connected': true,
-          'googleSheets.connectedEmail': connectedEmail,
-          'googleSheets.mode': 'oauth',
-          'googleSheets.updatedAt': new Date(),
-        },
-        $setOnInsert: {
-          'googleSheets.serviceAccountEmail': SERVICE_ACCOUNT_EMAIL,
-          'googleSheets.sharedSheets': [],
-          'googleSheets.sharedConfig': {
-            spreadsheetId: null,
-            sheetName: 'Sheet1',
-            headerRow: 1,
-            columnsMap: {},
-            enabled: false,
-            lastVerifiedAt: null,
-            lastImportAt: null,
-          },
-          'googleSheets.sources': [],
-          'quickbooks.connected': false,
-          'quickbooks.environment': 'sandbox',
-          'quickbooks.realmId': null,
-          'quickbooks.companyName': null,
-          'quickbooks.updatedAt': new Date(),
+          encryptedPayload: encryptJson(
+            {
+              accessToken: tokens.access_token,
+              refreshToken: refreshTokenToStore,
+              expiryDate: tokens.expiry_date ?? null,
+              scope: tokens.scope ?? null,
+              tokenType: tokens.token_type ?? null,
+              connectedEmail
+            },
+            env.encryptionKey,
+          ),
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
 
+    const settings = await getOrCreateSettings(parsedState.companyId, parsedState.userId);
+    ensureGoogleSheetsShape(settings);
+    settings.ownerUserId = parsedState.userId as any;
+    (settings.googleSheets as any).oauth.enabled = true;
+    (settings.googleSheets as any).oauth.connectionStatus = 'connected';
+    (settings.googleSheets as any).updatedAt = new Date();
+    await settings.save();
+
     return redirectWithStatus(res, 'connected');
   } catch (error) {
-    console.error(error);
-    return redirectWithStatus(res, 'error', 'google_oauth_callback_failed');
+    console.error('[GoogleSheets OAuth] callback exception', error);
+    return redirectWithStatus(res, 'error', extractOauthCallbackReason(error));
   }
 };
 
@@ -265,10 +267,6 @@ export const listOAuthSpreadsheets = async (req: Request, res: Response) => {
 
   try {
     const drive = await (await import('../integrations/google/sheets.client')).getDriveClientForCompany(companyId);
-    const settings = await IntegrationSettingsModel.findOne({ companyId }).select('googleSheets.connectedEmail').lean();
-    const connectedEmail = (settings?.googleSheets as any)?.connectedEmail ?? null;
-    // eslint-disable-next-line no-console
-    if (connectedEmail) console.log('[google-oauth-spreadsheets]', { companyId, connectedEmail });
 
     const q = "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
     const response = await drive.files.list({
@@ -306,27 +304,93 @@ export const getGoogleSheetsOAuthStatus = async (req: Request, res: Response) =>
   }
 
   const settings = await IntegrationSettingsModel.findOne({ companyId })
-    .select('googleSheets.connected googleSheets.connectedEmail')
+    .select('googleSheets.oauth')
     .lean();
-  const connected = Boolean((settings?.googleSheets as any)?.connected);
-  const connectedEmail = (settings?.googleSheets as any)?.connectedEmail ?? null;
+  const oauth = (settings?.googleSheets as any)?.oauth ?? {};
+  const connected = oauth.connectionStatus === 'connected';
 
   const secret = await IntegrationSecretModel.findOne({ companyId, provider: 'google_oauth' })
-    .select('_id')
+    .select('+encryptedPayload')
     .lean();
-  if (!connected || !secret) {
-    return ok(res, { ok: false, reason: 'not_connected', email: connectedEmail });
+  if (!connected || !secret?.encryptedPayload) {
+    return ok(res, { ok: false, reason: 'not_connected', email: null, scopes: null, expiresInSec: null });
+  }
+
+  let cachedEmail: string | null = null;
+  let scopes: string[] | null = null;
+  let expiresInSec: number | null = null;
+  try {
+    const payload = decryptJson<{
+      connectedEmail?: string | null;
+      scope?: string | null;
+      expiryDate?: number | null;
+    }>(secret.encryptedPayload, env.encryptionKey);
+    cachedEmail =
+      typeof payload.connectedEmail === 'string' && payload.connectedEmail.trim().length > 0
+        ? payload.connectedEmail.trim()
+        : null;
+    scopes =
+      typeof payload.scope === 'string' && payload.scope.trim().length > 0
+        ? payload.scope.split(/\s+/).filter(Boolean)
+        : null;
+    if (typeof payload.expiryDate === 'number' && Number.isFinite(payload.expiryDate)) {
+      expiresInSec = Math.max(0, Math.floor((payload.expiryDate - Date.now()) / 1000));
+    }
+  } catch {
+    // Best-effort metadata; token validation still runs below.
   }
 
   try {
-    const drive = await (await import('../integrations/google/sheets.client')).getDriveClientForCompany(companyId);
+    const { getDriveClientForCompany, getOAuthClientForCompany } = await import('../integrations/google/sheets.client');
+    const drive = await getDriveClientForCompany(companyId);
     await drive.files.list({
       pageSize: 1,
       fields: 'files(id)'
     });
-    return ok(res, { ok: true, reason: null, email: connectedEmail });
+
+    let resolvedEmail = cachedEmail;
+    if (!resolvedEmail) {
+      try {
+        const about = await drive.about.get({ fields: 'user(emailAddress)' });
+        resolvedEmail =
+          typeof about.data.user?.emailAddress === 'string' && about.data.user.emailAddress.trim().length > 0
+            ? about.data.user.emailAddress.trim()
+            : null;
+      } catch {
+        // Fallback to oauth userinfo below.
+      }
+
+      if (!resolvedEmail) {
+        try {
+          const oauthClient = await getOAuthClientForCompany(companyId);
+          const oauth2 = google.oauth2({ version: 'v2', auth: oauthClient });
+          const userInfo = await oauth2.userinfo.get();
+          resolvedEmail =
+            typeof userInfo.data.email === 'string' && userInfo.data.email.trim().length > 0
+              ? userInfo.data.email.trim()
+              : null;
+        } catch {
+          // Non-fatal: status remains OK without resolved email.
+        }
+      }
+
+      if (resolvedEmail) {
+        try {
+          const payload = decryptJson<Record<string, unknown>>(secret.encryptedPayload, env.encryptionKey);
+          const nextPayload = { ...payload, connectedEmail: resolvedEmail };
+          await IntegrationSecretModel.updateOne(
+            { companyId, provider: 'google_oauth' },
+            { $set: { encryptedPayload: encryptJson(nextPayload, env.encryptionKey) } }
+          );
+        } catch {
+          // Non-fatal: status can still return resolvedEmail.
+        }
+      }
+    }
+
+    return ok(res, { ok: true, reason: null, email: resolvedEmail, scopes, expiresInSec });
   } catch {
-    return ok(res, { ok: false, reason: 'token_invalid', email: connectedEmail });
+    return ok(res, { ok: false, reason: 'token_invalid', email: cachedEmail, scopes, expiresInSec });
   }
 };
 

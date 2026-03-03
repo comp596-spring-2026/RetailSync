@@ -5,6 +5,7 @@ import {
   commitPosImportFromSharedSheet,
   exportPosDailyCsv,
   getPosOverview,
+  getPosTrend,
   importPosCsv,
   importPosFile,
   importPosRows,
@@ -71,6 +72,7 @@ router.post(
   clearPosDailyData
 );
 router.get('/daily', requirePermission('pos', 'view'), listPosDaily);
+router.get('/trend', requirePermission('pos', 'view'), getPosTrend);
 router.get('/daily-paged', requirePermission('pos', 'view'), listPosDailyPaged);
 router.get('/overview', requirePermission('pos', 'view'), getPosOverview);
 router.get('/export', requirePermission('pos', 'view'), exportPosDailyCsv);

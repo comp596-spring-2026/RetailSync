@@ -21,12 +21,24 @@ describe('settingsSlice', () => {
     mockedSettingsApi.get.mockResolvedValueOnce({
       data: {
         data: {
+          id: 'settings-1',
+          companyId: 'company-1',
+          ownerUserId: 'user-1',
           googleSheets: {
-            mode: 'service_account',
-            serviceAccountEmail: 'svc@retailsync.test',
-            connected: true,
-            connectedEmail: null,
-            sources: []
+            activeIntegration: 'shared',
+            oauth: {
+              enabled: true,
+              connectionStatus: 'connected',
+              activeSourceId: 'source-1',
+              activeConnectorKey: 'pos_daily',
+              sources: []
+            },
+            shared: {
+              enabled: false,
+              activeProfileId: null,
+              activeConnectorKey: 'pos_daily',
+              profiles: []
+            }
           },
           quickbooks: {
             connected: false,
@@ -50,7 +62,7 @@ describe('settingsSlice', () => {
     await store.dispatch(fetchSettings());
     const state = store.getState().settings;
 
-    expect(state.settings?.googleSheets.connected).toBe(true);
+    expect(state.settings?.googleSheets.oauth.connectionStatus).toBe('connected');
     expect(state.loading).toBe(false);
   });
 

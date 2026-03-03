@@ -1,30 +1,50 @@
 import {
   Alert,
-  alpha,
   Box,
-  Chip,
+  Button,
+  CircularProgress,
   FormControl,
+  FormHelperText,
   InputLabel,
-  LinearProgress,
   MenuItem,
   Paper,
   Select,
   Stack,
+  Divider,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
-  Tooltip,
+  TableContainer,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
-  TextField
 } from '@mui/material';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import LinkOffIcon from '@mui/icons-material/LinkOff';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
+import {
+  autoFixDuplicateColumnUsage,
+  getCompatibility,
+  normalizeDerivedConfig,
+  serializeDerivedConfig,
+  setColumnForDerivedMap,
+  setColumnForTarget,
+  setDerivedMode,
+  toMappingByColumn,
+  toMappingByTarget,
+} from './matchingWizard/mappingLogic';
+import {
+  DERIVED_DEFINITIONS,
+  DERIVED_DEFAULT_FORMULAS,
+  MAPPABLE_TARGET_KEYS,
+  OPTIONAL_TARGET_KEYS,
+  REQUIRED_TARGET_KEYS,
+  TARGET_LABELS,
+  type DerivedKey,
+  type MappingCompatibility,
+  type MappableTargetKey,
+} from './matchingWizard/mappingTypes';
+import { getMissingDependencies } from './matchingWizard/expressionValidation';
 
 export type MappingSuggestion = {
   col: string;
@@ -43,476 +63,646 @@ type MatchingWizardProps = {
   rowErrors: Array<{ rowIndex: number; errors: Array<{ col: string; message: string }> }>;
   onChangeMapping: (next: Record<string, string>) => void;
   onChangeTransforms: (next: Record<string, unknown>) => void;
+  onCompatibilityChange?: (compatibility: MappingCompatibility) => void;
 };
 
-const AUTO_MAP_CONFIDENCE_THRESHOLD = 0.85;
-const normalizeTargetValue = (target: string) => {
-  const trimmed = String(target ?? '').trim();
-  if (!trimmed) return '';
-  if (trimmed.startsWith('custom:')) {
-    return `custom:${trimmed.replace(/^custom:/, '').trim().toLowerCase()}`;
+const isDateHeader = (value: string) => value.trim().toLowerCase() === 'date';
+const hasTimestampWord = (value: string) => value.trim().toLowerCase().includes('timestamp');
+
+const toOptionalNumber = (value: unknown): number | null => {
+  if (value == null) return null;
+  const cleaned = String(value).replace(/[$,\s]/g, '').trim();
+  if (!cleaned) return null;
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
+};
+
+const isValidUtcDateParts = (year: number, month: number, day: number): boolean => {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+};
+
+const parsePreviewDate = (value: string): Date | null => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+
+  // ISO date format
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split('-').map(Number);
+    if (!isValidUtcDateParts(year, month, day)) return null;
+    return new Date(Date.UTC(year, month - 1, day));
   }
-  return trimmed.toLowerCase();
+
+  // US date format MM/DD/YYYY
+  const usMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (usMatch) {
+    const month = Number(usMatch[1]);
+    const day = Number(usMatch[2]);
+    const year = Number(usMatch[3]);
+    if (!isValidUtcDateParts(year, month, day)) return null;
+    return new Date(Date.UTC(year, month - 1, day));
+  }
+
+  // Common dashed US format MM-DD-YYYY
+  const dashedUsMatch = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dashedUsMatch) {
+    const month = Number(dashedUsMatch[1]);
+    const day = Number(dashedUsMatch[2]);
+    const year = Number(dashedUsMatch[3]);
+    if (!isValidUtcDateParts(year, month, day)) return null;
+    return new Date(Date.UTC(year, month - 1, day));
+  }
+
+  // Google sheets / Excel serial date fallback.
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const serial = Number(raw);
+    if (Number.isFinite(serial) && serial > 25569) {
+      const utcMs = Math.round((serial - 25569) * 86400 * 1000);
+      const parsed = new Date(utcMs);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const TARGET_LABELS: Record<string, string> = {
-  date: 'Date',
-  day: 'Day',
-  highTax: 'High Tax',
-  lowTax: 'Low Tax',
-  saleTax: 'Sale Tax',
-  totalSales: 'Total Sales',
-  gas: 'Gas',
-  lottery: 'Lottery',
-  creditCard: 'Credit Card',
-  lotteryPayout: 'Lottery Payout (Cash)',
-  clTotal: 'Credit + Lottery Total',
-  cash: 'Cash Diff',
-  cashPayout: 'Cash Payout',
-  cashExpenses: 'Cash Expenses',
-  notes: 'Notes / Description'
+const previewDayFromDate = (value: string) => {
+  const parsed = parsePreviewDate(value);
+  if (!parsed) return '—';
+  return parsed.toLocaleDateString('en-US', {
+    weekday: 'short',
+    timeZone: 'UTC',
+  });
+};
+
+const getSafeHeaderValue = (value: string | null | undefined, headers: string[]) =>
+  value && headers.includes(value) ? value : '';
+
+const evaluateDerivedPreviewValue = (key: DerivedKey, context: Record<string, unknown>): unknown => {
+  const n = (value: unknown) => toOptionalNumber(value);
+  const getTotalSales = () => {
+    const fromContext = n(context.totalSales);
+    if (fromContext != null) return fromContext;
+    const highTax = n(context.highTax);
+    const lowTax = n(context.lowTax);
+    if (highTax == null || lowTax == null) return null;
+    return highTax + lowTax;
+  };
+
+  switch (key) {
+    case 'day': {
+      const rawDate = context.date;
+      if (typeof rawDate !== 'string' || !rawDate.trim()) return null;
+      return previewDayFromDate(rawDate.trim());
+    }
+    case 'totalSales': {
+      return getTotalSales();
+    }
+    case 'creditPlusLottery': {
+      const creditCard = n(context.creditCard);
+      const lotteryPayout = n(context.lotteryPayout);
+      if (creditCard == null || lotteryPayout == null) return null;
+      return creditCard + lotteryPayout;
+    }
+    case 'cashDiff': {
+      const totalSales = getTotalSales();
+      const gas = n(context.gas);
+      const lottery = n(context.lottery);
+      const saleTax = n(context.saleTax);
+      const creditCard = n(context.creditCard);
+      const lotteryPayout = n(context.lotteryPayout);
+      if (
+        totalSales == null ||
+        gas == null ||
+        lottery == null ||
+        saleTax == null ||
+        creditCard == null ||
+        lotteryPayout == null
+      ) {
+        return null;
+      }
+      return totalSales + gas + lottery + saleTax - (creditCard + lotteryPayout);
+    }
+    default:
+      return null;
+  }
 };
 
 export const MatchingWizard = ({
   headers,
   sampleRows,
-  suggestions,
+  suggestions: _suggestions,
   mapping,
   transforms,
-  targetFields,
+  targetFields: _targetFields,
   rowErrors,
   onChangeMapping,
-  onChangeTransforms
+  onChangeTransforms,
+  onCompatibilityChange,
 }: MatchingWizardProps) => {
-  void transforms;
-  void targetFields;
-  void onChangeTransforms;
+  void _suggestions;
+  void _targetFields;
 
-  const resolvedMapping = useMemo(() => {
-    const next: Record<string, string> = {};
-    const used = new Set<string>();
-
-    for (const header of headers) {
-      const chosen = mapping[header];
-      if (!chosen) continue;
-      const key = normalizeTargetValue(chosen);
-      if (!key || used.has(key)) {
-        next[header] = '';
-        continue;
-      }
-      used.add(key);
-      next[header] = chosen;
-    }
-
-    for (const s of suggestions) {
-      if (next[s.header]) continue;
-      if (s.score < AUTO_MAP_CONFIDENCE_THRESHOLD) continue;
-      const candidate = String(s.suggestion ?? '').trim();
-      if (!candidate) continue;
-      const key = normalizeTargetValue(candidate);
-      if (!key || used.has(key)) continue;
-      next[s.header] = candidate;
-      used.add(key);
+  const mappingByTarget = useMemo(() => toMappingByTarget(mapping), [mapping]);
+  const derivedConfig = useMemo(() => {
+    const raw = normalizeDerivedConfig(transforms, mapping);
+    const next: typeof raw = { ...raw };
+    for (const key of Object.keys(next) as DerivedKey[]) {
+      next[key] = {
+        ...next[key],
+        mode: key === 'cashDiff' ? 'calc' : (next[key].mode === 'map' ? 'map' : 'calc'),
+        equation: DERIVED_DEFAULT_FORMULAS[key],
+        sheetColumnId: key === 'cashDiff' ? null : next[key].sheetColumnId,
+      };
     }
     return next;
-  }, [headers, mapping, suggestions]);
+  }, [mapping, transforms]);
 
-  const requiredTargets = useMemo(
-    () => [
-      'date',
-      'highTax',
-      'lowTax',
-      'saleTax',
-      'gas',
-      'lottery',
-      'creditCard',
-      'lotteryPayout',
-      'cashExpenses'
-    ],
-    []
+  const compatibility = useMemo(
+    () => getCompatibility({ mappingByTarget, derivedConfig, headers }),
+    [derivedConfig, headers, mappingByTarget],
   );
 
-  const optionalTargets = useMemo(() => ['notes'], []);
-  const calculatedTargets = useMemo(
-    () => ['day', 'totalSales', 'cash', 'clTotal', 'cashPayout'],
-    []
-  );
+  useEffect(() => {
+    onCompatibilityChange?.(compatibility);
+  }, [compatibility, onCompatibilityChange]);
 
-  const mappedTargets = useMemo(
-    () => new Set(Object.values(resolvedMapping).filter(Boolean)),
-    [resolvedMapping]
-  );
-
-  const missingRequired = useMemo(
-    () => requiredTargets.filter((t) => !mappedTargets.has(t)),
-    [requiredTargets, mappedTargets]
-  );
-
-  const calculatedFields = useMemo(
-    () => [
-      { key: 'day', label: 'Day' },
-      { key: 'totalSales', label: 'Total Sales (highTax + lowTax)' },
-      { key: 'cash', label: 'Cash (totalSales - creditCard)' },
-      { key: 'clTotal', label: 'CL Total (creditCard + lottery)' },
-      { key: 'cashPayout', label: 'Cash Payout (cashExpenses fallback)' }
-    ],
-    []
-  );
+  const pushState = (nextMappingByTarget: ReturnType<typeof toMappingByTarget>, nextDerivedConfig = derivedConfig) => {
+    onChangeMapping(toMappingByColumn(nextMappingByTarget));
+    onChangeTransforms({
+      ...transforms,
+      ...serializeDerivedConfig(nextDerivedConfig),
+    });
+  };
 
   const mappedCount = useMemo(
-    () => Object.values(resolvedMapping).filter(Boolean).length,
-    [resolvedMapping]
+    () => Object.values(mappingByTarget).filter(Boolean).length,
+    [mappingByTarget],
   );
-  const totalCols = headers.length;
-  const mappedPct = totalCols > 0 ? Math.round((mappedCount / totalCols) * 100) : 0;
+  const totalMappableCount = MAPPABLE_TARGET_KEYS.length;
+  const mappedPercent = totalMappableCount > 0 ? Math.round((mappedCount / totalMappableCount) * 100) : 0;
 
-  const usedTargets = useMemo(
-    () => new Set(Object.values(resolvedMapping).filter(Boolean)),
-    [resolvedMapping]
-  );
+  const statusSeverity: 'success' | 'warning' | 'error' =
+    compatibility.status === 'ok' ? 'success' : compatibility.status === 'warn' ? 'warning' : 'error';
 
-  const previewRows = sampleRows.slice(0, 3);
-  const flatErrors = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const re of rowErrors) {
-      for (const e of re.errors) {
-        const list = map.get(e.col) ?? [];
-        list.push(e.message);
-        map.set(e.col, list);
+  const canUseDateQuickFix = useMemo(() => {
+    const dateHeader = headers.find(isDateHeader);
+    if (!dateHeader) return false;
+    return mappingByTarget.date !== dateHeader;
+  }, [headers, mappingByTarget.date]);
+
+  const canClearTimestampMapping = useMemo(() => {
+    if (Object.values(mappingByTarget).some((column) => column && hasTimestampWord(column))) return true;
+    return Object.values(derivedConfig).some(
+      (entry) => entry.mode === 'map' && entry.sheetColumnId && hasTimestampWord(entry.sheetColumnId),
+    );
+  }, [derivedConfig, mappingByTarget]);
+
+  const previewDescriptors = useMemo(() => {
+    const mappedTargets = MAPPABLE_TARGET_KEYS
+      .filter((key) => mappingByTarget[key])
+      .map((key) => ({
+        id: `target:${key}`,
+        label: TARGET_LABELS[key],
+        kind: 'target' as const,
+        sourceText: `From: ${mappingByTarget[key]}`,
+        columnId: mappingByTarget[key],
+      }));
+
+    const visibleDerivedKeys = DERIVED_DEFINITIONS.map((definition) => definition.key);
+    const derived = visibleDerivedKeys.map((key) => {
+        const entry = derivedConfig[key];
+        return {
+          id: `derived:${key}`,
+          label: TARGET_LABELS[key],
+          kind: 'derived' as const,
+          sourceText: entry.mode === 'map' ? `From: ${entry.sheetColumnId ?? '—'}` : `Calc: ${DERIVED_DEFAULT_FORMULAS[key]}`,
+          mode: entry.mode,
+          columnId: entry.sheetColumnId,
+        };
+      });
+
+    return [...mappedTargets, ...derived];
+  }, [derivedConfig, mappingByTarget]);
+
+  const previewRows = useMemo(() => {
+    const rows = sampleRows.slice(0, 10);
+    return rows.map((row) => {
+      const context: Record<string, unknown> = {};
+      for (const key of MAPPABLE_TARGET_KEYS) {
+        const header = mappingByTarget[key];
+        if (!header) continue;
+        const index = headers.indexOf(header);
+        if (index < 0) continue;
+        const raw = row[index];
+        if (key === 'date') {
+          context[key] = String(raw ?? '').trim();
+        } else if (key === 'notes') {
+          context[key] = String(raw ?? '');
+        } else {
+          const numeric = toOptionalNumber(raw);
+          if (numeric != null) context[key] = numeric;
+        }
       }
-    }
-    return map;
-  }, [rowErrors]);
+
+      if (context.totalSales == null) {
+        const highTax = toOptionalNumber(context.highTax);
+        const lowTax = toOptionalNumber(context.lowTax);
+        if (highTax != null && lowTax != null) context.totalSales = highTax + lowTax;
+      }
+
+      return previewDescriptors.map((descriptor) => {
+        if (descriptor.kind === 'target') {
+          const index = headers.indexOf(String(descriptor.columnId));
+          const value = index >= 0 ? row[index] : '';
+          if (descriptor.id === 'target:date') context.date = String(value ?? '').trim();
+          return String(value ?? '—') || '—';
+        }
+
+        const derivedKey = descriptor.id.replace('derived:', '') as DerivedKey;
+        if (descriptor.mode === 'map' && descriptor.columnId) {
+          const index = headers.indexOf(descriptor.columnId);
+          const raw = index >= 0 ? row[index] : '';
+          if (derivedKey === 'day') {
+            context[derivedKey] = String(raw ?? '').trim();
+          } else {
+            const numeric = toOptionalNumber(raw);
+            if (numeric != null) context[derivedKey] = numeric;
+          }
+          return String(raw ?? '—') || '—';
+        }
+
+        const evaluated = evaluateDerivedPreviewValue(derivedKey, context);
+        if (derivedKey === 'day') {
+          const dayValue = typeof evaluated === 'string' && evaluated.trim() ? evaluated.trim() : '—';
+          if (dayValue !== '—') context.day = dayValue;
+          return dayValue;
+        }
+        const numeric = toOptionalNumber(evaluated);
+        if (numeric == null) return '—';
+        context[derivedKey] = numeric;
+        return numeric.toFixed(2);
+      });
+    });
+  }, [derivedConfig, headers, mappingByTarget, previewDescriptors, sampleRows]);
 
   return (
-    <Stack spacing={2.5}>
-      {/* Summary bar */}
+    <Stack spacing={2}>
       <Paper variant="outlined" sx={{ p: 2 }}>
-        <Stack spacing={1}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Typography variant="subtitle2">
-              Column Mapping
-            </Typography>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Chip
-                icon={<CheckCircleIcon />}
-                label={`${mappedCount} / ${totalCols} mapped`}
-                size="small"
-                color={mappedCount === totalCols ? 'success' : mappedCount > 0 ? 'warning' : 'default'}
-                variant="outlined"
-              />
-              {rowErrors.length > 0 && (
-                <Chip
-                  icon={<WarningAmberIcon />}
-                  label={`${rowErrors.length} error${rowErrors.length > 1 ? 's' : ''}`}
-                  size="small"
-                  color="error"
-                  variant="outlined"
-                />
-              )}
+        <Stack spacing={1.5}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+            <Stack spacing={0.5}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                Column Mapping
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Map spreadsheet columns to RetailSync fields. Required fields must be mapped.
+              </Typography>
             </Stack>
-          </Stack>
-          <LinearProgress
-            variant="determinate"
-            value={mappedPct}
-            sx={{
-              height: 6,
-              borderRadius: 3,
-              bgcolor: (t) => alpha(t.palette.primary.main, 0.08),
-              '& .MuiLinearProgress-bar': { borderRadius: 3 }
-            }}
-          />
-          <Typography variant="caption" color="text.secondary">
-            Map your spreadsheet columns to RetailSync fields. Columns with high-confidence matches are pre-filled.
-          </Typography>
-        </Stack>
-      </Paper>
-
-      {/* Required/optional + calculated */}
-      <Paper variant="outlined" sx={{ p: 2 }}>
-        <Stack spacing={1.25}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }} justifyContent="space-between">
-            <Typography variant="subtitle2">Required fields</Typography>
-            <Chip
-              size="small"
-              variant="outlined"
-              color={missingRequired.length === 0 ? 'success' : 'warning'}
-              label={
-                missingRequired.length === 0
-                  ? 'All required fields mapped'
-                  : `Missing: ${missingRequired.map((t) => TARGET_LABELS[t] ?? t).join(', ')}`
-              }
-            />
-          </Stack>
-
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            {requiredTargets.map((t) => (
-              <Chip
-                key={t}
-                size="small"
-                variant={mappedTargets.has(t) ? 'filled' : 'outlined'}
-                color={mappedTargets.has(t) ? 'success' : 'default'}
-                label={TARGET_LABELS[t] ?? t}
-              />
-            ))}
-          </Stack>
-
-          <Typography variant="subtitle2" sx={{ mt: 0.5 }}>Optional fields</Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            {optionalTargets.map((t) => (
-              <Chip
-                key={t}
-                size="small"
-                variant={mappedTargets.has(t) ? 'filled' : 'outlined'}
-                color={mappedTargets.has(t) ? 'success' : 'default'}
-                label={TARGET_LABELS[t] ?? t}
-              />
-            ))}
-            <Chip size="small" variant="outlined" label="Custom fields allowed" />
-          </Stack>
-
-          <Typography variant="subtitle2" sx={{ mt: 0.5 }}>Calculated fields (optional direct mapping)</Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            {calculatedFields.map((f) => (
-              <Chip
-                key={f.key}
-                size="small"
-                variant="outlined"
-                color={mappedTargets.has(f.key) ? 'success' : missingRequired.length === 0 ? 'default' : 'default'}
-                label={mappedTargets.has(f.key) ? `${f.label} (mapped)` : missingRequired.length === 0 ? `${f.label} (auto)` : `${f.label} (needs required fields)`}
-              />
-            ))}
-          </Stack>
-        </Stack>
-      </Paper>
-
-      {/* Mapping table */}
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow sx={{ bgcolor: 'action.hover' }}>
-              <TableCell sx={{ fontWeight: 600, width: '5%' }}>#</TableCell>
-              <TableCell sx={{ fontWeight: 600, width: '22%' }}>Sheet Column</TableCell>
-              <TableCell sx={{ fontWeight: 600, width: '12%' }}>Status</TableCell>
-              <TableCell sx={{ fontWeight: 600, width: '5%', textAlign: 'center' }} />
-              <TableCell sx={{ fontWeight: 600, width: '28%' }}>Map To</TableCell>
-              <TableCell sx={{ fontWeight: 600, width: '18%' }}>Sample</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {headers.map((header, idx) => {
-              const target = resolvedMapping[header] ?? '';
-              const isMapped = !!target;
-              const hasError = flatErrors.has(header);
-              const sampleVal = previewRows[0]?.[idx] ?? '';
-
-              return (
-                <TableRow
-                  key={header}
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+                <CircularProgress variant="determinate" value={mappedPercent} size={36} thickness={5} />
+                <Box
                   sx={{
-                    bgcolor: hasError
-                      ? (t) => alpha(t.palette.error.main, 0.04)
-                      : isMapped
-                        ? (t) => alpha(t.palette.success.main, 0.03)
-                        : undefined,
-                    '&:hover': { bgcolor: 'action.hover' }
+                    top: 0,
+                    left: 0,
+                    bottom: 0,
+                    right: 0,
+                    position: 'absolute',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                   }}
                 >
-                  <TableCell>
-                    <Typography variant="caption" color="text.secondary">{String.fromCharCode(65 + idx)}</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      {isMapped
-                        ? <CheckCircleIcon sx={{ fontSize: 16, color: 'success.main' }} />
-                        : <LinkOffIcon sx={{ fontSize: 16, color: 'text.disabled' }} />}
-                      <Typography variant="body2" fontWeight={500}>{header}</Typography>
-                    </Stack>
-                    {hasError && (
-                      <Typography variant="caption" color="error.main" sx={{ display: 'block', mt: 0.25 }}>
-                        {flatErrors.get(header)?.[0]}
-                      </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {isMapped ? (
-                      <Chip label="Mapped" size="small" color="success" variant="outlined" sx={{ fontSize: 11 }} />
-                    ) : (
-                      <Typography variant="caption" color="text.secondary">
-                        Unmapped
-                      </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell sx={{ textAlign: 'center' }}>
-                    <ArrowForwardIcon sx={{ fontSize: 16, color: isMapped ? 'primary.main' : 'text.disabled' }} />
-                  </TableCell>
-                  <TableCell>
-                    <FormControl size="small" fullWidth>
-                      <InputLabel id={`map-${header}`}>Target</InputLabel>
-                      <Select
-                        labelId={`map-${header}`}
-                        value={target}
-                        label="Target"
-                        onChange={(e) => onChangeMapping({ ...resolvedMapping, [header]: String(e.target.value) })}
-                      >
-                        <MenuItem value="">
-                          <em>Unmapped</em>
-                        </MenuItem>
-                        <MenuItem disabled>
-                          <Typography variant="caption" color="text.secondary">Required</Typography>
-                        </MenuItem>
-                        {requiredTargets.map((field) => {
-                          const taken = usedTargets.has(field) && target !== field;
-                          return (
-                            <MenuItem key={field} value={field} disabled={taken}>
-                              {TARGET_LABELS[field] ?? field}
-                              {taken && (
-                                <Typography variant="caption" color="text.disabled" sx={{ ml: 1 }}>
-                                  (in use)
-                                </Typography>
-                              )}
-                            </MenuItem>
-                          );
-                        })}
-                        <MenuItem disabled>
-                          <Typography variant="caption" color="text.secondary">Optional</Typography>
-                        </MenuItem>
-                        {optionalTargets.map((field) => {
-                          const taken = usedTargets.has(field) && target !== field;
-                          return (
-                            <MenuItem key={field} value={field} disabled={taken}>
-                              {TARGET_LABELS[field] ?? field}
-                              {taken && (
-                                <Typography variant="caption" color="text.disabled" sx={{ ml: 1 }}>
-                                  (in use)
-                                </Typography>
-                              )}
-                            </MenuItem>
-                          );
-                        })}
-                        <MenuItem disabled>
-                          <Typography variant="caption" color="text.secondary">Calculated (optional direct mapping)</Typography>
-                        </MenuItem>
-                        {calculatedTargets.map((field) => {
-                          const taken = usedTargets.has(field) && target !== field;
-                          return (
-                            <MenuItem key={field} value={field} disabled={taken}>
-                              {TARGET_LABELS[field] ?? field}
-                              {taken && (
-                                <Typography variant="caption" color="text.disabled" sx={{ ml: 1 }}>
-                                  (in use)
-                                </Typography>
-                              )}
-                            </MenuItem>
-                          );
-                        })}
-                        <MenuItem value="custom:">
-                          <em>Custom field…</em>
-                        </MenuItem>
-                      </Select>
-                    </FormControl>
-                    {target.startsWith('custom:') && (
-                      <TextField
-                        size="small"
-                        margin="dense"
-                        fullWidth
-                        label="Custom field name"
-                        placeholder="e.g. timestamp"
-                        value={target.replace(/^custom:/, '')}
-                        onChange={(e) => onChangeMapping({ ...resolvedMapping, [header]: `custom:${e.target.value}` })}
-                      />
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Tooltip title={sampleVal || '(empty)'}>
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          display: 'block',
-                          maxWidth: 140,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          color: sampleVal ? 'text.primary' : 'text.disabled',
-                          fontFamily: 'monospace'
-                        }}
-                      >
-                        {sampleVal || '—'}
-                      </Typography>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                    {mappedPercent}%
+                  </Typography>
+                </Box>
+              </Box>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {mappedCount}/{totalMappableCount} mapped
+              </Typography>
+            </Stack>
+          </Stack>
 
-      {/* Validation errors */}
-      {rowErrors.length > 0 && (
-        <Alert severity="warning" variant="outlined">
-          <Typography variant="subtitle2" gutterBottom>Validation Issues</Typography>
-          {rowErrors.slice(0, 5).map((re, i) => (
-            <Typography key={i} variant="caption" display="block">
-              Row {re.rowIndex + 1}: {re.errors.map((e) => `${e.col} — ${e.message}`).join(', ')}
-            </Typography>
-          ))}
-          {rowErrors.length > 5 && (
-            <Typography variant="caption" color="text.secondary">
-              ...and {rowErrors.length - 5} more
-            </Typography>
-          )}
-        </Alert>
-      )}
+          <Divider />
 
-      {/* Data preview */}
-      {previewRows.length > 0 && (
-        <Box>
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            Data Preview (first {previewRows.length} rows)
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Required (must map all)
           </Typography>
-          <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 200, overflow: 'auto' }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600, bgcolor: 'background.paper', width: 40 }}>#</TableCell>
-                  {headers.map((header) => {
-                    const target = resolvedMapping[header];
-                    return (
-                      <TableCell key={header} sx={{ fontWeight: 600, bgcolor: 'background.paper' }}>
-                        <Stack spacing={0}>
-                          <Typography variant="caption" fontWeight={600}>{header}</Typography>
-                          {target && (
-                            <Typography variant="caption" color="primary.main" sx={{ fontSize: 10 }}>
-                              → {TARGET_LABELS[target] ?? target}
-                            </Typography>
-                          )}
+          {REQUIRED_TARGET_KEYS.map((target) => {
+            const value = getSafeHeaderValue(mappingByTarget[target], headers);
+            const isMissing = !value;
+            return (
+              <Stack key={target} direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
+                <Typography variant="body2" sx={{ width: { xs: '100%', md: 220 }, fontWeight: 600 }}>
+                  {TARGET_LABELS[target]} *
+                </Typography>
+                <FormControl size="small" fullWidth error={isMissing}>
+                  <InputLabel id={`required-${target}`}>Select sheet column</InputLabel>
+                  <Select
+                    labelId={`required-${target}`}
+                    label="Select sheet column"
+                    value={value}
+                    onChange={(event) => {
+                      const next = setColumnForTarget(mappingByTarget, target, String(event.target.value || ''));
+                      pushState(next);
+                    }}
+                  >
+                    <MenuItem value="">
+                      <em>Unmapped</em>
+                    </MenuItem>
+                    {headers.map((header) => (
+                      <MenuItem key={`required-${target}-${header}`} value={header}>
+                        {header}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  {isMissing ? <FormHelperText>Required field is missing.</FormHelperText> : null}
+                </FormControl>
+              </Stack>
+            );
+          })}
+
+          <Typography variant="body2" sx={{ fontWeight: 600, mt: 1 }}>
+            Optional / Other
+          </Typography>
+          {OPTIONAL_TARGET_KEYS.map((target) => {
+            const value = getSafeHeaderValue(mappingByTarget[target], headers);
+            return (
+              <Stack key={target} direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
+                <Typography variant="body2" sx={{ width: { xs: '100%', md: 220 }, fontWeight: 600 }}>
+                  {TARGET_LABELS[target]}
+                </Typography>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id={`optional-${target}`}>Select sheet column</InputLabel>
+                  <Select
+                    labelId={`optional-${target}`}
+                    label="Select sheet column"
+                    value={value}
+                    onChange={(event) => {
+                      const next = setColumnForTarget(mappingByTarget, target, String(event.target.value || ''));
+                      pushState(next);
+                    }}
+                  >
+                    <MenuItem value="">
+                      <em>Unmapped</em>
+                    </MenuItem>
+                    {headers.map((header) => (
+                      <MenuItem key={`optional-${target}-${header}`} value={header}>
+                        {header}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Stack>
+            );
+          })}
+
+          <Typography variant="caption" color="text.secondary">
+            + Add custom field (placeholder)
+          </Typography>
+        </Stack>
+      </Paper>
+
+      <Paper variant="outlined">
+        <Stack spacing={2} sx={{ p: 2 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+            Calculated Fields (optional)
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Choose per field: Calculate or Map to column.
+          </Typography>
+
+          {DERIVED_DEFINITIONS.map((definition) => {
+            const entry = derivedConfig[definition.key];
+            const canMapToColumn = definition.key !== 'cashDiff';
+            const missingDependencies = getMissingDependencies(definition.key, mappingByTarget, derivedConfig);
+            const calcHasIssue = entry.mode === 'calc' && missingDependencies.length > 0;
+
+            return (
+              <Paper key={definition.key} variant="outlined" sx={{ p: 1.5 }}>
+                <Stack spacing={1}>
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {definition.label}
+                  </Typography>
+
+                  <ToggleButtonGroup
+                    exclusive
+                    size="small"
+                    value={entry.mode === 'map' ? 'map' : 'calc'}
+                    onChange={(_event, value: 'calc' | 'map' | null) => {
+                      if (!value) return;
+                      const nextDerived = setDerivedMode(derivedConfig, definition.key, value);
+                      pushState(mappingByTarget, nextDerived);
+                    }}
+                    aria-label={`${definition.label} mode`}
+                  >
+                    <ToggleButton value="calc">Calculate</ToggleButton>
+                    {canMapToColumn ? <ToggleButton value="map">Map to Column</ToggleButton> : null}
+                  </ToggleButtonGroup>
+
+                  {entry.mode === 'calc' ? (
+                    <Stack spacing={1}>
+                      <Typography variant="caption" color="text.secondary">
+                        Formula: {DERIVED_DEFAULT_FORMULAS[definition.key]}
+                      </Typography>
+                      <Typography variant="caption" color={calcHasIssue ? 'error.main' : 'text.secondary'}>
+                        {missingDependencies.length > 0
+                          ? `Requires: ${missingDependencies.map((key) => TARGET_LABELS[key]).join(', ')}`
+                          : 'Ready to calculate'}
+                      </Typography>
+                    </Stack>
+                  ) : null}
+
+                  {entry.mode === 'map' && canMapToColumn ? (
+                    <Stack spacing={1}>
+                      <FormControl fullWidth size="small" error={!entry.sheetColumnId}>
+                        <InputLabel id={`derived-map-${definition.key}`}>Sheet column</InputLabel>
+                        <Select
+                          labelId={`derived-map-${definition.key}`}
+                          label="Sheet column"
+                          value={getSafeHeaderValue(entry.sheetColumnId, headers)}
+                          onChange={(event) => {
+                            const result = setColumnForDerivedMap(
+                              derivedConfig,
+                              mappingByTarget,
+                              definition.key,
+                              String(event.target.value || ''),
+                            );
+                            pushState(result.mappingByTarget, result.derivedConfig);
+                          }}
+                        >
+                          <MenuItem value="">
+                            <em>Unmapped</em>
+                          </MenuItem>
+                          {headers.map((header) => (
+                            <MenuItem key={`derived-${definition.key}-${header}`} value={header}>
+                              {header}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                        {!entry.sheetColumnId ? <FormHelperText>Select a sheet column.</FormHelperText> : null}
+                      </FormControl>
+                    </Stack>
+                  ) : null}
+                </Stack>
+              </Paper>
+            );
+          })}
+        </Stack>
+      </Paper>
+
+      <Paper variant="outlined">
+        <Stack spacing={1} sx={{ p: 2 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+            Data Preview (first 10 rows)
+          </Typography>
+          {previewDescriptors.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No mapped targets or calculated fields enabled.
+            </Typography>
+          ) : (
+            <TableContainer
+              sx={{
+                maxHeight: 360,
+                width: '100%',
+                overflowX: 'auto',
+                overflowY: 'auto',
+                border: (theme) => `1px solid ${theme.palette.divider}`,
+                borderRadius: 1,
+              }}
+            >
+              <Table size="small" stickyHeader sx={{ minWidth: 1100 }}>
+                <TableHead>
+                  <TableRow>
+                    {previewDescriptors.map((descriptor) => (
+                      <TableCell key={descriptor.id}>
+                        <Stack spacing={0.25}>
+                          <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                            {descriptor.label}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {descriptor.sourceText}
+                          </Typography>
                         </Stack>
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {previewRows.map((row, rowIdx) => (
-                  <TableRow key={rowIdx}>
-                    <TableCell>
-                      <Typography variant="caption" color="text.secondary">{rowIdx + 1}</Typography>
-                    </TableCell>
-                    {headers.map((_, colIdx) => (
-                      <TableCell key={colIdx}>
-                        <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
-                          {row[colIdx] ?? ''}
-                        </Typography>
                       </TableCell>
                     ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
-      )}
+                </TableHead>
+                <TableBody>
+                  {previewRows.map((row, rowIndex) => (
+                    <TableRow key={`preview-row-${rowIndex}`}>
+                      {row.map((value, colIndex) => (
+                        <TableCell key={`preview-cell-${rowIndex}-${colIndex}`}>{value || '—'}</TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Stack>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 1.5 }}>
+        <Stack spacing={1}>
+          <Alert severity={statusSeverity} variant="outlined">
+            Compatibility: {compatibility.status.toUpperCase()}
+          </Alert>
+
+          {compatibility.missingRequiredTargets.length > 0 ? (
+            <Typography variant="body2" color="error.main">
+              Missing required: {compatibility.missingRequiredTargets.map((key) => TARGET_LABELS[key]).join(', ')}
+            </Typography>
+          ) : null}
+
+          {compatibility.duplicateColumnUsage.length > 0 ? (
+            <Typography variant="body2" color="error.main">
+              Duplicate column usage: {compatibility.duplicateColumnUsage.map((item) => `${item.columnId} (${item.usedBy.join(', ')})`).join('; ')}
+            </Typography>
+          ) : null}
+
+          {compatibility.invalidDerivedEquations.length > 0 ? (
+            <Typography variant="body2" color="error.main">
+              Invalid derived configuration: {compatibility.invalidDerivedEquations.map((key) => TARGET_LABELS[key]).join(', ')}
+            </Typography>
+          ) : null}
+
+          {compatibility.derivedDependencyIssues.length > 0 ? (
+            <Typography variant="body2" color="error.main">
+              Missing dependencies: {compatibility.derivedDependencyIssues
+                .map((issue) => `${TARGET_LABELS[issue.key]} (${issue.missingDependencies.map((dep) => TARGET_LABELS[dep]).join(', ')})`)
+                .join('; ')}
+            </Typography>
+          ) : null}
+
+          {compatibility.status !== 'ok' ? (
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={!canUseDateQuickFix}
+                onClick={() => {
+                  const dateHeader = headers.find(isDateHeader);
+                  if (!dateHeader) return;
+                  const next = setColumnForTarget(mappingByTarget, 'date', dateHeader);
+                  pushState(next);
+                }}
+              >
+                Use DATE as Date
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={!canClearTimestampMapping}
+                onClick={() => {
+                  const nextMapping = { ...mappingByTarget };
+                  for (const key of MAPPABLE_TARGET_KEYS) {
+                    if (nextMapping[key] && hasTimestampWord(String(nextMapping[key]))) {
+                      nextMapping[key] = null;
+                    }
+                  }
+                  const nextDerived = { ...derivedConfig };
+                  for (const key of Object.keys(nextDerived) as DerivedKey[]) {
+                    const entry = nextDerived[key];
+                    if (entry.mode === 'map' && entry.sheetColumnId && hasTimestampWord(entry.sheetColumnId)) {
+                      nextDerived[key] = { ...entry, sheetColumnId: null };
+                    }
+                  }
+                  pushState(nextMapping, nextDerived);
+                }}
+              >
+                Clear Timestamp mapping
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  const fixed = autoFixDuplicateColumnUsage(mappingByTarget, derivedConfig);
+                  pushState(fixed.mappingByTarget, fixed.derivedConfig);
+                }}
+              >
+                Auto-fix duplicates
+              </Button>
+            </Stack>
+          ) : null}
+        </Stack>
+      </Paper>
+
+      {rowErrors.length > 0 ? (
+        <Alert severity="error" variant="outlined">
+          Validation detected {rowErrors.length} row error{rowErrors.length > 1 ? 's' : ''}. Fix mapping and retry.
+        </Alert>
+      ) : null}
     </Stack>
   );
 };

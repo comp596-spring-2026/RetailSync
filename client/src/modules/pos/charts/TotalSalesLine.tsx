@@ -12,12 +12,30 @@ export const TotalSalesLine = ({ seriesData, height = 280 }: TotalSalesLineProps
   const options = withCurrencyTooltip({
     chart: {
       type: 'line',
-      toolbar: { show: false }
+      toolbar: {
+        show: true,
+        tools: {
+          download: true,
+          selection: false,
+          zoom: false,
+          zoomin: false,
+          zoomout: false,
+          pan: false,
+          reset: false
+        }
+      },
+      zoom: { enabled: false }
     },
     xaxis: {
-      type: 'datetime'
+      type: 'datetime',
+      title: {
+        text: 'Date'
+      }
     },
     yaxis: {
+      title: {
+        text: 'Total Sales (USD)'
+      },
       labels: {
         formatter: (value: number) => `$${Math.round(value).toLocaleString('en-US')}`
       }

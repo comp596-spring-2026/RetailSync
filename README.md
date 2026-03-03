@@ -129,13 +129,26 @@ Notes:
 
 ```mermaid
 flowchart TD
-  A["Import POS Data modal"] --> B["Select source (File / Google Sheets / POS DB)"]
-  B --> C["If Google Sheets: Connect (OAuth or Service Account)"]
-  C --> D["Sheet/Tabs: list + select (/api/integrations/sheets/tabs or Drive files)"]
-  D --> E["Preview sample (/api/pos/import/sheets/preview)"]
-  E --> F["Match columns (/api/pos/import/sheets/match)"]
-  F --> G["Commit import (/api/pos/import/sheets/commit)"]
+  A["Import POS Data modal"] --> B["Select source (File / Google Sheets)"]
+  B -->|"File"| C["Upload file and commit import"]
+  B -->|"Google Sheets"| D["Navigate to Settings > Google Sheets setup"]
+  D --> E["Step 1: Source + Connect/Verify (OAuth or Shared)"]
+  E --> F["Step 2: Sheet + Tab + Preview"]
+  F --> G["Step 3: Mapping + Commit connector config"]
+  G --> H["POS Sync Now -> /api/pos/import/sheets/commit"]
 ```
+
+### Google Sheets E2E Configuration Notes
+
+- Google Sheets configuration is connector-first in `/api/settings`:
+  - `googleSheets.activeIntegration`
+  - `googleSheets.oauth.sources[].connectors[]`
+  - `googleSheets.shared.profiles[].connectors[]`
+- POS page `Sync Now` resolves active connector config from server-authoritative settings.
+- POS Import modal no longer maintains a second Google setup flow; it redirects to Settings for Google configuration.
+- Mapping must be saved on the connector before sync/import.
+
+Detailed runbook: `/Users/trupal/Projects/RetailSync/docs/operations/google-sheets-e2e.md`
 
 ## Monorepo Structure
 
