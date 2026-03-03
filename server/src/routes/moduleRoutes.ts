@@ -23,5 +23,8 @@ registerModuleCrud('locations');
 registerModuleCrud('suppliers');
 registerModuleCrud('reports');
 registerModuleCrud('dashboard');
+registerModuleCrud('accounting');
+registerModuleCrud('ledger');
+registerModuleCrud('quickbooks');
 
 export default router;

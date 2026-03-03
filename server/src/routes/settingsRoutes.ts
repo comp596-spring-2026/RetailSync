@@ -14,7 +14,7 @@ import {
   updateSharedConnector
 } from '../controllers/googleSheetsController';
 import {
-  connectQuickbooksPlaceholder,
+  connectQuickbooks,
   disconnectGoogle,
   disconnectQuickbooks,
   getGoogleSheetsSyncOverview,
@@ -50,7 +50,7 @@ router.post('/google-sheets/reset', resetGoogleSheetsIntegration);
 router.post('/google-sheets/shared/verify', verifySharedSheetsConfig);
 router.post('/disconnect/google', disconnectGoogle);
 router.put('/quickbooks', setQuickbooksSettings);
-router.post('/quickbooks/connect', connectQuickbooksPlaceholder);
+router.post('/quickbooks/connect', connectQuickbooks);
 router.post('/disconnect/quickbooks', disconnectQuickbooks);
 
 export default router;

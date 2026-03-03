@@ -21,6 +21,10 @@ import debugSheetsRoutes from "./routes/debug.sheets.routes";
 import integrationGoogleSheetsRoutes from "./routes/integrationGoogleSheetsRoutes";
 import integrationsSheetsRoutes from "./routes/integrationsSheetsRoutes";
 import googleSheetsIntegrationRoutes from "./routes/googleSheetsIntegrationRoutes";
+import quickbooksIntegrationRoutes from "./routes/quickbooksIntegrationRoutes";
+import accountingRoutes from "./routes/accountingRoutes";
+import internalTaskRoutes from "./routes/internalTaskRoutes";
+import ledgerRoutes from "./routes/ledgerRoutes";
 import { notFound } from "./middleware/notFound";
 import { errorHandler } from "./middleware/errorHandler";
 import { withRequestContext } from "./config/requestContext";
@@ -113,6 +117,11 @@ export const createApp = () => {
       GOOGLE_OAUTH_CLIENT_ID: Boolean(env.googleOAuthClientId),
       GOOGLE_OAUTH_CLIENT_SECRET: Boolean(env.googleOAuthClientSecret),
       GOOGLE_AUTH_REDIRECT_URI: Boolean(env.googleAuthRedirectUri),
+      QUICKBOOKS_CLIENT_ID: Boolean(env.quickbooksClientId),
+      QUICKBOOKS_CLIENT_SECRET: Boolean(env.quickbooksClientSecret),
+      QUICKBOOKS_INTEGRATION_REDIRECT_URI: Boolean(env.quickbooksIntegrationRedirectUri),
+      API_SERVICE_NAME: Boolean(env.apiServiceName),
+      WORKER_SERVICE_NAME: Boolean(env.workerServiceName),
     };
 
     res.json({
@@ -138,11 +147,15 @@ export const createApp = () => {
   app.use("/api/sheets", sheetsRoutes);
   app.use("/api/google", googleRoutes);
   app.use("/api/integrations/google/sheets", integrationGoogleSheetsRoutes);
+  app.use("/api/integrations/quickbooks", quickbooksIntegrationRoutes);
   app.use("/api/integrations/google-sheets", googleSheetsIntegrationRoutes);
   app.use("/api/integrations/sheets", integrationsSheetsRoutes);
   app.use("/api/debug/sheets", debugSheetsRoutes);
   app.use("/api/settings", settingsRoutes);
   app.use("/api/cron", cronRoutes);
+  app.use("/api/accounting", accountingRoutes);
+  app.use("/api/accounting/ledger", ledgerRoutes);
+  app.use("/api/internal/tasks", internalTaskRoutes);
   app.use("/api", moduleRoutes);
 
   app.use(notFound);

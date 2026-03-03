@@ -33,11 +33,19 @@ export const memberPermissions = (): PermissionsMap => ({
   inventory: makePermission('inventory', { view: true, create: true, edit: true, actions: ['move'] }),
   locations: makePermission('locations', { view: true, create: true, edit: true }),
   reconciliation: makePermission('reconciliation', { view: true, create: true, actions: ['auto_match', 'confirm_match'] }),
-  bankStatements: makePermission('bankStatements', { view: true, create: true, actions: ['import'] }),
+  bankStatements: makePermission('bankStatements', {
+    view: true,
+    create: true,
+    edit: true,
+    actions: ['import', 'confirm', 'reprocess']
+  }),
   suppliers: makePermission('suppliers', { view: true, create: true, edit: true }),
   reports: makePermission('reports', { view: true, actions: ['export_csv'] }),
   users: makePermission('users', { view: true }),
-  rolesSettings: makePermission('rolesSettings', { view: false })
+  rolesSettings: makePermission('rolesSettings', { view: false }),
+  accounting: makePermission('accounting', { view: true }),
+  ledger: makePermission('ledger', { view: true, create: true, edit: true, actions: ['post', 'adjust'] }),
+  quickbooks: makePermission('quickbooks', { view: true, actions: ['connect', 'sync'] })
 });
 
 export const viewerPermissions = (): PermissionsMap => {

@@ -1,6 +1,9 @@
-import { z } from 'zod';
-import { moduleKeys } from '../constants/modules';
-import { permissionSetSchema, permissionsSchema } from '../permissions/permissions';
+import { z } from "zod";
+import { moduleKeys } from "../constants/modules";
+import {
+  permissionSetSchema,
+  permissionsSchema,
+} from "../permissions/permissions";
 
 export const emailSchema = z.string().trim().toLowerCase().email();
 
@@ -11,38 +14,44 @@ export const companyCreateSchema = z.object({
   phone: z.string().trim().min(7),
   email: emailSchema,
   timezone: z.string().trim().min(2),
-  currency: z.string().trim().min(2)
+  currency: z.string().trim().min(2),
 });
 
 export const companyJoinSchema = z.object({
-  companyCode: z.string().trim().regex(/^RS-[A-Z0-9]{6}$/),
+  companyCode: z
+    .string()
+    .trim()
+    .regex(/^RS-[A-Z0-9]{6}$/),
   inviteCode: z.string().trim().min(6),
-  email: emailSchema
+  email: emailSchema,
 });
 
 export const roleSchema = z.object({
   name: z.string().trim().min(2),
   isSystem: z.boolean().default(false),
-  permissions: permissionsSchema
+  permissions: permissionsSchema,
 });
 
 export const roleCreateSchema = z.object({
   name: z.string().trim().min(2),
-  permissions: permissionsSchema
+  permissions: permissionsSchema,
 });
 
 export const inviteCreateSchema = z.object({
   email: emailSchema,
   roleId: z.string().trim().min(1),
-  expiresInDays: z.number().int().min(1).max(30).default(7)
+  expiresInDays: z.number().int().min(1).max(30).default(7),
 });
 
 export const assignRoleSchema = z.object({
-  roleId: z.string().trim().min(1)
+  roleId: z.string().trim().min(1),
 });
 
 export const posDailySummarySchema = z.object({
-  date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/),
   day: z.string().trim().min(2),
   highTax: z.number(),
   lowTax: z.number(),
@@ -56,62 +65,94 @@ export const posDailySummarySchema = z.object({
   cash: z.number(),
   cashPayout: z.number(),
   cashExpenses: z.number(),
-  notes: z.string().default('')
+  notes: z.string().default(""),
 });
 
 export const posDailyQuerySchema = z.object({
-  start: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
-  end: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/)
+  start: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/),
+  end: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
 export const monthlySummaryQuerySchema = z.object({
-  month: z.string().trim().regex(/^\d{4}-\d{2}$/)
+  month: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}$/),
 });
 
-export const dateRangeSummaryQuerySchema = z.object({
-  from: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/)
-}).refine((data) => data.from <= data.to, { message: 'from must be before or equal to to', path: ['to'] });
+export const dateRangeSummaryQuerySchema = z
+  .object({
+    from: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/),
+    to: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/),
+  })
+  .refine((data) => data.from <= data.to, {
+    message: "from must be before or equal to to",
+    path: ["to"],
+  });
 
 export const itemCreateSchema = z.object({
   upc: z.string().trim().min(1),
-  modifier: z.string().trim().default(''),
+  modifier: z.string().trim().default(""),
   description: z.string().trim().min(1),
   department: z.string().trim().min(1),
   price: z.number().min(0),
   sku: z.string().trim().optional(),
-  defaultLocationCode: z.string().trim().optional()
+  defaultLocationCode: z.string().trim().optional(),
 });
 
-export const itemUpdateSchema = itemCreateSchema.partial().refine((value) => Object.keys(value).length > 0, {
-  message: 'At least one field is required'
-});
+export const itemUpdateSchema = itemCreateSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required",
+  });
 
-export const locationTypeSchema = z.enum(['shelf', 'fridge', 'freezer', 'backroom']);
+export const locationTypeSchema = z.enum([
+  "shelf",
+  "fridge",
+  "freezer",
+  "backroom",
+]);
 
 export const locationCreateSchema = z.object({
   code: z.string().trim().min(1),
   type: locationTypeSchema,
-  label: z.string().trim().min(1)
+  label: z.string().trim().min(1),
 });
 
-export const locationUpdateSchema = locationCreateSchema.partial().refine((value) => Object.keys(value).length > 0, {
-  message: 'At least one field is required'
-});
+export const locationUpdateSchema = locationCreateSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required",
+  });
 
 export const inventoryMoveSchema = z.object({
   itemId: z.string().trim().min(1),
   fromLocationCode: z.string().trim().min(1),
   toLocationCode: z.string().trim().min(1),
   qty: z.number().positive(),
-  notes: z.string().trim().optional()
+  notes: z.string().trim().optional(),
 });
 
 export const barcodeSearchSchema = z.object({
-  barcode: z.string().trim().min(1)
+  barcode: z.string().trim().min(1),
 });
 
-export const modulePermissionInputSchema = z.record(z.enum(moduleKeys), permissionSetSchema);
+export const modulePermissionInputSchema = z.record(
+  z.enum(moduleKeys),
+  permissionSetSchema,
+);
 
 export type CompanyCreateInput = z.infer<typeof companyCreateSchema>;
 export type CompanyJoinInput = z.infer<typeof companyJoinSchema>;
@@ -121,8 +162,12 @@ export type InviteCreateInput = z.infer<typeof inviteCreateSchema>;
 export type AssignRoleInput = z.infer<typeof assignRoleSchema>;
 export type PosDailySummaryInput = z.infer<typeof posDailySummarySchema>;
 export type PosDailyQueryInput = z.infer<typeof posDailyQuerySchema>;
-export type MonthlySummaryQueryInput = z.infer<typeof monthlySummaryQuerySchema>;
-export type DateRangeSummaryQueryInput = z.infer<typeof dateRangeSummaryQuerySchema>;
+export type MonthlySummaryQueryInput = z.infer<
+  typeof monthlySummaryQuerySchema
+>;
+export type DateRangeSummaryQueryInput = z.infer<
+  typeof dateRangeSummaryQuerySchema
+>;
 export type ItemCreateInput = z.infer<typeof itemCreateSchema>;
 export type ItemUpdateInput = z.infer<typeof itemUpdateSchema>;
 export type LocationCreateInput = z.infer<typeof locationCreateSchema>;

@@ -1,4 +1,5 @@
 export const APP_ERROR_MESSAGES: Record<string, string> = {
+  not_connected: 'Not connected.',
   not_shared: 'Spreadsheet is not shared with the RetailSync service account.',
   not_found: 'Requested resource was not found.',
   tab_not_found: 'The selected sheet tab was not found.',
@@ -31,6 +32,22 @@ export const APP_ERROR_MESSAGES: Record<string, string> = {
     'Failed to persist Google OAuth settings due to a server conflict. Retry once.',
   google_oauth_callback_failed:
     'Google Sheets connection failed. Please try again.',
+  quickbooks_oauth_not_configured:
+    'QuickBooks OAuth is not configured on the server.',
+  quickbooks_invalid_grant:
+    'QuickBooks OAuth grant is invalid or expired. Retry connect and verify app credentials.',
+  quickbooks_invalid_client:
+    'QuickBooks OAuth client credentials are invalid. Check QUICKBOOKS_CLIENT_ID and QUICKBOOKS_CLIENT_SECRET.',
+  quickbooks_access_denied:
+    'QuickBooks access was denied during OAuth consent.',
+  quickbooks_oauth_callback_failed:
+    'QuickBooks connection failed. Please try again.',
+  quickbooks_realm_id_missing:
+    'QuickBooks callback did not include a realm ID. Retry connecting and select a company.',
+  quickbooks_refresh_token_missing:
+    'QuickBooks refresh token is missing. Reconnect QuickBooks.',
+  quickbooks_secret_missing:
+    'QuickBooks token data is missing for this company. Reconnect QuickBooks.',
 };
 
 export const getAppErrorMessage = (code?: string | null, fallback = 'Something went wrong.'): string => {

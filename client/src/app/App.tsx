@@ -32,6 +32,13 @@ import { RolesPage } from "../modules/rbac/pages";
 import { SettingsPage } from "../modules/settings/pages";
 import { AccessHubPage, UsersPage } from "../modules/users/pages";
 import { ModuleShellPage } from "../layout/ModuleShellPage";
+import {
+  LedgerPage,
+  ObservabilityPage,
+  QuickBooksSyncPage,
+  StatementDetailPage,
+  StatementsPage
+} from "../modules/accounting/pages";
 
 const App = () => {
   return (
@@ -85,6 +92,14 @@ const App = () => {
             path="rolesSettings"
             element={<ModuleShellPage module="rolesSettings" />}
           />
+          <Route path="accounting">
+            <Route index element={<Navigate to="statements" replace />} />
+            <Route path="statements" element={<StatementsPage />} />
+            <Route path="statements/:statementId" element={<StatementDetailPage />} />
+            <Route path="ledger" element={<LedgerPage />} />
+            <Route path="quickbooks" element={<QuickBooksSyncPage />} />
+            <Route path="observability" element={<ObservabilityPage />} />
+          </Route>
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Route>

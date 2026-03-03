@@ -9,22 +9,25 @@ describe('rbacSlice', () => {
   });
 
   it('stores roles and selected role', () => {
+    const basePermissions = moduleKeys.reduce((acc, key) => {
+      acc[key] = { view: false, create: false, edit: false, delete: false, actions: [] };
+      return acc;
+    }, {} as Record<(typeof moduleKeys)[number], { view: boolean; create: boolean; edit: boolean; delete: boolean; actions: string[] }>);
+
     const roles = [
       {
         _id: 'role-1',
         name: 'Manager',
         isSystem: false,
         permissions: {
+          ...basePermissions,
           dashboard: { view: true, create: false, edit: false, delete: false, actions: [] },
           pos: { view: true, create: true, edit: true, delete: false, actions: ['import'] },
           items: { view: true, create: true, edit: true, delete: true, actions: ['import'] },
           invoices: { view: true, create: true, edit: false, delete: false, actions: [] },
           inventory: { view: true, create: false, edit: true, delete: false, actions: ['move'] },
           locations: { view: true, create: true, edit: true, delete: false, actions: ['sync'] },
-          reconciliation: { view: false, create: false, edit: false, delete: false, actions: [] },
-          bankStatements: { view: false, create: false, edit: false, delete: false, actions: [] },
           suppliers: { view: true, create: false, edit: false, delete: false, actions: [] },
-          reports: { view: false, create: false, edit: false, delete: false, actions: [] },
           users: { view: true, create: false, edit: false, delete: false, actions: ['invite'] },
           rolesSettings: { view: true, create: false, edit: false, delete: false, actions: [] }
         }

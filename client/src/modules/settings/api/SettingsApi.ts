@@ -176,8 +176,17 @@ export class SettingsApi {
     return api.put('/settings/quickbooks', payload);
   }
 
-  connectQuickbooks() {
-    return api.post('/settings/quickbooks/connect');
+  getQuickbooksConnectUrl(returnTo = '/dashboard/settings') {
+    return api.get<{
+      data: {
+        url: string;
+        environment: QuickbooksEnvironment;
+      };
+    }>('/integrations/quickbooks/start-url', { params: { returnTo } });
+  }
+
+  connectQuickbooks(returnTo = '/dashboard/settings') {
+    return this.getQuickbooksConnectUrl(returnTo);
   }
 
   disconnectQuickbooks() {

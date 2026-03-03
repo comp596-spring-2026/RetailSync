@@ -49,7 +49,7 @@ RetailSync is a TypeScript monorepo with React/Vite on the client and Express/Mo
 | Tenant and RBAC | `companyId`-scoped data, server-side permission checks |
 | POS | CSV import, daily views, monthly reporting |
 | Inventory | Items, locations, immutable `InventoryLedger` movements |
-| Integrations | Google Sheets (service account + OAuth connect), QuickBooks settings UI |
+| Integrations | Google Sheets (service account + OAuth connect), QuickBooks OAuth + CoA pull + posted ledger sync |
 | Quality | Vitest test suites, Docker workflows, CI quality gates |
 
 ## Frontend UX System Updates
@@ -75,6 +75,7 @@ Recent UI foundation upgrades now ship in the client:
 | Product | Used For | Required Env |
 |---|---|---|
 | Google APIs (`googleapis`) | Sheets read and OAuth connect/callback flow | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_AUTH_REDIRECT_URI` |
+| Intuit QuickBooks OAuth 2.0 | Accounting connect/callback and token refresh | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_INTEGRATION_REDIRECT_URI` |
 
 ## Brand Assets
 
@@ -225,17 +226,34 @@ Local fallback is also supported in non-production:
 | `GOOGLE_OAUTH_CLIENT_ID` | No | Google OAuth |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | No | Google OAuth |
 | `GOOGLE_AUTH_REDIRECT_URI` | No | Google OAuth callback |
+| `GOOGLE_INTEGRATION_REDIRECT_URI` | No | Google integration callback |
+| `QUICKBOOKS_CLIENT_ID` | No | QuickBooks OAuth client id |
+| `QUICKBOOKS_CLIENT_SECRET` | No | QuickBooks OAuth client secret |
+| `QUICKBOOKS_INTEGRATION_REDIRECT_URI` | No | QuickBooks OAuth callback (`/api/integrations/quickbooks/callback`) |
+| `CRON_SECRET` | No | Secret for `/api/cron/*` endpoints |
+| `GCS_BUCKET_NAME` | No | Bucket used for accounting statement storage |
+| `TASKS_MODE` | No | `inline` (local/default) or `cloud` |
+| `INTERNAL_TASKS_SECRET` | No | Shared secret for `/api/internal/tasks/run` |
+| `INTERNAL_TASKS_ENDPOINT` | No | Worker endpoint for Cloud Tasks HTTP target |
+| `GCP_PROJECT_ID` | No | Required when `TASKS_MODE=cloud` |
+| `GCP_REGION` | No | Required when `TASKS_MODE=cloud` |
+| `TASKS_QUEUE_PIPELINE` | No | Queue for OCR/extraction jobs |
+| `TASKS_QUEUE_SYNC` | No | Queue for integration sync jobs |
+| `TASKS_OIDC_SERVICE_ACCOUNT_EMAIL` | No | OIDC service account for Cloud Tasks calls |
+| `API_SERVICE_NAME` | No | Cloud Run API service name used by observability log links |
+| `WORKER_SERVICE_NAME` | No | Cloud Run worker service name used by observability log links |
 
 ### Client (`/client/.env`)
 
 | Variable | Required | Notes |
 |---|---|---|
-| `VITE_API_URL` | Yes | API base URL (local: `http://localhost:4000/api`, deployed: `https://retailsync-api-qbdqiyjkbq-uw.a.run.app/api`) |
+| `VITE_API_URL` | Yes | API base URL (local: `http://localhost:4000/api`, deployed: `<Cloud Run API URL>/api`) |
 
 ## Deployment Snapshot
 
-- Current deployed API URL: `https://retailsync-api-qbdqiyjkbq-uw.a.run.app`
-- Current client build expects: `VITE_API_URL=https://retailsync-api-qbdqiyjkbq-uw.a.run.app/api`
+- Production services: `retailsync-api`, `retailsync-worker`
+- Development services: `retailsync-api-dev`, `retailsync-worker-dev`
+- Client build expects: `VITE_API_URL=<deployed-api-url>/api`
 - Docker Compose build arg for client: `VITE_API_URL=/api` (when reverse-proxying API from same host)
 
 ## Branching and Release
@@ -245,7 +263,9 @@ Local fallback is also supported in non-production:
 - PR flow: feature -> `development`, then `development` -> `production`.
 - GitHub Actions:
   - `.github/workflows/ci.yml` runs on PRs to `development` and `production`.
-  - `.github/workflows/deploy.yml` runs on pushes to `production`.
+  - `.github/workflows/deploy.yml` runs on pushes to `development` and `production`.
+  - Deploy auto-injects QuickBooks secrets if present in Secret Manager (`QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_INTEGRATION_REDIRECT_URI`).
+  - Deploy workflow provisions Cloud Tasks queues, deploys worker first, then API with `TASKS_MODE=cloud`.
 
 ## Testing
 
@@ -272,6 +292,16 @@ Local fallback is also supported in non-production:
   `LOCAL_CRON_EXPR` (default: `0 2 * * *`) in `server/.env` to run the sync on a schedule.
 - **Manual / dry run**: you can test without writing to the DB via:  
   `curl -X POST 'http://localhost:4000/api/cron/sync-sheets?dryRun=true' -H 'x-cron-secret: <value-or-empty>'`
+
+### Accounting Worker + Tasks
+
+- API enqueue mode:
+  - local default: `TASKS_MODE=inline`
+  - cloud deploy: `TASKS_MODE=cloud`
+- Cloud mode targets the worker endpoint directly and keeps queue env names aligned for Cloud Tasks migration:
+  - pipeline queue: `TASKS_QUEUE_PIPELINE`
+  - sync queue: `TASKS_QUEUE_SYNC`
+  - worker endpoint: `${INTERNAL_TASKS_ENDPOINT}` (`/api/internal/tasks/run`)
 
 ## Docker
 
