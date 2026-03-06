@@ -1,7 +1,12 @@
-import { Types } from 'mongoose';
-import { DEFAULT_CONNECTOR_KEY, getConnectorDefinition } from './sheetsConnectors';
+// server/src/utils/googleSheetsDbCleanup.ts
 
-type SourceKey = 'oauth' | 'shared';
+import { Types } from "mongoose";
+import {
+  DEFAULT_CONNECTOR_KEY,
+  getConnectorDefinition,
+} from "./sheetsConnectors";
+
+type SourceKey = "oauth" | "shared";
 
 type CleanupIssue = string;
 
@@ -23,7 +28,7 @@ type NormalizedConnector = {
   transformations: Record<string, unknown>;
   schedule?: {
     enabled: boolean;
-    frequency: 'hourly' | 'daily' | 'weekly' | 'manual';
+    frequency: "hourly" | "daily" | "weekly" | "manual";
     timeOfDay?: string;
     dayOfWeek?: number;
   };
@@ -45,13 +50,14 @@ type NormalizedContainer = {
 const now = () => new Date();
 
 const asRecord = (value: unknown): Record<string, unknown> =>
-  value && typeof value === 'object' && !Array.isArray(value)
+  value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 
-const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+const asArray = (value: unknown): unknown[] =>
+  Array.isArray(value) ? value : [];
 
-const asTrimmedString = (value: unknown) => String(value ?? '').trim();
+const asTrimmedString = (value: unknown) => String(value ?? "").trim();
 
 const parseMaybeDate = (value: unknown): Date | null => {
   if (!value) return null;
@@ -69,12 +75,18 @@ const parseObjectId = (value: unknown): Types.ObjectId | null => {
 const toStringMap = (value: unknown): Record<string, string> => {
   if (value instanceof Map) {
     return Object.fromEntries(
-      Array.from(value.entries()).map(([key, entry]) => [String(key), String(entry ?? '')]),
+      Array.from(value.entries()).map(([key, entry]) => [
+        String(key),
+        String(entry ?? ""),
+      ]),
     );
   }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, String(entry ?? '')]),
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        String(entry ?? ""),
+      ]),
     );
   }
   return {};
@@ -82,19 +94,21 @@ const toStringMap = (value: unknown): Record<string, string> => {
 
 const toObjectMap = (value: unknown): Record<string, unknown> => {
   if (value instanceof Map) {
-    return Object.fromEntries(Array.from(value.entries()).map(([key, entry]) => [String(key), entry]));
+    return Object.fromEntries(
+      Array.from(value.entries()).map(([key, entry]) => [String(key), entry]),
+    );
   }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>));
   }
   return {};
 };
 
 const parseRangeSheetName = (range: string) => {
-  if (!range) return 'Sheet1';
-  const tab = range.split('!')[0]?.trim();
-  if (!tab) return 'Sheet1';
-  return tab.replace(/^'/, '').replace(/'$/, '') || 'Sheet1';
+  if (!range) return "Sheet1";
+  const tab = range.split("!")[0]?.trim();
+  if (!tab) return "Sheet1";
+  return tab.replace(/^'/, "").replace(/'$/, "") || "Sheet1";
 };
 
 const dedupeMappingByTarget = (
@@ -110,7 +124,9 @@ const dedupeMappingByTarget = (
     if (!target) continue;
     const normalizedTarget = target.toLowerCase();
     if (usedTargets.has(normalizedTarget)) {
-      issues.push(`${path}: duplicate target "${target}" removed from column "${column}"`);
+      issues.push(
+        `${path}: duplicate target "${target}" removed from column "${column}"`,
+      );
       continue;
     }
     usedTargets.add(normalizedTarget);
@@ -120,7 +136,12 @@ const dedupeMappingByTarget = (
   return next;
 };
 
-const isConnectorReady = (connector: Pick<NormalizedConnector, 'enabled' | 'spreadsheetId' | 'sheetName' | 'mapping'>) =>
+const isConnectorReady = (
+  connector: Pick<
+    NormalizedConnector,
+    "enabled" | "spreadsheetId" | "sheetName" | "mapping"
+  >,
+) =>
   connector.enabled &&
   Boolean(asTrimmedString(connector.spreadsheetId)) &&
   Boolean(asTrimmedString(connector.sheetName)) &&
@@ -142,26 +163,37 @@ const normalizeConnector = (
     label: asTrimmedString(record.label) || definition.label,
     enabled: Boolean(record.enabled ?? true),
     spreadsheetId: asTrimmedString(record.spreadsheetId),
-    sheetName: asTrimmedString(record.sheetName) || 'Sheet1',
+    sheetName: asTrimmedString(record.sheetName) || "Sheet1",
     headerRow: Math.max(1, Number(record.headerRow ?? 1) || 1),
     mapping: dedupeMappingByTarget(rawMapping, issues, path),
     transformations: toObjectMap(record.transformations),
-    schedule: record.schedule && typeof record.schedule === 'object'
-      ? {
-          enabled: Boolean(asRecord(record.schedule).enabled ?? false),
-          frequency:
-            (['hourly', 'daily', 'weekly', 'manual'] as const).includes(
-              asTrimmedString(asRecord(record.schedule).frequency) as 'hourly',
+    schedule:
+      record.schedule && typeof record.schedule === "object"
+        ? {
+            enabled: Boolean(asRecord(record.schedule).enabled ?? false),
+            frequency: (
+              ["hourly", "daily", "weekly", "manual"] as const
+            ).includes(
+              asTrimmedString(asRecord(record.schedule).frequency) as "hourly",
             )
-              ? (asTrimmedString(asRecord(record.schedule).frequency) as 'hourly' | 'daily' | 'weekly' | 'manual')
-              : 'manual',
-          timeOfDay: asTrimmedString(asRecord(record.schedule).timeOfDay) || undefined,
-          dayOfWeek:
-            Number.isFinite(Number(asRecord(record.schedule).dayOfWeek))
-              ? Math.max(0, Math.min(6, Number(asRecord(record.schedule).dayOfWeek)))
+              ? (asTrimmedString(asRecord(record.schedule).frequency) as
+                  | "hourly"
+                  | "daily"
+                  | "weekly"
+                  | "manual")
+              : "manual",
+            timeOfDay:
+              asTrimmedString(asRecord(record.schedule).timeOfDay) || undefined,
+            dayOfWeek: Number.isFinite(
+              Number(asRecord(record.schedule).dayOfWeek),
+            )
+              ? Math.max(
+                  0,
+                  Math.min(6, Number(asRecord(record.schedule).dayOfWeek)),
+                )
               : undefined,
-        }
-      : undefined,
+          }
+        : undefined,
     lastDebugResult: record.lastDebugResult,
     lastImportAt: parseMaybeDate(record.lastImportAt),
     createdAt: parseMaybeDate(record.createdAt) ?? now(),
@@ -190,14 +222,20 @@ const dedupeConnectorsByKey = (
 
     const winner = score(connector) >= score(existing) ? connector : existing;
     byKey.set(connector.key, winner);
-    issues.push(`${path}: duplicate connector key "${connector.key}" deduplicated`);
+    issues.push(
+      `${path}: duplicate connector key "${connector.key}" deduplicated`,
+    );
   }
 
   const next = Array.from(byKey.values());
   if (next.length === 0) {
     next.push(
       normalizeConnector(
-        { key: DEFAULT_CONNECTOR_KEY, label: getConnectorDefinition(DEFAULT_CONNECTOR_KEY).label, enabled: false },
+        {
+          key: DEFAULT_CONNECTOR_KEY,
+          label: getConnectorDefinition(DEFAULT_CONNECTOR_KEY).label,
+          enabled: false,
+        },
         issues,
         `${path}[default]`,
       ),
@@ -215,7 +253,9 @@ const normalizeContainer = (
   const record = asRecord(raw);
   const connectorsRaw = asArray(record.connectors);
   const connectors = dedupeConnectorsByKey(
-    connectorsRaw.map((entry, index) => normalizeConnector(entry, issues, `${path}.connectors[${index}]`)),
+    connectorsRaw.map((entry, index) =>
+      normalizeConnector(entry, issues, `${path}.connectors[${index}]`),
+    ),
     issues,
     `${path}.connectors`,
   );
@@ -233,7 +273,8 @@ const normalizeContainer = (
 const fromLegacyShape = (googleSheetsRaw: Record<string, unknown>) => {
   const sources = asArray(googleSheetsRaw.sources).map((entry, index) => {
     const source = asRecord(entry);
-    const sourceName = asTrimmedString(source.name) || `OAuth Source ${index + 1}`;
+    const sourceName =
+      asTrimmedString(source.name) || `OAuth Source ${index + 1}`;
     return {
       _id: parseObjectId(source.sourceId ?? source._id) ?? new Types.ObjectId(),
       name: sourceName,
@@ -260,12 +301,19 @@ const fromLegacyShape = (googleSheetsRaw: Record<string, unknown>) => {
 
   const sharedSheets = asArray(googleSheetsRaw.sharedSheets);
   const sharedFromConfig = asRecord(googleSheetsRaw.sharedConfig);
-  const profilesSource = sharedSheets.length > 0 ? sharedSheets : sharedFromConfig.spreadsheetId ? [sharedFromConfig] : [];
+  const profilesSource =
+    sharedSheets.length > 0
+      ? sharedSheets
+      : sharedFromConfig.spreadsheetId
+        ? [sharedFromConfig]
+        : [];
   const profiles = profilesSource.map((entry, index) => {
     const profile = asRecord(entry);
-    const profileName = asTrimmedString(profile.name) || `Shared Profile ${index + 1}`;
+    const profileName =
+      asTrimmedString(profile.name) || `Shared Profile ${index + 1}`;
     return {
-      _id: parseObjectId(profile.profileId ?? profile._id) ?? new Types.ObjectId(),
+      _id:
+        parseObjectId(profile.profileId ?? profile._id) ?? new Types.ObjectId(),
       name: profileName,
       connectors: [
         {
@@ -274,10 +322,14 @@ const fromLegacyShape = (googleSheetsRaw: Record<string, unknown>) => {
           label: getConnectorDefinition(DEFAULT_CONNECTOR_KEY).label,
           enabled: Boolean(profile.enabled ?? true),
           spreadsheetId: asTrimmedString(profile.spreadsheetId),
-          sheetName: asTrimmedString(profile.sheetName) || 'Sheet1',
+          sheetName: asTrimmedString(profile.sheetName) || "Sheet1",
           headerRow: Math.max(1, Number(profile.headerRow ?? 1) || 1),
-          mapping: toStringMap(profile.columnsMap ?? asRecord(profile.lastMapping).columnsMap),
-          transformations: toObjectMap(asRecord(profile.lastMapping).transformations),
+          mapping: toStringMap(
+            profile.columnsMap ?? asRecord(profile.lastMapping).columnsMap,
+          ),
+          transformations: toObjectMap(
+            asRecord(profile.lastMapping).transformations,
+          ),
           lastImportAt: parseMaybeDate(profile.lastImportAt),
           createdAt: now(),
           updatedAt: now(),
@@ -289,14 +341,24 @@ const fromLegacyShape = (googleSheetsRaw: Record<string, unknown>) => {
   });
 
   const legacyMode = asTrimmedString(googleSheetsRaw.mode);
-  const activeIntegration = legacyMode === 'oauth' ? 'oauth' : legacyMode === 'service_account' ? 'shared' : null;
+  const activeIntegration =
+    legacyMode === "oauth"
+      ? "oauth"
+      : legacyMode === "service_account"
+        ? "shared"
+        : null;
 
   return {
     oauth: {
       enabled: Boolean(googleSheetsRaw.connected) || sources.length > 0,
-      connectionStatus: Boolean(googleSheetsRaw.connected) ? 'connected' : 'not_connected',
+      connectionStatus: Boolean(googleSheetsRaw.connected)
+        ? "connected"
+        : "not_connected",
       sources,
-      activeSourceId: sources.find((entry) => entry.connectors[0].enabled)?._id ?? sources[0]?._id ?? null,
+      activeSourceId:
+        sources.find((entry) => entry.connectors[0].enabled)?._id ??
+        sources[0]?._id ??
+        null,
       activeConnectorKey: DEFAULT_CONNECTOR_KEY,
       lastDebugResult: undefined,
       lastImportAt: null,
@@ -315,90 +377,206 @@ const fromLegacyShape = (googleSheetsRaw: Record<string, unknown>) => {
   };
 };
 
-const normalizeForCompare = (value: unknown): unknown => {
+/**
+ * IMPORTANT:
+ * This function is used ONLY for "before vs after" comparison by JSON.stringify.
+ * It MUST be safe for:
+ * - Mongoose documents/subdocs (cycles via parent pointers)
+ * - Mongoose arrays (overridden .map)
+ * - Maps, Dates, ObjectIds
+ * - Circular references
+ */
+const normalizeForCompare = (
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0,
+): unknown => {
+  // Prevent pathological recursion even without explicit cycles
+  if (depth > 50) return "[MaxDepth]";
+
   if (value == null) return null;
-  if (value instanceof Date) return value.toISOString();
+
+  // primitives
+  const t = typeof value;
+  if (t === "string" || t === "number" || t === "boolean") return value;
+
+  // safer Date detection than `instanceof Date` (avoids Symbol.hasInstance edge traps)
+  if (Object.prototype.toString.call(value) === "[object Date]") {
+    const d = value as Date;
+    return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+  }
+
+  // ObjectId
   if (value instanceof Types.ObjectId) return value.toString();
-  if (Array.isArray(value)) return value.map((entry) => normalizeForCompare(entry));
-  if (value instanceof Map) {
-    return Object.fromEntries(
-      Array.from(value.entries()).map(([key, entry]) => [String(key), normalizeForCompare(entry)]),
+
+  // Flatten mongoose docs/subdocs ASAP to avoid internal cycles
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof (value as any).toObject === "function"
+  ) {
+    const plain = (value as any).toObject({
+      depopulate: true,
+      getters: false,
+      virtuals: false,
+      minimize: true,
+      versionKey: false,
+    });
+    return normalizeForCompare(plain, seen, depth + 1);
+  }
+
+  // circular guard
+  if (typeof value === "object") {
+    if (seen.has(value)) return "[Circular]";
+    seen.add(value);
+  }
+
+  // arrays — force native map to avoid MongooseArray.map override
+  if (Array.isArray(value)) {
+    return Array.prototype.map.call(value, (entry: unknown) =>
+      normalizeForCompare(entry, seen, depth + 1),
     );
   }
-  if (typeof value === 'object') {
+
+  // maps
+  if (value instanceof Map) {
+    return Object.fromEntries(
+      Array.from(value.entries()).map(([key, entry]) => [
+        String(key),
+        normalizeForCompare(entry, seen, depth + 1),
+      ]),
+    );
+  }
+
+  // objects
+  if (typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .filter(([, entry]) => entry !== undefined)
-        .map(([key, entry]) => [key, normalizeForCompare(entry)]),
+        .map(([key, entry]) => [
+          key,
+          normalizeForCompare(entry, seen, depth + 1),
+        ]),
     );
   }
+
   return value;
 };
 
-export const cleanupGoogleSheetsConfig = (googleSheetsRaw: unknown): CleanupResult => {
+export const cleanupGoogleSheetsConfig = (
+  googleSheetsRaw: unknown,
+): CleanupResult => {
   const issues: CleanupIssue[] = [];
   const gsRecord = asRecord(googleSheetsRaw);
 
-  const hasNewShape = Object.prototype.hasOwnProperty.call(gsRecord, 'oauth') || Object.prototype.hasOwnProperty.call(gsRecord, 'shared');
+  const hasNewShape =
+    Object.prototype.hasOwnProperty.call(gsRecord, "oauth") ||
+    Object.prototype.hasOwnProperty.call(gsRecord, "shared");
   const base = hasNewShape ? gsRecord : fromLegacyShape(gsRecord);
   if (!hasNewShape) {
-    issues.push('Legacy googleSheets shape converted to connector model');
+    issues.push("Legacy googleSheets shape converted to connector model");
   }
 
   const oauthRaw = asRecord(base.oauth);
   const sharedRaw = asRecord(base.shared);
 
   const oauthSources = asArray(oauthRaw.sources).map((entry, index) =>
-    normalizeContainer(entry, issues, `oauth.sources[${index}]`, `OAuth Source ${index + 1}`),
+    normalizeContainer(
+      entry,
+      issues,
+      `oauth.sources[${index}]`,
+      `OAuth Source ${index + 1}`,
+    ),
   );
   const sharedProfiles = asArray(sharedRaw.profiles).map((entry, index) =>
-    normalizeContainer(entry, issues, `shared.profiles[${index}]`, `Shared Profile ${index + 1}`),
+    normalizeContainer(
+      entry,
+      issues,
+      `shared.profiles[${index}]`,
+      `Shared Profile ${index + 1}`,
+    ),
   );
 
   let activeSourceId = parseObjectId(oauthRaw.activeSourceId);
-  if (activeSourceId && !oauthSources.some((entry) => entry._id.toString() === activeSourceId?.toString())) {
-    issues.push('oauth.activeSourceId did not match any source and was cleared');
+  if (
+    activeSourceId &&
+    !oauthSources.some(
+      (entry) => entry._id.toString() === activeSourceId?.toString(),
+    )
+  ) {
+    issues.push(
+      "oauth.activeSourceId did not match any source and was cleared",
+    );
     activeSourceId = null;
   }
 
   let activeProfileId = parseObjectId(sharedRaw.activeProfileId);
-  if (activeProfileId && !sharedProfiles.some((entry) => entry._id.toString() === activeProfileId?.toString())) {
-    issues.push('shared.activeProfileId did not match any profile and was cleared');
+  if (
+    activeProfileId &&
+    !sharedProfiles.some(
+      (entry) => entry._id.toString() === activeProfileId?.toString(),
+    )
+  ) {
+    issues.push(
+      "shared.activeProfileId did not match any profile and was cleared",
+    );
     activeProfileId = null;
   }
 
-  const oauthActiveConnectorKey = asTrimmedString(oauthRaw.activeConnectorKey) || DEFAULT_CONNECTOR_KEY;
-  const sharedActiveConnectorKey = asTrimmedString(sharedRaw.activeConnectorKey) || DEFAULT_CONNECTOR_KEY;
+  const oauthActiveConnectorKey =
+    asTrimmedString(oauthRaw.activeConnectorKey) || DEFAULT_CONNECTOR_KEY;
+  const sharedActiveConnectorKey =
+    asTrimmedString(sharedRaw.activeConnectorKey) || DEFAULT_CONNECTOR_KEY;
 
-  const activeOauthContainer = oauthSources.find((entry) => entry._id.toString() === activeSourceId?.toString()) ?? null;
-  const activeSharedContainer = sharedProfiles.find((entry) => entry._id.toString() === activeProfileId?.toString()) ?? null;
+  const activeOauthContainer =
+    oauthSources.find(
+      (entry) => entry._id.toString() === activeSourceId?.toString(),
+    ) ?? null;
+  const activeSharedContainer =
+    sharedProfiles.find(
+      (entry) => entry._id.toString() === activeProfileId?.toString(),
+    ) ?? null;
 
-  const activeOauthConnector = activeOauthContainer?.connectors.find((entry) => entry.key === oauthActiveConnectorKey) ?? null;
-  const activeSharedConnector = activeSharedContainer?.connectors.find((entry) => entry.key === sharedActiveConnectorKey) ?? null;
+  const activeOauthConnector =
+    activeOauthContainer?.connectors.find(
+      (entry) => entry.key === oauthActiveConnectorKey,
+    ) ?? null;
+  const activeSharedConnector =
+    activeSharedContainer?.connectors.find(
+      (entry) => entry.key === sharedActiveConnectorKey,
+    ) ?? null;
 
-  const oauthReady = activeOauthConnector ? isConnectorReady(activeOauthConnector) : false;
-  const sharedReady = activeSharedConnector ? isConnectorReady(activeSharedConnector) : false;
+  const oauthReady = activeOauthConnector
+    ? isConnectorReady(activeOauthConnector)
+    : false;
+  const sharedReady = activeSharedConnector
+    ? isConnectorReady(activeSharedConnector)
+    : false;
 
   let activeIntegrationRaw = asTrimmedString(base.activeIntegration);
-  if (activeIntegrationRaw !== 'oauth' && activeIntegrationRaw !== 'shared') {
-    activeIntegrationRaw = '';
+  if (activeIntegrationRaw !== "oauth" && activeIntegrationRaw !== "shared") {
+    activeIntegrationRaw = "";
   }
 
-  let activeIntegration: 'oauth' | 'shared' | null = null;
-  if (activeIntegrationRaw === 'oauth' && oauthReady) activeIntegration = 'oauth';
-  if (activeIntegrationRaw === 'shared' && sharedReady) activeIntegration = 'shared';
+  let activeIntegration: "oauth" | "shared" | null = null;
+  if (activeIntegrationRaw === "oauth" && oauthReady)
+    activeIntegration = "oauth";
+  if (activeIntegrationRaw === "shared" && sharedReady)
+    activeIntegration = "shared";
 
   if (activeIntegrationRaw && !activeIntegration) {
-    issues.push(`activeIntegration "${activeIntegrationRaw}" was not ready and was cleared`);
+    issues.push(
+      `activeIntegration "${activeIntegrationRaw}" was not ready and was cleared`,
+    );
   }
 
   if (!activeIntegration) {
     if (oauthReady && !sharedReady) {
-      activeIntegration = 'oauth';
-      issues.push('activeIntegration auto-set to oauth (only ready source)');
+      activeIntegration = "oauth";
+      issues.push("activeIntegration auto-set to oauth (only ready source)");
     } else if (sharedReady && !oauthReady) {
-      activeIntegration = 'shared';
-      issues.push('activeIntegration auto-set to shared (only ready source)');
+      activeIntegration = "shared";
+      issues.push("activeIntegration auto-set to shared (only ready source)");
     }
   }
 
@@ -406,11 +584,14 @@ export const cleanupGoogleSheetsConfig = (googleSheetsRaw: unknown): CleanupResu
     oauth: {
       enabled: Boolean(oauthRaw.enabled ?? false) || oauthSources.length > 0,
       connectionStatus:
-        asTrimmedString(oauthRaw.connectionStatus) === 'connected' ||
-        asTrimmedString(oauthRaw.connectionStatus) === 'error' ||
-        asTrimmedString(oauthRaw.connectionStatus) === 'not_connected'
-          ? (asTrimmedString(oauthRaw.connectionStatus) as 'connected' | 'error' | 'not_connected')
-          : 'not_connected',
+        asTrimmedString(oauthRaw.connectionStatus) === "connected" ||
+        asTrimmedString(oauthRaw.connectionStatus) === "error" ||
+        asTrimmedString(oauthRaw.connectionStatus) === "not_connected"
+          ? (asTrimmedString(oauthRaw.connectionStatus) as
+              | "connected"
+              | "error"
+              | "not_connected")
+          : "not_connected",
       sources: oauthSources,
       activeSourceId,
       activeConnectorKey: oauthActiveConnectorKey,
@@ -430,12 +611,14 @@ export const cleanupGoogleSheetsConfig = (googleSheetsRaw: unknown): CleanupResu
     updatedAt: now(),
   };
 
+  // IMPORTANT: avoid passing live mongoose docs if possible.
+  // This normalizeForCompare is safe even if you do, but this keeps output stable.
   const before = JSON.stringify(normalizeForCompare(googleSheetsRaw));
   const after = JSON.stringify(normalizeForCompare(normalized));
+
   return {
     normalized: normalized as Record<string, unknown>,
     changed: before !== after,
     issues,
   };
 };
-
