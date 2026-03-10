@@ -60,11 +60,29 @@ gcloud iam service-accounts add-iam-policy-binding retailsync-ci-sa@lively-infin
 - Cloud Tasks queues are auto-created/updated by workflow:
   - `pipeline-ocr-dev` / `sync-integrations-dev`
   - `pipeline-ocr-prod` / `sync-integrations-prod`
-- Current worker endpoint security model:
-  - Cloud Run worker is publicly reachable
-  - `/api/internal/tasks/run` is protected with `x-internal-task-secret`
+- Current task endpoint security model:
+  - Cloud Run task HTTP target must be reachable by Cloud Tasks
+  - `/api/tasks/*` endpoints are protected with `x-internal-task-secret`
+  - `INTERNAL_TASKS_ENDPOINT` should point to `/api/tasks` base; dispatcher routes to `/pipeline` or `/sync`
 - Deploy workflow includes QuickBooks env wiring only when the corresponding secrets exist.
 - Deploy workflow also injects `API_SERVICE_NAME` and `WORKER_SERVICE_NAME` for observability log shortcuts.
+- Daily integration sync is managed by Cloud Scheduler calling:
+  - `POST /api/cron/accounting-sync`
+  - with header `x-cron-secret: <CRON_SECRET>`
+  - optional query flags: `dryRun`, `includeSheets`, `includeQuickBooks`, `postDelaySeconds`
+
+## Daily scheduler (example)
+
+```bash
+gcloud scheduler jobs create http retailsync-accounting-daily-prod \
+  --project lively-infinity-488304-m9 \
+  --location us-west1 \
+  --schedule "0 4 * * *" \
+  --time-zone "America/New_York" \
+  --uri "https://<api-url>/api/cron/accounting-sync?includeSheets=true&includeQuickBooks=true&postDelaySeconds=120" \
+  --http-method POST \
+  --headers "x-cron-secret=<CRON_SECRET>"
+```
 
 Full rollout checklist: `/Users/trupal/Projects/RetailSync/docs/operations/accounting-observability-rollout.md`
 

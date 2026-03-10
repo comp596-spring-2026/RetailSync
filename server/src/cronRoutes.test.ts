@@ -2,9 +2,13 @@ import request from 'supertest';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const runSheetsSyncMock = vi.fn();
+const runDailyAccountingSyncMock = vi.fn();
 
 vi.mock('./jobs/syncSheets', () => ({
   runSheetsSync: (...args: unknown[]) => runSheetsSyncMock(...args)
+}));
+vi.mock('./jobs/dailyAccountingSync', () => ({
+  runDailyAccountingSync: (...args: unknown[]) => runDailyAccountingSyncMock(...args)
 }));
 
 vi.mock('./config/env', () => ({
@@ -94,5 +98,74 @@ describe('cronRoutes /api/cron/sync-sheets', () => {
       dryRun: true
     });
   });
-});
 
+  it('runs combined accounting sync when authorized', async () => {
+    runDailyAccountingSyncMock.mockResolvedValueOnce({
+      ok: true,
+      source: 'accounting-daily-sync',
+      dryRun: false,
+      includeSheets: true,
+      includeQuickBooks: true,
+      sheets: {
+        ok: true,
+        lockAcquired: true,
+        totalCompanies: 1,
+        succeeded: 1,
+        failed: 0,
+        skipped: 0,
+        source: 'accounting-daily-sync-sheets',
+        companies: []
+      },
+      quickbooks: {
+        totalConnected: 2,
+        queued: 2,
+        wouldQueue: 0,
+        failed: 0,
+        companies: []
+      }
+    });
+
+    const res = await request(app)
+      .post('/api/cron/accounting-sync')
+      .set('x-cron-secret', 'test-secret');
+
+    expect(res.status).toBe(200);
+    expect(runDailyAccountingSyncMock).toHaveBeenCalledWith({
+      source: 'accounting-daily-sync',
+      dryRun: false,
+      includeSheets: true,
+      includeQuickBooks: true,
+      postDelaySeconds: 120
+    });
+    expect(res.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        includeSheets: true,
+        includeQuickBooks: true
+      })
+    );
+  });
+
+  it('passes query options to combined accounting sync route', async () => {
+    runDailyAccountingSyncMock.mockResolvedValueOnce({
+      ok: true,
+      source: 'accounting-daily-sync-dry-run',
+      dryRun: true,
+      includeSheets: false,
+      includeQuickBooks: true
+    });
+
+    const res = await request(app)
+      .post('/api/cron/accounting-sync?dryRun=true&includeSheets=false&includeQuickBooks=true&postDelaySeconds=300')
+      .set('x-cron-secret', 'test-secret');
+
+    expect(res.status).toBe(200);
+    expect(runDailyAccountingSyncMock).toHaveBeenCalledWith({
+      source: 'accounting-daily-sync-dry-run',
+      dryRun: true,
+      includeSheets: false,
+      includeQuickBooks: true,
+      postDelaySeconds: 300
+    });
+  });
+});

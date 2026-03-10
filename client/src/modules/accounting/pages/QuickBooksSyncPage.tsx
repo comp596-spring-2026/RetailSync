@@ -149,45 +149,45 @@ export const QuickBooksSyncPage = () => {
     }
   };
 
-  const onPullAccounts = async () => {
+  const onRefreshReferences = async () => {
     try {
       setBusy(true);
-      const response = await accountingApi.pullQuickbooksAccounts();
+      const response = await accountingApi.refreshQuickbooksReferenceData();
       const queue = response.data.data.queue;
       dispatch(
         showSnackbar({
           message:
             queue.mode === 'inline'
-              ? 'Chart of Accounts pulled successfully.'
-              : 'Chart of Accounts pull queued.',
+              ? 'QuickBooks reference data refreshed.'
+              : 'QuickBooks reference refresh queued.',
           severity: 'success'
         })
       );
       await load();
     } catch (apiError) {
-      setError(extractApiErrorMessage(apiError, 'Failed to pull QuickBooks accounts'));
+      setError(extractApiErrorMessage(apiError, 'Failed to refresh QuickBooks references'));
     } finally {
       setBusy(false);
     }
   };
 
-  const onSync = async () => {
+  const onPostApproved = async () => {
     try {
       setBusy(true);
-      const response = await accountingApi.pushQuickbooksEntries();
+      const response = await accountingApi.postApprovedToQuickbooks();
       const queue = response.data.data.queue;
       dispatch(
         showSnackbar({
           message:
             queue.mode === 'inline'
-              ? 'Posted ledger entries synced to QuickBooks.'
-              : 'QuickBooks sync queued.',
+              ? 'Approved ledger entries posted to QuickBooks.'
+              : 'Post-approved sync queued.',
           severity: 'success'
         })
       );
       await load();
     } catch (apiError) {
-      setError(extractApiErrorMessage(apiError, 'Failed to sync entries to QuickBooks'));
+      setError(extractApiErrorMessage(apiError, 'Failed to queue post-approved sync'));
     } finally {
       setBusy(false);
     }
@@ -201,7 +201,7 @@ export const QuickBooksSyncPage = () => {
     <Stack spacing={2}>
       <PageHeader
         title="QuickBooks Sync"
-        subtitle="Connect QuickBooks OAuth and prepare ledger sync."
+        subtitle="Connect, refresh reference data, and post approved ledger entries."
         icon={<SyncIcon />}
       />
       <AccountingTabs />
@@ -213,7 +213,12 @@ export const QuickBooksSyncPage = () => {
       ) : (
         <Paper sx={{ p: 3, borderRadius: 2 }}>
           <Stack spacing={2}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} spacing={1}>
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              justifyContent="space-between"
+              alignItems={{ sm: 'center' }}
+              spacing={1}
+            >
               <Typography variant="h6">Connection</Typography>
               <Chip
                 size="small"
@@ -256,20 +261,22 @@ export const QuickBooksSyncPage = () => {
                   : getAppErrorMessage(oauthStatus?.reason ?? undefined, 'Unknown')}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Pull status:{' '}
-                {settings?.lastPullStatus ?? 'idle'}
-                {settings?.lastPullAt ? ` (${formatDate(settings.lastPullAt, 'short')})` : ''}
+                Refresh status: {settings?.lastPullStatus ?? 'idle'}
+                {settings?.lastPullAt
+                  ? ` (${formatDate(settings.lastPullAt, 'short')})`
+                  : ''}
                 {typeof settings?.lastPullCount === 'number'
                   ? ` • count ${settings.lastPullCount}`
                   : ''}
                 {settings?.lastPullError ? ` - ${settings.lastPullError}` : ''}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Push status:{' '}
-                {settings?.lastPushStatus ?? 'idle'}
-                {settings?.lastPushAt ? ` (${formatDate(settings.lastPushAt, 'short')})` : ''}
+                Post status: {settings?.lastPushStatus ?? 'idle'}
+                {settings?.lastPushAt
+                  ? ` (${formatDate(settings.lastPushAt, 'short')})`
+                  : ''}
                 {typeof settings?.lastPushCount === 'number'
-                  ? ` • synced ${settings.lastPushCount}`
+                  ? ` • posted ${settings.lastPushCount}`
                   : ''}
                 {settings?.lastPushError ? ` - ${settings.lastPushError}` : ''}
               </Typography>
@@ -294,26 +301,23 @@ export const QuickBooksSyncPage = () => {
               <Button
                 variant="outlined"
                 disabled={!canSync || !settings?.connected || busy}
-                onClick={() => void onPullAccounts()}
+                onClick={() => void onRefreshReferences()}
               >
-                Pull CoA from QB
+                Refresh Reference Data
               </Button>
               <Button
                 variant="contained"
                 disabled={!canSync || !settings?.connected || busy}
-                onClick={() => void onSync()}
+                onClick={() => void onPostApproved()}
               >
-                Sync Posted Entries
+                Post Approved
               </Button>
-              <Button
-                disabled={busy}
-                onClick={() => void load()}
-              >
+              <Button disabled={busy} onClick={() => void load()}>
                 Refresh Status
               </Button>
             </Stack>
             <Typography color="text.secondary" variant="body2">
-              Pull CoA first, then sync posted ledger entries. Sync uses idempotent `qbTxnId`.
+              Always refresh reference data before posting newly approved entries.
             </Typography>
           </Stack>
         </Paper>

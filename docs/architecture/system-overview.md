@@ -76,7 +76,13 @@ sequenceDiagram
 - Items, locations, immutable inventory ledger
 - Integrations settings shell + Google Sheets read/connect flows
 - Server-side Google auth (google start/callback + refresh/logout/me)
+- Accounting domain:
+  - Statements upload and async processing pipeline
+  - Canonical ledger review and approval gates
+  - QuickBooks reference sync and post-approved workflow
+  - Observability runs and diagnostics
 
 ## See also
 
 - [Workflows and usage](workflows-and-usage.md) — detailed login, onboarding, POS import sources, no-POS-data behavior, reports, and RBAC.
+- [Accounting docs](../accounting/README.md) — end-to-end accounting lifecycle and module-by-module documentation.

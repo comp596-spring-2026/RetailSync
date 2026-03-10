@@ -1,11 +1,9 @@
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import {
-  AccountingObservabilityDebug,
-  AccountingObservabilitySummary,
-  QuickBooksSyncStatus,
   accountingObservabilityDebugSchema,
-  accountingObservabilitySummarySchema
+  accountingObservabilitySummarySchema,
+  quickBooksSettingsSchema
 } from '@retailsync/shared';
 import { z } from 'zod';
 import { env } from '../config/env';
@@ -13,25 +11,12 @@ import { BankStatement } from '../models/BankStatement';
 import { ChartOfAccountModel } from '../models/ChartOfAccount';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { LedgerEntryModel } from '../models/LedgerEntry';
+import { RunModel } from '../models/Run';
 import { fail, ok } from '../utils/apiResponse';
 
 const debugQuerySchema = z.object({
   statementId: z.string().trim().optional()
 });
-
-const stalledThresholdMs = 20 * 60 * 1000;
-
-const normalizeSyncStatus = (value: unknown): QuickBooksSyncStatus => {
-  if (
-    value === 'idle' ||
-    value === 'running' ||
-    value === 'success' ||
-    value === 'error'
-  ) {
-    return value;
-  }
-  return 'idle';
-};
 
 const buildLogsUrl = (projectId: string, query: string) => {
   const encoded = encodeURIComponent(query);
@@ -73,151 +58,119 @@ const buildGcpLinks = () => {
     ),
     quickbooksSyncUrl: buildLogsUrl(
       env.gcpProjectId,
-      `${commonFilters} AND resource.labels.service_name="${workerName}" AND (textPayload:"qb_pull_accounts" OR textPayload:"qb_push_entries")`
+      `${commonFilters} AND resource.labels.service_name="${workerName}" AND (textPayload:"quickbooks.refresh_reference_data" OR textPayload:"quickbooks.post_approved")`
     )
   };
 };
+
+const normalizeQuickBooks = (quickbooks: any) =>
+  quickBooksSettingsSchema.parse({
+    connected: Boolean(quickbooks?.connected),
+    environment: quickbooks?.environment === 'production' ? 'production' : 'sandbox',
+    realmId: quickbooks?.realmId ? String(quickbooks.realmId) : null,
+    companyName: quickbooks?.companyName ? String(quickbooks.companyName) : null,
+    lastPullStatus: ['idle', 'running', 'success', 'error'].includes(String(quickbooks?.lastPullStatus))
+      ? String(quickbooks.lastPullStatus)
+      : 'idle',
+    lastPullAt:
+      quickbooks?.lastPullAt instanceof Date
+        ? quickbooks.lastPullAt.toISOString()
+        : null,
+    lastPullCount: Number(quickbooks?.lastPullCount ?? 0),
+    lastPullError: quickbooks?.lastPullError ? String(quickbooks.lastPullError) : null,
+    lastPushStatus: ['idle', 'running', 'success', 'error'].includes(String(quickbooks?.lastPushStatus))
+      ? String(quickbooks.lastPushStatus)
+      : 'idle',
+    lastPushAt:
+      quickbooks?.lastPushAt instanceof Date
+        ? quickbooks.lastPushAt.toISOString()
+        : null,
+    lastPushCount: Number(quickbooks?.lastPushCount ?? 0),
+    lastPushError: quickbooks?.lastPushError ? String(quickbooks.lastPushError) : null,
+    updatedAt:
+      quickbooks?.updatedAt instanceof Date
+        ? quickbooks.updatedAt.toISOString()
+        : null
+  });
 
 export const getAccountingObservabilitySummary = async (req: Request, res: Response) => {
   if (!req.companyId) {
     return fail(res, 'Company onboarding required', 403);
   }
 
-  const [recentStatements, statementCounts, quickbooksSettings] = await Promise.all([
+  const [recentStatements, counts, failedRuns, settings] = await Promise.all([
     BankStatement.find({ companyId: req.companyId })
       .sort({ updatedAt: -1 })
-      .limit(30)
-      .select(
-        '_id statementMonth fileName status processingStage extraction.issues updatedAt createdAt jobRuns'
-      ),
+      .limit(30),
     Promise.all([
       BankStatement.countDocuments({ companyId: req.companyId }),
-      BankStatement.countDocuments({ companyId: req.companyId, status: 'processing' }),
-      BankStatement.countDocuments({ companyId: req.companyId, status: 'needs_review' }),
-      BankStatement.countDocuments({ companyId: req.companyId, status: 'failed' }),
-      BankStatement.countDocuments({ companyId: req.companyId, status: 'confirmed' }),
-      BankStatement.countDocuments({ companyId: req.companyId, status: 'locked' })
+      BankStatement.countDocuments({ companyId: req.companyId, status: 'extracting' }),
+      BankStatement.countDocuments({ companyId: req.companyId, status: 'structuring' }),
+      BankStatement.countDocuments({ companyId: req.companyId, status: 'checks_queued' }),
+      BankStatement.countDocuments({ companyId: req.companyId, status: 'ready_for_review' }),
+      BankStatement.countDocuments({ companyId: req.companyId, status: 'failed' })
     ]),
+    RunModel.find({ companyId: req.companyId, status: 'failed' }).sort({ updatedAt: -1 }).limit(30),
     IntegrationSettingsModel.findOne({ companyId: req.companyId }).select('quickbooks')
   ]);
 
-  const failedJobs = recentStatements
-    .flatMap((statement) => {
-      const runs = Array.isArray(statement.jobRuns) ? statement.jobRuns : [];
-      return runs
-        .filter((run) => run.status === 'failed')
-        .map((run) => ({
-          statementId: String(statement._id),
-          fileName: statement.fileName,
-          statementMonth: statement.statementMonth,
-          jobType: String(run.jobType ?? ''),
-          taskId: String(run.taskId ?? ''),
-          attempt: Number(run.attempt ?? 1),
-          error: run.error ? String(run.error) : 'Unknown error',
-          endedAt: run.endedAt instanceof Date ? run.endedAt.toISOString() : null
-        }));
-    })
-    .sort((a, b) => {
-      const aTime = a.endedAt ? Date.parse(a.endedAt) : 0;
-      const bTime = b.endedAt ? Date.parse(b.endedAt) : 0;
-      return bTime - aTime;
-    })
-    .slice(0, 20);
-
-  const now = Date.now();
-  const statements = recentStatements.map((statement) => {
-    const runs = Array.isArray(statement.jobRuns) ? statement.jobRuns : [];
-    const lastJob = runs.length > 0 ? runs[runs.length - 1] : null;
-    const updatedAtIso =
-      statement.updatedAt instanceof Date
-        ? statement.updatedAt.toISOString()
-        : String(statement.updatedAt);
-    const isStaleProcessing =
-      statement.status === 'processing' &&
-      Date.parse(updatedAtIso) < now - stalledThresholdMs;
-    return {
-      id: String(statement._id),
-      statementMonth: statement.statementMonth,
-      fileName: statement.fileName,
-      status: statement.status,
-      processingStage: statement.processingStage,
-      issuesCount: Array.isArray(statement.extraction?.issues)
-        ? statement.extraction.issues.length
-        : 0,
-      updatedAt: updatedAtIso,
-      isStaleProcessing,
-      lastJob: lastJob
-        ? {
-          jobType: String(lastJob.jobType ?? ''),
-          status: String(lastJob.status ?? ''),
-          endedAt:
-            lastJob.endedAt instanceof Date ? lastJob.endedAt.toISOString() : null,
-          error: lastJob.error ? String(lastJob.error) : null
-        }
-        : null
-    };
-  });
-
   const [
     totalStatements,
-    processingStatements,
-    needsReviewStatements,
-    failedStatements,
-    confirmedStatements,
-    lockedStatements
-  ] = statementCounts;
+    extractingStatements,
+    structuringStatements,
+    checksQueuedStatements,
+    readyForReviewStatements,
+    failedStatements
+  ] = counts;
 
-  const quickbooks = quickbooksSettings?.quickbooks
-    ? {
-      connected: Boolean(quickbooksSettings.quickbooks.connected),
-      environment:
-        quickbooksSettings.quickbooks.environment === 'production'
-          ? 'production'
-          : 'sandbox',
-      realmId: quickbooksSettings.quickbooks.realmId
-        ? String(quickbooksSettings.quickbooks.realmId)
-        : null,
-      companyName: quickbooksSettings.quickbooks.companyName
-        ? String(quickbooksSettings.quickbooks.companyName)
-        : null,
-      lastPullStatus: normalizeSyncStatus(quickbooksSettings.quickbooks.lastPullStatus),
-      lastPullAt:
-        quickbooksSettings.quickbooks.lastPullAt instanceof Date
-          ? quickbooksSettings.quickbooks.lastPullAt.toISOString()
-          : null,
-      lastPullCount: Number(quickbooksSettings.quickbooks.lastPullCount ?? 0),
-      lastPullError: quickbooksSettings.quickbooks.lastPullError
-        ? String(quickbooksSettings.quickbooks.lastPullError)
-        : null,
-      lastPushStatus: normalizeSyncStatus(quickbooksSettings.quickbooks.lastPushStatus),
-      lastPushAt:
-        quickbooksSettings.quickbooks.lastPushAt instanceof Date
-          ? quickbooksSettings.quickbooks.lastPushAt.toISOString()
-          : null,
-      lastPushCount: Number(quickbooksSettings.quickbooks.lastPushCount ?? 0),
-      lastPushError: quickbooksSettings.quickbooks.lastPushError
-        ? String(quickbooksSettings.quickbooks.lastPushError)
-        : null
-    }
-    : null;
-
-  const responsePayload: AccountingObservabilitySummary =
-    accountingObservabilitySummarySchema.parse({
+  const payload = accountingObservabilitySummarySchema.parse({
     generatedAt: new Date().toISOString(),
     counts: {
       totalStatements,
-      processingStatements,
-      needsReviewStatements,
-      failedStatements,
-      confirmedStatements,
-      lockedStatements
+      extractingStatements,
+      structuringStatements,
+      checksQueuedStatements,
+      readyForReviewStatements,
+      failedStatements
     },
-    recentStatements: statements,
-    failedJobs,
-    quickbooks,
+    recentStatements: recentStatements.map((statement) => ({
+      id: statement._id.toString(),
+      statementMonth: statement.statementMonth,
+      fileName: statement.fileName,
+      source: statement.source,
+      status: statement.status,
+      progress: {
+        totalChecks: Number(statement.progress?.totalChecks ?? 0),
+        checksQueued: Number(statement.progress?.checksQueued ?? 0),
+        checksProcessing: Number(statement.progress?.checksProcessing ?? 0),
+        checksReady: Number(statement.progress?.checksReady ?? 0),
+        checksFailed: Number(statement.progress?.checksFailed ?? 0)
+      },
+      confidence: undefined,
+      issuesCount: Array.isArray(statement.issues) ? statement.issues.length : 0,
+      updatedAt: statement.updatedAt instanceof Date ? statement.updatedAt.toISOString() : String(statement.updatedAt),
+      createdAt: statement.createdAt instanceof Date ? statement.createdAt.toISOString() : String(statement.createdAt)
+    })),
+    failedRuns: failedRuns.map((run) => ({
+      id: run._id.toString(),
+      companyId: String(run.companyId),
+      statementId: run.statementId ? String(run.statementId) : undefined,
+      integrationId: run.integrationId ? String(run.integrationId) : undefined,
+      runType: run.runType,
+      job: run.job,
+      status: run.status,
+      metrics: run.metrics ?? undefined,
+      artifacts: run.artifacts ? Object.fromEntries(run.artifacts.entries()) : undefined,
+      errors: Array.isArray(run.errors) ? run.errors.map((error) => String(error)) : [],
+      traceId: run.traceId ? String(run.traceId) : undefined,
+      createdAt: run.createdAt instanceof Date ? run.createdAt.toISOString() : String(run.createdAt),
+      updatedAt: run.updatedAt instanceof Date ? run.updatedAt.toISOString() : String(run.updatedAt)
+    })),
+    quickbooks: settings?.quickbooks ? normalizeQuickBooks(settings.quickbooks) : null,
     gcpLinks: buildGcpLinks()
   });
-  return ok(res, responsePayload);
+
+  return ok(res, payload);
 };
 
 export const runAccountingObservabilityDebug = async (req: Request, res: Response) => {
@@ -237,40 +190,24 @@ export const runAccountingObservabilityDebug = async (req: Request, res: Respons
   const hasValidStatementId =
     statementId != null ? Types.ObjectId.isValid(statementId) : false;
 
-  const [
-    quickbooksSettings,
-    mappedAccountsCount,
-    postedUnsyncedCount,
-    postedSyncErrorCount,
-    topSyncErrors,
-    statement
-  ] = await Promise.all([
-    IntegrationSettingsModel.findOne({ companyId: req.companyId }).select('quickbooks'),
+  const [statement, mappedAccountsCount, readyToPostCount, failedPostingCount, quickbooksSettings] = await Promise.all([
+    statementId && hasValidStatementId
+      ? BankStatement.findOne({ _id: statementId, companyId: req.companyId })
+      : Promise.resolve(null),
     ChartOfAccountModel.countDocuments({
       companyId: req.companyId,
       qbAccountId: { $type: 'string', $ne: '' }
     }),
     LedgerEntryModel.countDocuments({
       companyId: req.companyId,
-      status: 'posted',
-      $or: [{ qbTxnId: null }, { qbTxnId: { $exists: false } }]
+      reviewStatus: 'approved',
+      'posting.status': { $in: ['not_posted', 'failed'] }
     }),
     LedgerEntryModel.countDocuments({
       companyId: req.companyId,
-      status: 'posted',
-      qbSyncError: { $type: 'string', $ne: '' }
+      'posting.status': 'failed'
     }),
-    LedgerEntryModel.find({
-      companyId: req.companyId,
-      status: 'posted',
-      qbSyncError: { $type: 'string', $ne: '' }
-    })
-      .sort({ updatedAt: -1 })
-      .limit(8)
-      .select('_id date memo qbSyncError updatedAt'),
-    statementId && hasValidStatementId
-      ? BankStatement.findOne({ _id: statementId, companyId: req.companyId })
-      : Promise.resolve(null)
+    IntegrationSettingsModel.findOne({ companyId: req.companyId }).select('quickbooks')
   ]);
 
   const envReadiness = {
@@ -290,118 +227,34 @@ export const runAccountingObservabilityDebug = async (req: Request, res: Respons
     workerServiceName: env.workerServiceName ?? null
   };
 
-  const now = Date.now();
-  const statementDebug = statement
-    ? {
-      found: true,
-      id: String(statement._id),
-      fileName: statement.fileName,
-      statementMonth: statement.statementMonth,
-      status: statement.status,
-      processingStage: String(statement.processingStage ?? 'queued'),
-      updatedAt:
-        statement.updatedAt instanceof Date
-          ? statement.updatedAt.toISOString()
-          : String(statement.updatedAt),
-      isStaleProcessing:
-        statement.status === 'processing' &&
-        Date.parse(
-          statement.updatedAt instanceof Date
-            ? statement.updatedAt.toISOString()
-            : String(statement.updatedAt)
-        ) < now - stalledThresholdMs,
-      issues: Array.isArray(statement.extraction?.issues)
-        ? statement.extraction.issues.map((issue) => String(issue))
-        : [],
-      pageCount: Array.isArray(statement.files?.pages)
-        ? statement.files.pages.length
-        : 0,
-      checkCount: Array.isArray(statement.files?.checks)
-        ? statement.files.checks.length
-        : 0,
-      recentJobRuns: Array.isArray(statement.jobRuns)
-        ? statement.jobRuns.slice(-10).map((run) => ({
-          taskId: String(run.taskId ?? ''),
-          jobType: String(run.jobType ?? ''),
-          status: String(run.status ?? ''),
-          attempt: Number(run.attempt ?? 1),
-          startedAt:
-            run.startedAt instanceof Date ? run.startedAt.toISOString() : null,
-          endedAt: run.endedAt instanceof Date ? run.endedAt.toISOString() : null,
-          error: run.error ? String(run.error) : null
-        }))
-        : []
-    }
-    : statementId
-      ? { found: false, id: statementId, invalidId: !hasValidStatementId }
-      : null;
-
-  const quickbooksDebug = quickbooksSettings?.quickbooks
-    ? {
-      connected: Boolean(quickbooksSettings.quickbooks.connected),
-      environment:
-        quickbooksSettings.quickbooks.environment === 'production'
-          ? 'production'
-          : 'sandbox',
-      realmId: quickbooksSettings.quickbooks.realmId
-        ? String(quickbooksSettings.quickbooks.realmId)
-        : null,
-      companyName: quickbooksSettings.quickbooks.companyName
-        ? String(quickbooksSettings.quickbooks.companyName)
-        : null,
-      lastPullStatus: normalizeSyncStatus(quickbooksSettings.quickbooks.lastPullStatus),
-      lastPullError: quickbooksSettings.quickbooks.lastPullError
-        ? String(quickbooksSettings.quickbooks.lastPullError)
-        : null,
-      lastPushStatus: normalizeSyncStatus(quickbooksSettings.quickbooks.lastPushStatus),
-      lastPushError: quickbooksSettings.quickbooks.lastPushError
-        ? String(quickbooksSettings.quickbooks.lastPushError)
-        : null,
-      mappedAccountsCount,
-      postedUnsyncedCount,
-      postedSyncErrorCount,
-      topSyncErrors: topSyncErrors.map((row) => ({
-        entryId: String(row._id),
-        date: row.date,
-        memo: row.memo,
-        error: row.qbSyncError ? String(row.qbSyncError) : null,
-        updatedAt:
-          row.updatedAt instanceof Date ? row.updatedAt.toISOString() : null
-      }))
-    }
-    : {
-      connected: false,
-      mappedAccountsCount,
-      postedUnsyncedCount,
-      postedSyncErrorCount,
-      topSyncErrors: topSyncErrors.map((row) => ({
-        entryId: String(row._id),
-        date: row.date,
-        memo: row.memo,
-        error: row.qbSyncError ? String(row.qbSyncError) : null,
-        updatedAt:
-          row.updatedAt instanceof Date ? row.updatedAt.toISOString() : null
-      }))
-    };
-
   const actions: string[] = [];
-  if (!quickbooksDebug.connected) actions.push('Connect QuickBooks from Accounting > QuickBooks Sync.');
-  if (quickbooksDebug.connected && quickbooksDebug.mappedAccountsCount === 0) actions.push('Run Pull CoA from QB before pushing entries.');
-  if (quickbooksDebug.connected && quickbooksDebug.postedUnsyncedCount > 0) actions.push('Run Sync Posted Entries to push pending ledger entries.');
-  if (statementDebug && 'found' in statementDebug && statementDebug.found && statementDebug.isStaleProcessing) {
-    actions.push('Reprocess this statement from Statements > Review.');
+  if (!quickbooksSettings?.quickbooks?.connected) {
+    actions.push('Connect QuickBooks from Accounting > QuickBooks Sync.');
   }
-  if (quickbooksDebug.postedSyncErrorCount > 0) {
-    actions.push('Review qbSyncError entries in ledger and verify account mappings.');
+  if (quickbooksSettings?.quickbooks?.connected && mappedAccountsCount === 0) {
+    actions.push('Run Refresh Reference Data in QuickBooks tab.');
+  }
+  if (readyToPostCount > 0) {
+    actions.push('Run Post Approved to sync approved ledger rows.');
+  }
+  if (failedPostingCount > 0) {
+    actions.push('Open Ledger failures and correct proposal/account mapping issues.');
+  }
+  if (statementId && !hasValidStatementId) {
+    actions.push('Provided statementId is invalid ObjectId format.');
+  }
+  if (statementId && hasValidStatementId && !statement) {
+    actions.push('Statement not found for provided statementId.');
+  }
+  if (statement?.status === 'failed') {
+    actions.push('Reprocess failed statement from Statements tab.');
   }
 
-  const responsePayload: AccountingObservabilityDebug =
-    accountingObservabilityDebugSchema.parse({
+  const payload = accountingObservabilityDebugSchema.parse({
     generatedAt: new Date().toISOString(),
     envReadiness,
-    statementDebug,
-    quickbooksDebug,
     actions
   });
-  return ok(res, responsePayload);
+
+  return ok(res, payload);
 };

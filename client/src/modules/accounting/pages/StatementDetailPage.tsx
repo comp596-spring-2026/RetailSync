@@ -3,15 +3,8 @@ import {
   Button,
   Chip,
   Grid2 as Grid,
-  MenuItem,
   Paper,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  TextField,
   Typography
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -26,45 +19,55 @@ import { hasPermission } from '../../../utils/permissions';
 import { accountingApi } from '../api';
 import { AccountingTabs } from '../components';
 
-const CATEGORY_OPTIONS = [
-  'expense',
-  'income',
-  'inventory',
-  'payroll',
-  'utilities',
-  'rent',
-  'fees',
-  'transfer',
-  'other'
-];
+type CheckCard = {
+  id: string;
+  status: 'queued' | 'processing' | 'ready' | 'needs_review' | 'failed';
+  confidence?: { overall: number };
+  autoFill?: {
+    checkNumber?: string;
+    date?: string;
+    payeeName?: string;
+    amount?: number;
+    memo?: string;
+  };
+  gcs: {
+    frontPath: string;
+    backPath?: string;
+    ocrPath?: string;
+    structuredPath?: string;
+  };
+  match?: {
+    reasons?: string[];
+    matchConfidence?: number;
+  };
+};
 
 type StatementDetail = {
   id: string;
   statementMonth: string;
   fileName: string;
   status: string;
-  processingStage?: string;
-  updatedAt: string;
-  pages: Array<{ pageNo: number; gcsPath: string }>;
-  checks: Array<{ checkId: string; pageNo: number; gcsPath: string }>;
-  extraction?: {
-    rawOcrText?: string;
-    structuredJson?: {
-      summary?: {
-        openingBalance?: number;
-        closingBalance?: number;
-      };
-      transactions?: Array<{
-        id: string;
-        date: string;
-        description: string;
-        amount: number;
-        type: string;
-        suggestedCategory?: string;
-      }>;
-    };
-    issues: string[];
+  progress: {
+    totalChecks: number;
+    checksQueued: number;
+    checksProcessing: number;
+    checksReady: number;
+    checksFailed: number;
   };
+  updatedAt: string;
+  gcs: {
+    rootPrefix: string;
+    pdfPath: string;
+  };
+  issues: string[];
+};
+
+const statusColor = (status: CheckCard['status']) => {
+  if (status === 'ready') return 'success';
+  if (status === 'needs_review') return 'warning';
+  if (status === 'failed') return 'error';
+  if (status === 'processing') return 'info';
+  return 'default';
 };
 
 export const StatementDetailPage = () => {
@@ -72,15 +75,14 @@ export const StatementDetailPage = () => {
   const navigate = useNavigate();
   const { statementId } = useParams<{ statementId: string }>();
   const permissions = useAppSelector((state) => state.auth.permissions);
-  const canView = hasPermission(permissions, 'accounting', 'view') || hasPermission(permissions, 'bankStatements', 'view');
+  const canView =
+    hasPermission(permissions, 'accounting', 'view') ||
+    hasPermission(permissions, 'bankStatements', 'view');
   const canEdit = hasPermission(permissions, 'bankStatements', 'edit');
-  const canConfirm = hasPermission(permissions, 'bankStatements', 'actions:confirm');
-  const canLock = hasPermission(permissions, 'bankStatements', 'actions:lock');
 
   const [statement, setStatement] = useState<StatementDetail | null>(null);
-  const [draftCategories, setDraftCategories] = useState<Record<string, string>>({});
+  const [checks, setChecks] = useState<CheckCard[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -88,16 +90,12 @@ export const StatementDetailPage = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await accountingApi.getStatement(statementId);
-      const detail = response.data.data as StatementDetail;
-      setStatement(detail);
-      const mapped = (detail.extraction?.structuredJson?.transactions ?? []).reduce<Record<string, string>>((acc, txn) => {
-        if (txn.suggestedCategory) {
-          acc[txn.id] = txn.suggestedCategory;
-        }
-        return acc;
-      }, {});
-      setDraftCategories(mapped);
+      const [statementResponse, checksResponse] = await Promise.all([
+        accountingApi.getStatement(statementId),
+        accountingApi.listStatementChecks(statementId)
+      ]);
+      setStatement(statementResponse.data.data as StatementDetail);
+      setChecks(checksResponse.data.data.checks as CheckCard[]);
     } catch (apiError) {
       setError(extractApiErrorMessage(apiError, 'Failed to load statement'));
     } finally {
@@ -110,81 +108,53 @@ export const StatementDetailPage = () => {
     void load();
   }, [canView, statementId]);
 
-  const transactions = useMemo(() => statement?.extraction?.structuredJson?.transactions ?? [], [statement]);
-  const missingCategoriesCount = useMemo(
+  useEffect(() => {
+    if (!statementId || !canView || !statement) return;
+    const inFlight =
+      statement.status === 'extracting' ||
+      statement.status === 'structuring' ||
+      statement.status === 'checks_queued';
+    if (!inFlight) return;
+
+    const interval = window.setInterval(() => {
+      void load();
+    }, 3000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [statementId, canView, statement]);
+
+  const retryCheck = async (checkId: string) => {
+    if (!statementId) return;
+    try {
+      await accountingApi.retryStatementCheck(statementId, checkId);
+      dispatch(showSnackbar({ message: 'Check retry queued', severity: 'success' }));
+      await load();
+    } catch (apiError) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Failed to retry check'),
+          severity: 'error'
+        })
+      );
+    }
+  };
+
+  const sortedChecks = useMemo(
     () =>
-      transactions.filter((txn) => !(draftCategories[txn.id] || txn.suggestedCategory || '').trim()).length,
-    [transactions, draftCategories]
-  );
-  const hasDraftChanges = useMemo(
-    () =>
-      transactions.some((txn) => {
-        const nextValue = (draftCategories[txn.id] ?? txn.suggestedCategory ?? '').trim();
-        const currentValue = (txn.suggestedCategory ?? '').trim();
-        return nextValue !== currentValue;
+      [...checks].sort((a, b) => {
+        const rank = (value: CheckCard['status']) => {
+          if (value === 'processing') return 0;
+          if (value === 'queued') return 1;
+          if (value === 'needs_review') return 2;
+          if (value === 'ready') return 3;
+          return 4;
+        };
+        return rank(a.status) - rank(b.status);
       }),
-    [transactions, draftCategories]
+    [checks]
   );
-
-  const reprocess = async () => {
-    if (!statementId) return;
-    try {
-      await accountingApi.reprocessStatement(statementId);
-      dispatch(showSnackbar({ message: 'Reprocess started', severity: 'success' }));
-      await load();
-    } catch (apiError) {
-      dispatch(showSnackbar({ message: extractApiErrorMessage(apiError, 'Failed to reprocess statement'), severity: 'error' }));
-    }
-  };
-
-  const confirm = async () => {
-    if (!statementId) return;
-    if (missingCategoriesCount > 0) {
-      dispatch(showSnackbar({ message: 'Assign categories to all transactions before confirming', severity: 'warning' }));
-      return;
-    }
-    try {
-      await accountingApi.confirmStatement(statementId);
-      dispatch(showSnackbar({ message: 'Statement confirmed', severity: 'success' }));
-      await load();
-    } catch (apiError) {
-      dispatch(showSnackbar({ message: extractApiErrorMessage(apiError, 'Failed to confirm statement'), severity: 'error' }));
-    }
-  };
-
-  const saveTransactionCategories = async () => {
-    if (!statementId) return;
-    if (!hasDraftChanges) return;
-    setSaving(true);
-    try {
-      const payload = {
-        transactions: transactions
-          .map((txn) => ({
-            id: txn.id,
-            suggestedCategory: (draftCategories[txn.id] ?? txn.suggestedCategory ?? '').trim()
-          }))
-          .filter((txn) => txn.suggestedCategory.length > 0)
-      };
-      const response = await accountingApi.updateStatementTransactions(statementId, payload);
-      setStatement(response.data.data.statement as StatementDetail);
-      dispatch(showSnackbar({ message: 'Transaction categories saved', severity: 'success' }));
-    } catch (apiError) {
-      dispatch(showSnackbar({ message: extractApiErrorMessage(apiError, 'Failed to save transaction categories'), severity: 'error' }));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const lock = async () => {
-    if (!statementId) return;
-    try {
-      await accountingApi.lockStatement(statementId);
-      dispatch(showSnackbar({ message: 'Statement locked', severity: 'success' }));
-      await load();
-    } catch (apiError) {
-      dispatch(showSnackbar({ message: extractApiErrorMessage(apiError, 'Failed to lock statement'), severity: 'error' }));
-    }
-  };
 
   if (!canView) {
     return <NoAccess />;
@@ -193,8 +163,8 @@ export const StatementDetailPage = () => {
   return (
     <Stack spacing={2}>
       <PageHeader
-        title={`Statement Review${statement ? ` • ${statement.statementMonth}` : ''}`}
-        subtitle="Validate extracted transactions before confirm and lock."
+        title={`Statement Processing${statement ? ` • ${statement.statementMonth}` : ''}`}
+        subtitle="Track check extraction progress and unlock review cards as they finish."
         icon={<DescriptionIcon />}
       />
       <AccountingTabs />
@@ -209,144 +179,128 @@ export const StatementDetailPage = () => {
         {statement && (
           <>
             <Paper sx={{ p: 2 }}>
-              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ md: 'center' }}>
+              <Stack
+                direction={{ xs: 'column', md: 'row' }}
+                spacing={1.5}
+                justifyContent="space-between"
+                alignItems={{ md: 'center' }}
+              >
                 <Stack>
                   <Typography variant="h6">{statement.fileName}</Typography>
                   <Typography variant="body2" color="text.secondary">
                     Updated {formatDate(statement.updatedAt, 'short')}
                   </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Status: {statement.status.replace(/_/g, ' ')}
+                  </Typography>
                 </Stack>
                 <Stack direction="row" spacing={1}>
-                  <Chip label={statement.status} color={statement.status === 'needs_review' ? 'warning' : 'default'} />
-                  <Button variant="outlined" onClick={() => navigate('/dashboard/accounting/statements')}>
-                    Back to list
+                  <Button
+                    variant="outlined"
+                    onClick={() => navigate('/dashboard/accounting/statements')}
+                  >
+                    Back
                   </Button>
-                  {canEdit && (
-                    <Button variant="outlined" onClick={() => void reprocess()}>
-                      Reprocess
-                    </Button>
-                  )}
-                  {canConfirm && statement.status === 'needs_review' && (
-                    <Button
-                      variant="outlined"
-                      onClick={() => void confirm()}
-                      disabled={missingCategoriesCount > 0 || transactions.length === 0 || saving}
-                    >
-                      Confirm
-                    </Button>
-                  )}
-                  {canLock && statement.status === 'confirmed' && (
-                    <Button variant="outlined" color="warning" onClick={() => void lock()}>
-                      Lock
-                    </Button>
-                  )}
+                  <Button
+                    variant="contained"
+                    onClick={() => navigate('/dashboard/accounting/ledger')}
+                    disabled={statement.status !== 'ready_for_review'}
+                  >
+                    Open Ledger Review
+                  </Button>
                 </Stack>
+              </Stack>
+
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mt: 1.5 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Checks total {statement.progress.totalChecks}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  queued {statement.progress.checksQueued}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  processing {statement.progress.checksProcessing}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  ready {statement.progress.checksReady}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  failed {statement.progress.checksFailed}
+                </Typography>
               </Stack>
             </Paper>
 
+            {statement.issues.length > 0 && (
+              <Alert severity="warning">
+                {statement.issues.join(' | ')}
+              </Alert>
+            )}
+
             <Grid container spacing={2}>
-              <Grid size={{ xs: 12, md: 5 }}>
-                <Paper sx={{ p: 2, minHeight: 340 }}>
-                  <Typography variant="subtitle1" sx={{ mb: 1 }}>
-                    Document Viewer
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                    Page image rendering overlays are planned in Ticket 3.1.
-                  </Typography>
-                  <Stack spacing={1}>
-                    {statement.pages.map((page) => (
-                      <Paper key={page.pageNo} variant="outlined" sx={{ p: 1 }}>
-                        <Typography variant="body2">Page {page.pageNo}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {page.gcsPath}
-                        </Typography>
-                      </Paper>
-                    ))}
-                    {statement.pages.length === 0 && (
+              {sortedChecks.map((check) => (
+                <Grid key={check.id} size={{ xs: 12, md: 6 }}>
+                  <Paper sx={{ p: 2, border: '1px solid', borderColor: 'divider' }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography variant="subtitle2">Check {check.id.slice(-6)}</Typography>
+                      <Chip
+                        size="small"
+                        color={statusColor(check.status) as any}
+                        label={check.status.replace(/_/g, ' ')}
+                      />
+                    </Stack>
+
+                    <Stack spacing={0.5} sx={{ mt: 1 }}>
                       <Typography variant="body2" color="text.secondary">
-                        No rendered pages yet.
+                        Confidence: {check.confidence?.overall != null ? `${Math.round(check.confidence.overall * 100)}%` : 'n/a'}
                       </Typography>
-                    )}
-                  </Stack>
-                </Paper>
-              </Grid>
-              <Grid size={{ xs: 12, md: 7 }}>
-                <Paper sx={{ p: 2, minHeight: 340 }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle1">
-                      Extracted Transactions
-                    </Typography>
-                    {canEdit && (
+                      <Typography variant="body2" color="text.secondary">
+                        Check No: {check.autoFill?.checkNumber ?? '-'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Date: {check.autoFill?.date ?? '-'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Payee: {check.autoFill?.payeeName ?? '-'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Amount:{' '}
+                        {typeof check.autoFill?.amount === 'number'
+                          ? check.autoFill.amount.toFixed(2)
+                          : '-'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Front: {check.gcs.frontPath}
+                      </Typography>
+                      {check.match?.reasons?.length ? (
+                        <Typography variant="caption" color="text.secondary">
+                          Why: {check.match.reasons.join(' • ')}
+                        </Typography>
+                      ) : null}
+                    </Stack>
+
+                    {canEdit && check.status === 'failed' && (
                       <Button
                         size="small"
                         variant="outlined"
-                        onClick={() => void saveTransactionCategories()}
-                        disabled={!hasDraftChanges || saving}
+                        sx={{ mt: 1.5 }}
+                        onClick={() => void retryCheck(check.id)}
                       >
-                        {saving ? 'Saving...' : 'Save changes'}
+                        Retry
                       </Button>
                     )}
-                  </Stack>
-                  {missingCategoriesCount > 0 && (
-                    <Alert severity="warning" sx={{ mb: 1.5 }}>
-                      {missingCategoriesCount} transaction(s) need a category before confirm.
-                    </Alert>
-                  )}
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Date</TableCell>
-                        <TableCell>Description</TableCell>
-                        <TableCell align="right">Amount</TableCell>
-                        <TableCell>Type</TableCell>
-                        <TableCell>Category</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {transactions.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={5}>
-                            <Typography variant="body2" color="text.secondary">
-                              No structured transactions yet.
-                            </Typography>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        transactions.map((txn) => (
-                          <TableRow key={txn.id}>
-                            <TableCell>{txn.date}</TableCell>
-                            <TableCell>{txn.description}</TableCell>
-                            <TableCell align="right">{txn.amount.toFixed(2)}</TableCell>
-                            <TableCell>{txn.type}</TableCell>
-                            <TableCell sx={{ minWidth: 160 }}>
-                              <TextField
-                                select
-                                size="small"
-                                fullWidth
-                                value={draftCategories[txn.id] ?? txn.suggestedCategory ?? ''}
-                                onChange={(event) =>
-                                  setDraftCategories((prev) => ({
-                                    ...prev,
-                                    [txn.id]: event.target.value
-                                  }))
-                                }
-                                disabled={!canEdit || statement.status === 'locked'}
-                              >
-                                <MenuItem value="">Select</MenuItem>
-                                {CATEGORY_OPTIONS.map((category) => (
-                                  <MenuItem key={category} value={category}>
-                                    {category}
-                                  </MenuItem>
-                                ))}
-                              </TextField>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </Paper>
-              </Grid>
+                  </Paper>
+                </Grid>
+              ))}
+
+              {sortedChecks.length === 0 && (
+                <Grid size={{ xs: 12 }}>
+                  <Paper sx={{ p: 2 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      No check candidates detected yet.
+                    </Typography>
+                  </Paper>
+                </Grid>
+              )}
             </Grid>
           </>
         )}

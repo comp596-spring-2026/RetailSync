@@ -107,15 +107,33 @@ The URI configured in Intuit must equal `QUICKBOOKS_INTEGRATION_REDIRECT_URI`.
 
 - Open `/dashboard/accounting/quickbooks`
   - connect QuickBooks
-  - pull CoA
-  - push posted entries
+  - refresh reference data
+  - post approved entries
 - Open `/dashboard/accounting/observability`
   - recent statements load
   - failed jobs list renders
   - debug diagnostics run
   - GCP log shortcut links open
 
-## 7) Rollback
+Detailed accounting lifecycle + module docs:
+
+- `/Users/trupal/Projects/RetailSync/docs/accounting/README.md`
+
+## 7) Scheduler Verification
+
+1. Configure daily scheduler:
+   - `POST /api/cron/accounting-sync`
+   - include header `x-cron-secret`
+2. Smoke test with dry-run:
+   - `POST /api/cron/accounting-sync?dryRun=true`
+3. Confirm outputs:
+   - response includes `sheets` summary and `quickbooks` per-company queue summary.
+   - QuickBooks settings `lastPullStatus` / `lastPushStatus` move to `running` then final states.
+4. Optional targeted runs:
+   - sheets only: `?includeSheets=true&includeQuickBooks=false`
+   - quickbooks only: `?includeSheets=false&includeQuickBooks=true`
+
+## 8) Rollback
 
 - Roll back Cloud Run traffic for API and worker to previous revisions.
 - If needed, temporarily disable QB sync buttons via RBAC (`quickbooks.sync`) while investigating.

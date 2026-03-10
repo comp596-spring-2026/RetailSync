@@ -4,8 +4,8 @@ import {
   getQuickBooksConnectUrl,
   getQuickBooksOAuthStatus,
   getQuickBooksSettings,
-  queueQuickBooksPullAccounts,
-  queueQuickBooksPushEntries,
+  queueQuickBooksPostApproved,
+  queueQuickBooksRefreshReferenceData,
   quickBooksCallback,
   startQuickBooksConnect,
   updateQuickBooksSettings
@@ -46,17 +46,18 @@ router.get(
   startQuickBooksConnect
 );
 router.post(
-  '/sync/pull-accounts',
+  '/sync/refresh-reference-data',
   requireAuth,
   requirePermission('quickbooks', 'sync'),
-  queueQuickBooksPullAccounts
+  queueQuickBooksRefreshReferenceData
 );
 router.post(
-  '/sync/push-entries',
+  '/sync/post-approved',
   requireAuth,
   requirePermission('quickbooks', 'sync'),
-  queueQuickBooksPushEntries
+  queueQuickBooksPostApproved
 );
+
 router.post(
   '/disconnect',
   requireAuth,

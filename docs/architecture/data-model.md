@@ -96,3 +96,27 @@ flowchart LR
   Ledger --> Aggregate[Aggregate by item+location]
   Aggregate --> Current[Current Stock Snapshot View]
 ```
+
+## Accounting Entities (Extension)
+
+```mermaid
+erDiagram
+  BANK_STATEMENT ||--o{ STATEMENT_TRANSACTION : "statementId"
+  BANK_STATEMENT ||--o{ STATEMENT_CHECK : "statementId"
+  BANK_STATEMENT ||--o{ RUN : "statementId(optional)"
+  STATEMENT_TRANSACTION ||--|| LEDGER_ENTRY : "statementTransactionId"
+  STATEMENT_CHECK }o--o| STATEMENT_TRANSACTION : "match.statementTransactionId"
+  LEDGER_ENTRY }o--|| COMPANY : "companyId"
+  RUN }o--|| COMPANY : "companyId"
+  QUICKBOOKS_REFERENCE }o--|| COMPANY : "companyId"
+```
+
+Notes:
+
+- GCS stores statement/check artifacts; Mongo stores references and workflow state.
+- `LedgerEntry` is the canonical review + posting record.
+- `Run` captures pipeline/sync job observability.
+
+Detailed accounting docs:
+
+- `/Users/trupal/Projects/RetailSync/docs/accounting/README.md`

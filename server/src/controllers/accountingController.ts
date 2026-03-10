@@ -1,33 +1,36 @@
 import {
   bankStatementDetailSchema,
   bankStatementListItemSchema,
+  bankStatementStatusResponseSchema,
   createBankStatementSchema,
   listBankStatementsQuerySchema,
+  listChecksQuerySchema,
   reprocessBankStatementSchema,
-  requestStatementUploadUrlSchema,
   requestStatementUploadUrlResponseSchema,
-  updateStatementTransactionsSchema
+  requestStatementUploadUrlSchema
 } from '@retailsync/shared';
 import { Storage } from '@google-cloud/storage';
+import { createHash } from 'node:crypto';
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { env } from '../config/env';
 import { enqueueAccountingJob } from '../jobs/accountingQueue';
 import { BankStatement } from '../models/BankStatement';
-import { createDraftLedgerEntriesFromStatement } from '../services/ledgerService';
+import { StatementCheckModel } from '../models/StatementCheck';
+import {
+  buildStatementPdfPath,
+  buildStatementRootPrefix
+} from '../services/accountingStorageService';
 import { fail, ok } from '../utils/apiResponse';
 
 const storage = new Storage();
 
 const sanitizeFileName = (name: string) => name.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 
-const ensureExtraction = (statement: any) => {
-  if (!statement.extraction) {
-    statement.extraction = { issues: [] };
-  }
-  if (!statement.extraction.issues) {
-    statement.extraction.issues = [];
-  }
+const computeStatementHash = async (bucketName: string, objectPath: string) => {
+  const file = storage.bucket(bucketName).file(objectPath);
+  const [buffer] = await file.download();
+  return createHash('sha256').update(buffer).digest('hex');
 };
 
 const toListItem = (statement: any) =>
@@ -37,45 +40,93 @@ const toListItem = (statement: any) =>
     fileName: statement.fileName,
     source: statement.source,
     status: statement.status,
-    processingStage: statement.processingStage,
-    pageCount: statement.files?.pages?.length ?? 0,
-    checkCount: statement.files?.checks?.length ?? 0,
-    confidence: statement.extraction?.confidence,
-    issuesCount: statement.extraction?.issues?.length ?? 0,
+    progress: {
+      totalChecks: Number(statement.progress?.totalChecks ?? 0),
+      checksQueued: Number(statement.progress?.checksQueued ?? 0),
+      checksProcessing: Number(statement.progress?.checksProcessing ?? 0),
+      checksReady: Number(statement.progress?.checksReady ?? 0),
+      checksFailed: Number(statement.progress?.checksFailed ?? 0)
+    },
+    confidence: undefined,
+    issuesCount: Array.isArray(statement.issues) ? statement.issues.length : 0,
     updatedAt: statement.updatedAt instanceof Date ? statement.updatedAt.toISOString() : String(statement.updatedAt),
     createdAt: statement.createdAt instanceof Date ? statement.createdAt.toISOString() : String(statement.createdAt)
   });
 
-const toDetailItem = (statement: any) =>
-  bankStatementDetailSchema.parse({
+const toDetailItem = async (statement: any) => {
+  const checks = await StatementCheckModel.find({
+    statementId: statement._id.toString(),
+    companyId: statement.companyId
+  })
+    .sort({ createdAt: 1 })
+    .limit(500)
+    .lean();
+
+  return bankStatementDetailSchema.parse({
     ...toListItem(statement),
-    pdfPath: statement.files?.pdf?.gcsPath,
-    pages: (statement.files?.pages ?? []).map((page: any) => ({
-      pageNo: Number(page.pageNo),
-      gcsPath: String(page.gcsPath),
-      width: page.width ? Number(page.width) : undefined,
-      height: page.height ? Number(page.height) : undefined
+    periodStart: statement.periodStart ?? undefined,
+    periodEnd: statement.periodEnd ?? undefined,
+    bankName: statement.bankName ?? undefined,
+    accountLast4: statement.accountLast4 ?? undefined,
+    gcs: {
+      rootPrefix: statement.gcs?.rootPrefix,
+      pdfPath: statement.gcs?.pdfPath
+    },
+    checks: checks.map((check) => ({
+      id: String(check._id),
+      statementId: String(check.statementId),
+      companyId: String(check.companyId),
+      status: check.status,
+      confidence: check.confidence
+        ? {
+          imageQuality: check.confidence.imageQuality,
+          ocrConfidence: check.confidence.ocrConfidence,
+          fieldConfidence: check.confidence.fieldConfidence,
+          crossValidation: check.confidence.crossValidation,
+          overall: Number(check.confidence.overall ?? 0)
+        }
+        : undefined,
+      autoFill: check.autoFill
+        ? {
+          checkNumber: check.autoFill.checkNumber ?? undefined,
+          date: check.autoFill.date ?? undefined,
+          payeeName: check.autoFill.payeeName ?? undefined,
+          amount: check.autoFill.amount != null ? Number(check.autoFill.amount) : undefined,
+          memo: check.autoFill.memo ?? undefined
+        }
+        : undefined,
+      gcs: (() => {
+        const gcs = check.gcs ?? { frontPath: '' };
+        return {
+          frontPath: String(gcs.frontPath ?? ''),
+          backPath: gcs.backPath ?? undefined,
+          ocrPath: gcs.ocrPath ?? undefined,
+          structuredPath: gcs.structuredPath ?? undefined
+        };
+      })(),
+      match: check.match
+        ? {
+          statementTransactionId: check.match.statementTransactionId ?? undefined,
+          matchConfidence:
+            check.match.matchConfidence != null
+              ? Number(check.match.matchConfidence)
+              : undefined,
+          reasons: Array.isArray(check.match.reasons)
+            ? check.match.reasons.map((reason) => String(reason))
+            : []
+        }
+        : undefined
     })),
-    checks: (statement.files?.checks ?? []).map((check: any) => ({
-      checkId: String(check.checkId),
-      pageNo: Number(check.pageNo),
-      bbox: Array.isArray(check.bbox) ? check.bbox.map((value: unknown) => Number(value)) : [],
-      gcsPath: String(check.gcsPath),
-      linkedTransactionId: check.linkedTransactionId ? String(check.linkedTransactionId) : undefined
-    })),
-    extraction: statement.extraction
-      ? {
-        rawOcrText: statement.extraction.rawOcrText ?? undefined,
-        structuredJson: statement.extraction.structuredJson ?? undefined,
-        issues: statement.extraction.issues ?? [],
-        confidence: statement.extraction.confidence ?? undefined
-      }
-      : undefined
+    issues: Array.isArray(statement.issues)
+      ? statement.issues.map((issue: unknown) => String(issue))
+      : []
   });
+};
 
 export const getUploadUrl = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
   if (!env.gcsBucketName) return fail(res, 'GCS bucket is not configured', 500);
+  const companyId = String(req.companyId);
 
   const parsed = requestStatementUploadUrlSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -83,8 +134,13 @@ export const getUploadUrl = async (req: Request, res: Response) => {
   }
 
   const statementId = new Types.ObjectId().toString();
-  const cleanName = sanitizeFileName(parsed.data.fileName);
-  const gcsPath = `accounting/${req.companyId}/statements/${statementId}/original.pdf`;
+  const statementMonth = parsed.data.statementMonth ?? new Date().toISOString().slice(0, 7);
+  const rootPrefix = buildStatementRootPrefix({
+    companyId,
+    statementMonth,
+    statementId
+  });
+  const gcsPath = buildStatementPdfPath(rootPrefix);
   const expires = new Date(Date.now() + 15 * 60 * 1000);
 
   try {
@@ -99,10 +155,11 @@ export const getUploadUrl = async (req: Request, res: Response) => {
       uploadUrl,
       gcsPath,
       statementId,
+      rootPrefix,
       expiresAt: expires.toISOString()
     });
 
-    return ok(res, { ...payload, fileName: cleanName });
+    return ok(res, { ...payload, fileName: sanitizeFileName(parsed.data.fileName), statementMonth });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('[accounting.upload-url] failed', error);
@@ -113,6 +170,8 @@ export const getUploadUrl = async (req: Request, res: Response) => {
 export const createStatement = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
   if (!req.user?.id) return fail(res, 'Unauthorized', 401);
+  if (!env.gcsBucketName) return fail(res, 'GCS bucket is not configured', 500);
+  const companyId = String(req.companyId);
 
   const parsed = createBankStatementSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -123,48 +182,75 @@ export const createStatement = async (req: Request, res: Response) => {
     return fail(res, 'Invalid statementId', 422);
   }
 
-  const expectedPrefix = `accounting/${req.companyId}/statements/${parsed.data.statementId}/`;
-  if (!parsed.data.gcsPath.startsWith(expectedPrefix)) {
-    return fail(res, 'gcsPath does not match expected company/statement structure', 422);
+  const expectedRootPrefix = buildStatementRootPrefix({
+    companyId,
+    statementMonth: parsed.data.statementMonth,
+    statementId: parsed.data.statementId
+  });
+  const expectedPdfPath = buildStatementPdfPath(expectedRootPrefix);
+
+  if (parsed.data.gcsPath !== expectedPdfPath) {
+    return fail(res, 'gcsPath does not match expected company/statement structure', 422, {
+      expectedPdfPath
+    });
   }
 
   try {
+    const hash = await computeStatementHash(env.gcsBucketName, parsed.data.gcsPath);
+
+    const duplicate = await BankStatement.findOne({
+      companyId,
+      hash,
+      _id: { $ne: parsed.data.statementId }
+    })
+      .sort({ createdAt: -1 })
+      .select('_id statementMonth fileName');
+
+    const issues = duplicate
+      ? [`Potential duplicate of statement ${duplicate._id.toString()} (${duplicate.statementMonth} ${duplicate.fileName})`]
+      : [];
+
     const statement = await BankStatement.create({
       _id: new Types.ObjectId(parsed.data.statementId),
-      companyId: req.companyId,
+      companyId,
       statementMonth: parsed.data.statementMonth,
       fileName: sanitizeFileName(parsed.data.fileName),
       source: parsed.data.source,
       status: 'uploaded',
-      processingStage: 'queued',
-      files: {
-        pdf: { gcsPath: parsed.data.gcsPath },
-        pages: [],
-        checks: []
+      periodStart: parsed.data.periodStart,
+      periodEnd: parsed.data.periodEnd,
+      gcs: {
+        rootPrefix: expectedRootPrefix,
+        pdfPath: parsed.data.gcsPath
       },
-      extraction: {
-        issues: []
+      progress: {
+        totalChecks: 0,
+        checksQueued: 0,
+        checksProcessing: 0,
+        checksReady: 0,
+        checksFailed: 0
       },
+      hash,
+      issues,
       createdBy: req.user.id
     });
 
     let queueMeta: Awaited<ReturnType<typeof enqueueAccountingJob>> | null = null;
     try {
       queueMeta = await enqueueAccountingJob({
-        companyId: req.companyId,
+        companyId,
         statementId: statement._id.toString(),
-        jobType: 'render_pages',
+        jobType: 'statement.extract',
         meta: { requestedBy: req.user.id }
       });
-      if (queueMeta.mode === 'cloud') {
-        statement.status = 'processing' as any;
-        await statement.save();
-      }
+      statement.status = 'extracting' as any;
+      await statement.save();
     } catch (enqueueError) {
       statement.status = 'failed' as any;
-      statement.processingStage = 'failed' as any;
-      ensureExtraction(statement);
-      statement.extraction!.issues = [...(statement.extraction!.issues ?? []), `Queue dispatch failed: ${String((enqueueError as Error).message)}`];
+      statement.issues = [
+        ...(statement.issues ?? []),
+        `Queue dispatch failed: ${String((enqueueError as Error).message)}`
+      ] as any;
       await statement.save();
       throw enqueueError;
     }
@@ -225,12 +311,106 @@ export const getStatementById = async (req: Request, res: Response) => {
     if (!statement) {
       return fail(res, 'Statement not found', 404);
     }
-    return ok(res, toDetailItem(statement));
+    return ok(res, await toDetailItem(statement));
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('[accounting.get-statement] failed', error);
     return fail(res, 'Failed to load statement', 500);
   }
+};
+
+export const getStatementStatus = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+
+  try {
+    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    if (!statement) {
+      return fail(res, 'Statement not found', 404);
+    }
+
+    const payload = bankStatementStatusResponseSchema.parse({
+      statementId: statement._id.toString(),
+      status: statement.status,
+      progress: {
+        totalChecks: Number(statement.progress?.totalChecks ?? 0),
+        checksQueued: Number(statement.progress?.checksQueued ?? 0),
+        checksProcessing: Number(statement.progress?.checksProcessing ?? 0),
+        checksReady: Number(statement.progress?.checksReady ?? 0),
+        checksFailed: Number(statement.progress?.checksFailed ?? 0)
+      },
+      updatedAt: statement.updatedAt instanceof Date ? statement.updatedAt.toISOString() : String(statement.updatedAt),
+      issues: Array.isArray(statement.issues)
+        ? statement.issues.map((issue: unknown) => String(issue))
+        : []
+    });
+
+    return ok(res, payload);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.get-statement-status] failed', error);
+    return fail(res, 'Failed to load statement status', 500);
+  }
+};
+
+export const getStatementChecks = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+
+  const parsed = listChecksQuerySchema.safeParse({
+    status: typeof req.query.status === 'string' ? req.query.status : undefined
+  });
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+  if (!statement) {
+    return fail(res, 'Statement not found', 404);
+  }
+
+  const filter: Record<string, unknown> = {
+    companyId: req.companyId,
+    statementId: req.params.id
+  };
+  if (parsed.data.status) {
+    filter.status = parsed.data.status;
+  }
+
+  const checks = await StatementCheckModel.find(filter).sort({ createdAt: 1 }).limit(500);
+  return ok(res, {
+    checks: checks.map((check) => ({
+      id: check._id.toString(),
+      statementId: check.statementId,
+      companyId: String(check.companyId),
+      status: check.status,
+      confidence: check.confidence
+        ? {
+          imageQuality: check.confidence.imageQuality,
+          ocrConfidence: check.confidence.ocrConfidence,
+          fieldConfidence: check.confidence.fieldConfidence,
+          crossValidation: check.confidence.crossValidation,
+          overall: Number(check.confidence.overall ?? 0)
+        }
+        : undefined,
+      autoFill: check.autoFill ?? undefined,
+      gcs: (() => {
+        const gcs = check.gcs ?? { frontPath: '' };
+        return {
+          frontPath: String(gcs.frontPath ?? ''),
+          backPath: gcs.backPath ?? undefined,
+          ocrPath: gcs.ocrPath ?? undefined,
+          structuredPath: gcs.structuredPath ?? undefined
+        };
+      })(),
+      match: check.match
+        ? {
+          statementTransactionId: check.match.statementTransactionId ?? undefined,
+          matchConfidence: check.match.matchConfidence ?? undefined,
+          reasons: check.match.reasons ?? []
+        }
+        : undefined,
+      updatedAt: check.updatedAt instanceof Date ? check.updatedAt.toISOString() : String(check.updatedAt)
+    }))
+  });
 };
 
 export const reprocessStatement = async (req: Request, res: Response) => {
@@ -248,11 +428,18 @@ export const reprocessStatement = async (req: Request, res: Response) => {
       return fail(res, 'Statement not found', 404);
     }
 
-    statement.status = 'processing' as any;
-    statement.processingStage = 'queued' as any;
-    ensureExtraction(statement);
-    statement.extraction!.issues = [];
+    statement.status = 'uploaded' as any;
+    statement.progress = {
+      totalChecks: 0,
+      checksQueued: 0,
+      checksProcessing: 0,
+      checksReady: 0,
+      checksFailed: 0
+    } as any;
+    statement.issues = [] as any;
     await statement.save();
+
+    await StatementCheckModel.deleteMany({ companyId: req.companyId, statementId: statement._id.toString() });
 
     const queue = await enqueueAccountingJob({
       companyId: req.companyId,
@@ -273,139 +460,121 @@ export const reprocessStatement = async (req: Request, res: Response) => {
   }
 };
 
-export const confirmStatement = async (req: Request, res: Response) => {
+export const retryStatementCheck = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  if (!req.user?.id) return fail(res, 'Unauthorized', 401);
+  const companyId = String(req.companyId);
+  const statementId = String(req.params.id);
+  const checkId = String(req.params.checkId);
 
-  try {
-    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
-    if (!statement) {
-      return fail(res, 'Statement not found', 404);
-    }
-
-    if (statement.status !== 'needs_review') {
-      return fail(res, 'Statement must be in needs_review before confirming', 409);
-    }
-
-    const transactions = (statement.extraction as any)?.structuredJson?.transactions as Array<{
-      id?: string;
-      date?: string;
-      description?: string;
-      amount?: number;
-      type?: string;
-      suggestedCategory?: string;
-    }> | undefined;
-    if (!transactions || transactions.length === 0) {
-      return fail(res, 'No transactions available to confirm', 422);
-    }
-
-    const missingCategory = transactions.filter((txn) => !txn.suggestedCategory || !String(txn.suggestedCategory).trim()).length;
-    const invalidRows = transactions.filter((txn) => !txn.id || !txn.date || !txn.description || !Number.isFinite(Number(txn.amount)) || !txn.type).length;
-    if (invalidRows > 0 || missingCategory > 0) {
-      return fail(res, 'Statement has unresolved transaction fields', 422, {
-        invalidRows,
-        missingCategory
-      });
-    }
-
-    statement.status = 'confirmed' as any;
-    statement.processingStage = 'confirmed' as any;
-    await statement.save();
-
-    let ledgerDraftsCreated = 0;
-    try {
-      const result = await createDraftLedgerEntriesFromStatement({
-        companyId: req.companyId,
-        statementId: statement._id.toString(),
-        transactions: transactions.map((txn) => ({
-          id: String(txn.id),
-          date: String(txn.date),
-          description: String(txn.description),
-          amount: Number(txn.amount),
-          type: txn.type === 'debit' ? 'debit' : 'credit',
-          suggestedCategory: txn.suggestedCategory ? String(txn.suggestedCategory) : undefined
-        }))
-      });
-      ledgerDraftsCreated = result.created;
-    } catch (ledgerError) {
-      ensureExtraction(statement);
-      statement.extraction!.issues = [
-        ...(statement.extraction!.issues ?? []),
-        `Ledger draft generation failed: ${String((ledgerError as Error).message)}`
-      ];
-      await statement.save();
-    }
-
-    return ok(res, { statement: toListItem(statement), ledgerDraftsCreated });
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[accounting.confirm] failed', error);
-    return fail(res, 'Failed to confirm statement', 500);
+  const statement = await BankStatement.findOne({ _id: statementId, companyId });
+  if (!statement) {
+    return fail(res, 'Statement not found', 404);
   }
+
+  const check = await StatementCheckModel.findOne({
+    _id: checkId,
+    statementId,
+    companyId
+  });
+  if (!check) {
+    return fail(res, 'Check not found', 404);
+  }
+
+  check.status = 'queued' as any;
+  check.errors = [] as any;
+  await check.save();
+
+  const queue = await enqueueAccountingJob({
+    companyId,
+    statementId,
+    checkId,
+    jobType: 'check.process',
+    meta: {
+      requestedBy: req.user.id,
+      reason: 'manual-check-retry'
+    }
+  });
+
+  return ok(res, {
+    checkId: check._id.toString(),
+    queue
+  });
 };
 
-export const lockStatement = async (req: Request, res: Response) => {
+export const getStatementStream = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  const companyId = String(req.companyId);
 
-  try {
-    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
-    if (!statement) {
-      return fail(res, 'Statement not found', 404);
-    }
-
-    if (statement.status !== 'confirmed') {
-      return fail(res, 'Only confirmed statements can be locked', 409);
-    }
-
-    statement.status = 'locked' as any;
-    statement.processingStage = 'locked' as any;
-    await statement.save();
-    return ok(res, { statement: toListItem(statement) });
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[accounting.lock] failed', error);
-    return fail(res, 'Failed to lock statement', 500);
-  }
-};
-
-export const updateStatementTransactions = async (req: Request, res: Response) => {
-  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
-
-  const parsed = updateStatementTransactionsSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  const statementId = req.params.id;
+  const statement = await BankStatement.findOne({ _id: statementId, companyId });
+  if (!statement) {
+    return fail(res, 'Statement not found', 404);
   }
 
-  try {
-    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
-    if (!statement) {
-      return fail(res, 'Statement not found', 404);
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
+  let lastStatusFingerprint = '';
+  let lastChecksFingerprint = '';
+
+  const writeEvent = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const emit = async () => {
+    const latestStatement = await BankStatement.findOne({ _id: statementId, companyId });
+    if (!latestStatement) return;
+
+    const statusPayload = {
+      statementId: latestStatement._id.toString(),
+      status: latestStatement.status,
+      progress: latestStatement.progress,
+      updatedAt: latestStatement.updatedAt,
+      issues: latestStatement.issues ?? []
+    };
+    const statusFingerprint = JSON.stringify(statusPayload);
+    if (statusFingerprint !== lastStatusFingerprint) {
+      writeEvent('progressUpdated', statusPayload);
+      lastStatusFingerprint = statusFingerprint;
     }
 
-    const structured = (statement.extraction as any)?.structuredJson;
-    const existingTransactions = Array.isArray(structured?.transactions) ? structured.transactions : [];
-    const categoryMap = new Map(parsed.data.transactions.map((txn) => [txn.id, txn.suggestedCategory]));
+    const checks = await StatementCheckModel.find({ companyId, statementId })
+      .sort({ updatedAt: 1 })
+      .limit(500)
+      .lean();
 
-    const updatedTransactions = existingTransactions.map((txn: any) => ({
-      ...txn,
-      suggestedCategory: categoryMap.get(String(txn.id)) ?? txn.suggestedCategory
+    const checkPayload = checks.map((check) => ({
+      checkId: String(check._id),
+      status: check.status,
+      confidence: check.confidence?.overall ?? null,
+      autoFill: check.autoFill ?? null,
+      updatedAt: check.updatedAt
     }));
 
-    if (!statement.extraction) {
-      statement.extraction = { issues: [] } as any;
+    const checksFingerprint = JSON.stringify(checkPayload);
+    if (checksFingerprint !== lastChecksFingerprint) {
+      for (const check of checkPayload) {
+        writeEvent('checkUpdated', check);
+      }
+      lastChecksFingerprint = checksFingerprint;
     }
-    statement.extraction!.structuredJson = {
-      ...(structured ?? {}),
-      schemaVersion: structured?.schemaVersion ?? 'v1',
-      transactions: updatedTransactions
-    };
-    await statement.save();
+  };
 
-    return ok(res, {
-      statement: toDetailItem(statement)
-    });
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[accounting.update-transactions] failed', error);
-    return fail(res, 'Failed to update transactions', 500);
-  }
+  writeEvent('connected', { statementId, now: new Date().toISOString() });
+  await emit();
+
+  const interval = setInterval(() => {
+    void emit();
+  }, 3000);
+
+  req.on('close', () => {
+    clearInterval(interval);
+    res.end();
+  });
 };

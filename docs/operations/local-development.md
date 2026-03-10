@@ -90,8 +90,9 @@ Production Cloud Run uses ADC from attached service account and does not require
 For accounting task processing:
 
 - local default mode is `TASKS_MODE=inline`
-- cloud mode requires `GCP_PROJECT_ID`, `GCP_REGION`, queue names, worker endpoint, and OIDC service account env vars
-- worker endpoint is `/api/internal/tasks/run` and is protected by `x-internal-task-secret`
+- cloud mode requires `GCP_PROJECT_ID`, `GCP_REGION`, queue names, task endpoint base, and OIDC service account env vars
+- task endpoint base is `/api/tasks` and is protected by `x-internal-task-secret`
+- task dispatch automatically routes to `/api/tasks/pipeline` or `/api/tasks/sync` by job type
 - for observability log shortcuts, set `API_SERVICE_NAME` and `WORKER_SERVICE_NAME`
 
 Local convenience fallback is also supported for Sheets calls:

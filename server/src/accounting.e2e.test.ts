@@ -13,6 +13,9 @@ import { RoleModel } from './models/Role';
 import { BankStatement } from './models/BankStatement';
 import { LedgerEntryModel } from './models/LedgerEntry';
 import { ChartOfAccountModel } from './models/ChartOfAccount';
+import { StatementCheckModel } from './models/StatementCheck';
+import { StatementTransactionModel } from './models/StatementTransaction';
+import { RunModel } from './models/Run';
 import { getOrCreateSettings } from './utils/googleSheetsSettings';
 
 const { enqueueAccountingJobMock, runAccountingTaskMock } = vi.hoisted(() => ({
@@ -35,7 +38,8 @@ vi.mock('@google-cloud/storage', () => {
         file: (objectPath: string) => ({
           getSignedUrl: async () => [
             `https://storage.mock/${encodeURIComponent(bucketName)}/${encodeURIComponent(objectPath)}`
-          ]
+          ],
+          download: async () => [Buffer.from('%PDF-1.7 mock content', 'utf-8')]
         })
       };
     }
@@ -55,7 +59,7 @@ const extractCompanyContext = async (email: string) => {
   };
 };
 
-describe('Accounting + QuickBooks + Observability e2e', () => {
+describe('Accounting e2e', () => {
   const TEST_TIMEOUT_MS = 20_000;
   let app: ReturnType<(typeof import('./app'))['createApp']>;
 
@@ -69,7 +73,7 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
     process.env.WORKER_SERVICE_NAME = 'retailsync-worker-dev';
     process.env.INTERNAL_TASKS_SECRET = 'internal-test-secret';
     process.env.INTERNAL_TASKS_ENDPOINT =
-      'https://retailsync-worker-dev.example.com/api/internal/tasks/run';
+      'https://retailsync-worker-dev.example.com/api/tasks';
     process.env.QUICKBOOKS_CLIENT_ID = 'qb-client-id';
     process.env.QUICKBOOKS_CLIENT_SECRET = 'qb-client-secret';
     process.env.QUICKBOOKS_INTEGRATION_REDIRECT_URI =
@@ -86,22 +90,26 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
     runAccountingTaskMock.mockReset();
 
     enqueueAccountingJobMock.mockImplementation(async (args: { jobType: string }) => ({
-      taskId: `task-${args.jobType}`,
+      taskId: `task-${String(args.jobType).replace(/\./g, '-')}`,
       mode: 'cloud',
       status: 'queued',
-      queueName: args.jobType.startsWith('qb_') ? 'sync-integrations-dev' : 'pipeline-ocr-dev'
+      queueName: String(args.jobType).startsWith('quickbooks.')
+        ? 'sync-integrations-dev'
+        : 'pipeline-ocr-dev'
     }));
 
     runAccountingTaskMock.mockImplementation(
       async (payload: {
         companyId: string;
-        statementId: string;
+        statementId?: string;
+        checkId?: string;
         jobType: string;
         meta?: { taskId?: string };
       }) => ({
         taskId: String(payload.meta?.taskId ?? `task-${payload.jobType}`),
         companyId: payload.companyId,
         statementId: payload.statementId,
+        checkId: payload.checkId,
         jobType: payload.jobType,
         status: 'completed'
       })
@@ -113,7 +121,7 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
   });
 
   it(
-    'runs statement upload/create/reprocess/confirm/lock and ledger post end-to-end',
+    'runs upload/create/reprocess/check-retry and ledger approval/post queue flow',
     async () => {
       const { accessToken, email } = await registerAndCreateCompany(app, 'AcctLifecycle');
       const { companyId } = await extractCompanyContext(email);
@@ -131,7 +139,7 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
       const statementId = upload.body.data.statementId as string;
       const gcsPath = upload.body.data.gcsPath as string;
       expect(upload.body.data.uploadUrl).toContain('https://storage.mock/');
-      expect(gcsPath).toContain(`/statements/${statementId}/original.pdf`);
+      expect(gcsPath).toContain('/original/statement.pdf');
 
       const created = await request(app)
         .post('/api/accounting/statements')
@@ -144,7 +152,7 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
         })
         .expect(201);
 
-      expect(created.body.data.statement.status).toBe('processing');
+      expect(created.body.data.statement.status).toBe('extracting');
       expect(created.body.data.queue.mode).toBe('cloud');
 
       const listed = await request(app)
@@ -153,57 +161,80 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
         .expect(200);
       expect(listed.body.data.statements).toHaveLength(1);
 
+      const statementTxnId = new Types.ObjectId().toString();
+      await StatementTransactionModel.create({
+        _id: statementTxnId,
+        companyId,
+        statementId,
+        postDate: '2026-03-02',
+        description: 'Payroll check 1023',
+        merchant: 'Payroll',
+        amount: 1250,
+        type: 'debit',
+        proposal: {
+          qbTxnType: 'Check',
+          confidence: 0.8,
+          reasons: ['seeded'],
+          status: 'proposed',
+          version: 'v1'
+        },
+        reviewStatus: 'proposed',
+        posting: { status: 'not_posted' }
+      });
+
+      const ledgerEntry = await LedgerEntryModel.create({
+        companyId,
+        sourceType: 'statement',
+        statementId,
+        statementTransactionId: statementTxnId,
+        date: '2026-03-02',
+        description: 'Payroll check 1023',
+        amount: 1250,
+        type: 'debit',
+        proposal: {
+          qbTxnType: 'Check',
+          confidence: 0.8,
+          reasons: ['seeded'],
+          status: 'proposed',
+          version: 'v1'
+        },
+        reviewStatus: 'proposed',
+        posting: { status: 'not_posted' }
+      });
+
+      const failedCheck = await StatementCheckModel.create({
+        companyId,
+        statementId,
+        status: 'failed',
+        gcs: {
+          frontPath: `companies/${companyId}/statements/2026/03/${statementId}/derived/checks/extracted/check-1/front.jpg`
+        },
+        errors: ['OCR timeout']
+      });
+
       const detail = await request(app)
         .get(`/api/accounting/statements/${statementId}`)
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
       expect(detail.body.data.id).toBe(statementId);
-      expect(detail.body.data.pdfPath).toBe(gcsPath);
+      expect(detail.body.data.checks.length).toBe(1);
+
+      const status = await request(app)
+        .get(`/api/accounting/statements/${statementId}/status`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+      expect(status.body.data.statementId).toBe(statementId);
+
+      await request(app)
+        .post(`/api/accounting/statements/${statementId}/checks/${failedCheck._id.toString()}/retry`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
 
       await request(app)
         .post(`/api/accounting/statements/${statementId}/reprocess`)
         .set('Authorization', `Bearer ${accessToken}`)
-        .send({ fromJobType: 'detect_checks' })
+        .send({ fromJobType: 'statement.extract' })
         .expect(200);
-
-      await BankStatement.findOneAndUpdate(
-        { _id: statementId, companyId },
-        {
-          $set: {
-            status: 'needs_review',
-            processingStage: 'structured_ready',
-            extraction: {
-              issues: [],
-              structuredJson: {
-                schemaVersion: 'v1',
-                transactions: [
-                  {
-                    id: 'txn-1',
-                    date: '2026-03-01',
-                    description: 'Office supplies',
-                    amount: 42.5,
-                    type: 'debit',
-                    suggestedCategory: 'office_expense'
-                  }
-                ]
-              }
-            }
-          }
-        }
-      );
-
-      const confirmed = await request(app)
-        .post(`/api/accounting/statements/${statementId}/confirm`)
-        .set('Authorization', `Bearer ${accessToken}`)
-        .expect(200);
-      expect(confirmed.body.data.statement.status).toBe('confirmed');
-      expect(confirmed.body.data.ledgerDraftsCreated).toBeGreaterThanOrEqual(1);
-
-      const locked = await request(app)
-        .post(`/api/accounting/statements/${statementId}/lock`)
-        .set('Authorization', `Bearer ${accessToken}`)
-        .expect(200);
-      expect(locked.body.data.statement.status).toBe('locked');
 
       const ledgerEntries = await request(app)
         .get('/api/accounting/ledger/entries')
@@ -211,74 +242,57 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
         .expect(200);
       expect(ledgerEntries.body.data.entries.length).toBeGreaterThanOrEqual(1);
 
-      const firstEntryId = ledgerEntries.body.data.entries[0]._id as string;
-      const posted = await request(app)
-        .post(`/api/accounting/ledger/entries/${firstEntryId}/post`)
+      await request(app)
+        .post(`/api/accounting/ledger/entries/${ledgerEntry._id.toString()}/approve`)
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
-      expect(posted.body.data.entry.status).toBe('posted');
 
-      await request(app)
-        .post(`/api/accounting/ledger/entries/${firstEntryId}/post`)
+      const postApproved = await request(app)
+        .post('/api/accounting/ledger/post-approved')
         .set('Authorization', `Bearer ${accessToken}`)
-        .expect(409);
-
-      expect(enqueueAccountingJobMock).toHaveBeenCalledTimes(2);
+        .expect(200);
+      expect(postApproved.body.data.queue.status).toBe('queued');
     },
     TEST_TIMEOUT_MS
   );
 
   it(
-    'returns observability summary + debug diagnostics for statement and QuickBooks states',
+    'returns observability summary + debug diagnostics with new run and status model',
     async () => {
       const { accessToken, email } = await registerAndCreateCompany(app, 'ObservabilitySuite');
       const { companyId, userId } = await extractCompanyContext(email);
 
-      const staleStatementId = new Types.ObjectId();
-      const failedStatementId = new Types.ObjectId();
-
-      await BankStatement.create([
-        {
-          _id: staleStatementId,
-          companyId,
-          statementMonth: '2026-02',
-          fileName: 'stale.pdf',
-          source: 'upload',
-          status: 'processing',
-          processingStage: 'ocr_ready',
-          files: { pdf: { gcsPath: `accounting/${companyId}/stale/original.pdf` }, pages: [], checks: [] },
-          extraction: { issues: [] },
-          jobRuns: [],
-          createdBy: userId
+      const statementId = new Types.ObjectId().toString();
+      await BankStatement.create({
+        _id: statementId,
+        companyId,
+        statementMonth: '2026-02',
+        fileName: 'obs.pdf',
+        source: 'upload',
+        status: 'failed',
+        gcs: {
+          rootPrefix: `companies/${companyId}/statements/2026/02/${statementId}`,
+          pdfPath: `companies/${companyId}/statements/2026/02/${statementId}/original/statement.pdf`
         },
-        {
-          _id: failedStatementId,
-          companyId,
-          statementMonth: '2026-01',
-          fileName: 'failed.pdf',
-          source: 'upload',
-          status: 'failed',
-          processingStage: 'failed',
-          files: { pdf: { gcsPath: `accounting/${companyId}/failed/original.pdf` }, pages: [], checks: [] },
-          extraction: { issues: ['parse failure'] },
-          jobRuns: [
-            {
-              taskId: 'task-gemini',
-              jobType: 'gemini_structure',
-              status: 'failed',
-              attempt: 2,
-              endedAt: new Date(),
-              error: 'Gemini timeout'
-            }
-          ],
-          createdBy: userId
-        }
-      ]);
+        progress: {
+          totalChecks: 2,
+          checksQueued: 0,
+          checksProcessing: 0,
+          checksReady: 1,
+          checksFailed: 1
+        },
+        issues: ['Gemini validation failed'],
+        createdBy: userId
+      });
 
-      await BankStatement.updateOne(
-        { _id: staleStatementId, companyId },
-        { $set: { updatedAt: new Date(Date.now() - 45 * 60 * 1000) } }
-      );
+      await RunModel.create({
+        companyId,
+        statementId,
+        runType: 'pipeline',
+        job: 'statement.structure',
+        status: 'failed',
+        errors: ['Invalid schema']
+      });
 
       await ChartOfAccountModel.create({
         companyId,
@@ -289,29 +303,28 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
         isSystem: false
       });
 
-      await LedgerEntryModel.create([
-        {
-          companyId,
-          date: '2026-02-01',
-          memo: 'Posted unsynced',
-          lines: [
-            { accountCode: '1000', debit: 10, credit: 0 },
-            { accountCode: '7999', debit: 0, credit: 10 }
-          ],
-          status: 'posted'
+      await LedgerEntryModel.create({
+        companyId,
+        sourceType: 'statement',
+        statementId,
+        statementTransactionId: new Types.ObjectId().toString(),
+        date: '2026-02-01',
+        description: 'Approved unsynced',
+        amount: 120,
+        type: 'debit',
+        reviewStatus: 'approved',
+        posting: {
+          status: 'failed',
+          error: 'No account mapping'
         },
-        {
-          companyId,
-          date: '2026-02-02',
-          memo: 'Posted sync error',
-          lines: [
-            { accountCode: '1000', debit: 12, credit: 0 },
-            { accountCode: '7999', debit: 0, credit: 12 }
-          ],
-          status: 'posted',
-          qbSyncError: 'No QuickBooks account mapping for account code 6999'
+        proposal: {
+          qbTxnType: 'Expense',
+          confidence: 0.7,
+          reasons: ['seeded'],
+          status: 'approved',
+          version: 'v1'
         }
-      ]);
+      });
 
       const settings = await getOrCreateSettings(companyId, userId);
       const quickbooks = (settings as any).quickbooks;
@@ -331,31 +344,19 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(summary.body.data.counts.processingStatements).toBe(1);
+      expect(summary.body.data.counts.totalStatements).toBe(1);
       expect(summary.body.data.counts.failedStatements).toBe(1);
-      expect(summary.body.data.failedJobs.length).toBeGreaterThanOrEqual(1);
-      expect(summary.body.data.gcpLinks.apiLogsUrl).toContain('retailsync-test-project');
+      expect(summary.body.data.failedRuns.length).toBeGreaterThanOrEqual(1);
       expect(summary.body.data.quickbooks.connected).toBe(true);
 
-      const debugWithStatement = await request(app)
+      const debug = await request(app)
         .get('/api/accounting/observability/debug')
-        .query({ statementId: staleStatementId.toString() })
+        .query({ statementId })
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(debugWithStatement.body.data.statementDebug.found).toBe(true);
-      expect(debugWithStatement.body.data.statementDebug.isStaleProcessing).toBe(true);
-      expect(debugWithStatement.body.data.quickbooksDebug.mappedAccountsCount).toBe(1);
-      expect(debugWithStatement.body.data.quickbooksDebug.postedUnsyncedCount).toBe(2);
-      expect(debugWithStatement.body.data.quickbooksDebug.postedSyncErrorCount).toBe(1);
-
-      const debugInvalid = await request(app)
-        .get('/api/accounting/observability/debug')
-        .query({ statementId: 'not-an-object-id' })
-        .set('Authorization', `Bearer ${accessToken}`)
-        .expect(200);
-      expect(debugInvalid.body.data.statementDebug.found).toBe(false);
-      expect(debugInvalid.body.data.statementDebug.invalidId).toBe(true);
+      expect(['cloud', 'inline']).toContain(debug.body.data.envReadiness.tasksMode);
+      expect(Array.isArray(debug.body.data.actions)).toBe(true);
     },
     TEST_TIMEOUT_MS
   );
@@ -367,7 +368,7 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
       const { companyId, userId, roleId } = await extractCompanyContext(email);
 
       await request(app)
-        .post('/api/integrations/quickbooks/sync/pull-accounts')
+        .post('/api/integrations/quickbooks/sync/refresh-reference-data')
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(409);
 
@@ -387,12 +388,12 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
       expect(connectUrl.body.data.url).toContain('appcenter.intuit.com/connect/oauth2');
 
       await request(app)
-        .post('/api/integrations/quickbooks/sync/pull-accounts')
+        .post('/api/integrations/quickbooks/sync/refresh-reference-data')
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
       await request(app)
-        .post('/api/integrations/quickbooks/sync/push-entries')
+        .post('/api/integrations/quickbooks/sync/post-approved')
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
@@ -401,7 +402,7 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
       expect(refreshedQuickbooks.lastPullStatus).toBe('running');
       expect(refreshedQuickbooks.lastPushStatus).toBe('running');
 
-      const role = await RoleModel.findById(roleId);
+      const role = await RoleModel.findOne({ _id: roleId, companyId });
       if (!role) {
         throw new Error('Role not found');
       }
@@ -411,7 +412,7 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
       await role.save();
 
       await request(app)
-        .post('/api/integrations/quickbooks/sync/pull-accounts')
+        .post('/api/integrations/quickbooks/sync/refresh-reference-data')
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(403);
     },
@@ -419,36 +420,53 @@ describe('Accounting + QuickBooks + Observability e2e', () => {
   );
 
   it(
-    'enforces internal task secret, validates payload, and executes task contract',
+    'enforces task endpoint auth, validates payload, and executes routing contract',
     async () => {
+      const { env } = await import('./config/env');
+      const taskSecret = env.internalTasksSecret ?? 'internal-test-secret';
+
       await request(app)
-        .post('/api/internal/tasks/run')
+        .post('/api/tasks/pipeline')
         .send({})
         .expect(401);
 
       await request(app)
-        .post('/api/internal/tasks/run')
-        .set('x-internal-task-secret', 'internal-test-secret')
-        .send({ companyId: 'c1' })
+        .post('/api/tasks/pipeline')
+        .set('x-internal-task-secret', taskSecret)
+        .send({ companyId: 'c1', jobType: 'quickbooks.post_approved' })
         .expect(422);
 
-      const response = await request(app)
-        .post('/api/internal/tasks/run')
-        .set('x-internal-task-secret', 'internal-test-secret')
+      const pipelineResponse = await request(app)
+        .post('/api/tasks/pipeline')
+        .set('x-internal-task-secret', taskSecret)
         .send({
           companyId: 'company-1',
           statementId: 'statement-1',
-          jobType: 'qb_pull_accounts',
+          jobType: 'statement.extract',
           attempt: 1,
           meta: {
-            taskId: 'task-internal-1'
+            taskId: 'task-pipeline-1'
           }
         })
         .expect(200);
 
-      expect(response.body.data.accepted).toBe(true);
-      expect(response.body.data.result.status).toBe('completed');
-      expect(runAccountingTaskMock).toHaveBeenCalledTimes(1);
+      expect(pipelineResponse.body.data.accepted).toBe(true);
+
+      const syncResponse = await request(app)
+        .post('/api/tasks/sync')
+        .set('x-internal-task-secret', taskSecret)
+        .send({
+          companyId: 'company-1',
+          jobType: 'quickbooks.post_approved',
+          attempt: 1,
+          meta: {
+            taskId: 'task-sync-1'
+          }
+        })
+        .expect(200);
+
+      expect(syncResponse.body.data.accepted).toBe(true);
+      expect(runAccountingTaskMock).toHaveBeenCalledTimes(2);
     },
     TEST_TIMEOUT_MS
   );

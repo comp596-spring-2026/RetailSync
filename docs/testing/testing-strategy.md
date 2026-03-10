@@ -15,6 +15,7 @@
 - Users: company slice tests
 - RBAC: role state tests
 - Settings: settings slice + debug helper tests
+- Accounting: backend integration flow in `server/src/accounting.e2e.test.ts`, module playbook in `module-e2e-cases.md`
 - Procurement: hub page smoke test
 - Dev: home demo page smoke test
 
@@ -22,6 +23,7 @@ Detailed matrix:
 
 - [Module Test Matrix](/Users/trupal/Projects/RetailSync/docs/testing/module-test-matrix.md)
 - [Module E2E Cases](/Users/trupal/Projects/RetailSync/docs/testing/module-e2e-cases.md)
+- [Accounting Test Plan](/Users/trupal/Projects/RetailSync/docs/accounting/test-plan.md)
 
 ## Server Coverage
 

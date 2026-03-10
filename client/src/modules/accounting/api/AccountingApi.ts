@@ -6,8 +6,7 @@ import {
   CreateBankStatementInput,
   ListBankStatementsQuery,
   QuickBooksSettings,
-  RequestStatementUploadUrlInput,
-  UpdateStatementTransactionsInput
+  RequestStatementUploadUrlInput
 } from '@retailsync/shared';
 import { api } from '../../../app/api/client';
 
@@ -21,9 +20,13 @@ export class AccountingApi {
           fileName: string;
           source: string;
           status: BankStatementStatus;
-          processingStage?: string;
-          pageCount: number;
-          checkCount: number;
+          progress: {
+            totalChecks: number;
+            checksQueued: number;
+            checksProcessing: number;
+            checksReady: number;
+            checksFailed: number;
+          };
           confidence?: number;
           issuesCount: number;
           updatedAt: string;
@@ -37,12 +40,23 @@ export class AccountingApi {
     return api.get('/accounting/statements/' + id);
   }
 
+  getStatementStatus(id: string) {
+    return api.get('/accounting/statements/' + id + '/status');
+  }
+
+  listStatementChecks(id: string, status?: string) {
+    return api.get('/accounting/statements/' + id + '/checks', {
+      params: status ? { status } : undefined
+    });
+  }
+
   requestUploadUrl(payload: RequestStatementUploadUrlInput) {
     return api.post<{
       data: {
         uploadUrl: string;
         gcsPath: string;
         statementId: string;
+        rootPrefix: string;
         expiresAt: string;
       };
     }>('/accounting/statements/upload-url', payload);
@@ -52,50 +66,52 @@ export class AccountingApi {
     return api.post('/accounting/statements', payload);
   }
 
-  reprocessStatement(id: string, fromJobType: AccountingJobType = 'render_pages') {
+  reprocessStatement(id: string, fromJobType: AccountingJobType = 'statement.extract') {
     return api.post(`/accounting/statements/${id}/reprocess`, { fromJobType });
   }
 
-  confirmStatement(id: string) {
-    return api.post(`/accounting/statements/${id}/confirm`);
+  retryStatementCheck(statementId: string, checkId: string) {
+    return api.post(`/accounting/statements/${statementId}/checks/${checkId}/retry`);
   }
 
-  updateStatementTransactions(id: string, payload: UpdateStatementTransactionsInput) {
-    return api.patch(`/accounting/statements/${id}/transactions`, payload);
-  }
-
-  lockStatement(id: string) {
-    return api.post(`/accounting/statements/${id}/lock`);
-  }
-
-  listLedgerEntries(status?: 'draft' | 'posted' | 'reversed') {
-    return api.get<{
-      data: {
-        entries: Array<{
-          _id: string;
-          date: string;
-          memo: string;
-          status: 'draft' | 'posted' | 'reversed';
-          lines: Array<{ accountCode: string; debit: number; credit: number; category?: string }>;
-          source?: { statementId?: string; transactionId?: string };
-          postedAt?: string | null;
-        }>;
-      };
-    }>('/accounting/ledger/entries', {
-      params: status ? { status } : undefined
+  listLedgerEntries(params?: {
+    reviewStatus?: 'proposed' | 'edited' | 'approved' | 'excluded';
+    postingStatus?: 'not_posted' | 'posting' | 'posted' | 'failed';
+    hasCheck?: boolean;
+    type?: 'debit' | 'credit';
+    minConfidence?: number;
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+    limit?: number;
+  }) {
+    return api.get('/accounting/ledger/entries', {
+      params
     });
   }
 
-  listChartOfAccounts() {
-    return api.get('/accounting/ledger/accounts');
+  getLedgerEntry(entryId: string) {
+    return api.get(`/accounting/ledger/entries/${entryId}`);
   }
 
-  seedChartOfAccounts() {
-    return api.post('/accounting/ledger/accounts/seed');
+  updateLedgerEntry(entryId: string, payload: unknown) {
+    return api.patch(`/accounting/ledger/entries/${entryId}`, payload);
   }
 
-  postLedgerEntry(entryId: string) {
-    return api.post(`/accounting/ledger/entries/${entryId}/post`);
+  approveLedgerEntry(entryId: string) {
+    return api.post(`/accounting/ledger/entries/${entryId}/approve`);
+  }
+
+  excludeLedgerEntry(entryId: string) {
+    return api.post(`/accounting/ledger/entries/${entryId}/exclude`);
+  }
+
+  bulkApproveLedgerEntries(entryIds: string[]) {
+    return api.post('/accounting/ledger/entries/bulk-approve', { entryIds });
+  }
+
+  postApprovedLedgerEntries() {
+    return api.post('/accounting/ledger/post-approved');
   }
 
   getQuickbooksSettings() {
@@ -134,30 +150,12 @@ export class AccountingApi {
     return api.post('/integrations/quickbooks/disconnect');
   }
 
-  pullQuickbooksAccounts() {
-    return api.post<{
-      data: {
-        queue: {
-          taskId: string;
-          mode: 'inline' | 'cloud';
-          status: 'inline_executed' | 'queued';
-          queueName?: string;
-        };
-      };
-    }>('/integrations/quickbooks/sync/pull-accounts');
+  refreshQuickbooksReferenceData() {
+    return api.post('/integrations/quickbooks/sync/refresh-reference-data');
   }
 
-  pushQuickbooksEntries() {
-    return api.post<{
-      data: {
-        queue: {
-          taskId: string;
-          mode: 'inline' | 'cloud';
-          status: 'inline_executed' | 'queued';
-          queueName?: string;
-        };
-      };
-    }>('/integrations/quickbooks/sync/push-entries');
+  postApprovedToQuickbooks() {
+    return api.post('/integrations/quickbooks/sync/post-approved');
   }
 
   getObservabilitySummary() {
