@@ -31,8 +31,8 @@ const quickbooksOauthStateCookie = 'quickbooksOAuthState';
 const defaultReturnTo = '/dashboard/accounting/quickbooks';
 
 const oauthStateCookieBaseOptions = () => ({
-  httpOnly: true as const,
-  sameSite: (env.nodeEnv === 'production' ? 'none' : 'lax') as const,
+  httpOnly: true,
+  sameSite: (env.nodeEnv === 'production' ? 'none' : 'lax') as 'none' | 'lax',
   secure: env.nodeEnv === 'production'
 });
 
