@@ -5,6 +5,7 @@ import { setupTestEnv } from './test/testUtils';
 
 const {
   getOrCreateSettingsMock,
+  integrationSecretFindOneAndDeleteMock,
   buildQuickBooksAuthorizationUrlMock,
   ensureFreshQuickBooksSecretMock,
   exchangeQuickBooksAuthorizationCodeMock,
@@ -14,6 +15,7 @@ const {
   toQuickBooksSecretPayloadMock
 } = vi.hoisted(() => ({
   getOrCreateSettingsMock: vi.fn(),
+  integrationSecretFindOneAndDeleteMock: vi.fn(),
   buildQuickBooksAuthorizationUrlMock: vi.fn(),
   ensureFreshQuickBooksSecretMock: vi.fn(),
   exchangeQuickBooksAuthorizationCodeMock: vi.fn(),
@@ -25,6 +27,13 @@ const {
 
 vi.mock('./utils/googleSheetsSettings', () => ({
   getOrCreateSettings: (...args: unknown[]) => getOrCreateSettingsMock(...args)
+}));
+
+vi.mock('./models/IntegrationSecret', () => ({
+  IntegrationSecretModel: {
+    findOneAndDelete: (...args: unknown[]) =>
+      integrationSecretFindOneAndDeleteMock(...args)
+  }
 }));
 
 vi.mock('./services/quickbooksService', () => ({
@@ -130,6 +139,7 @@ describe('quickbooksController oauth flow', () => {
     returnToPath?: string
   ) => Promise<unknown>;
   let quickBooksCallback: (req: Request, res: Response) => Promise<unknown>;
+  let disconnectQuickBooks: (req: Request, res: Response) => Promise<unknown>;
   let originalNodeEnv: string;
   let originalClientUrl: string;
 
@@ -170,6 +180,7 @@ describe('quickbooksController oauth flow', () => {
     const controller = await import('./controllers/quickbooksController');
     createQuickBooksConnectUrlResponse = controller.createQuickBooksConnectUrlResponse;
     quickBooksCallback = controller.quickBooksCallback;
+    disconnectQuickBooks = controller.disconnectQuickBooks;
   });
 
   beforeEach(() => {
@@ -311,6 +322,69 @@ describe('quickbooksController oauth flow', () => {
     expect(settings.save).toHaveBeenCalledTimes(1);
     expect(redirect).toHaveBeenCalledWith(
       'http://localhost:5173/dashboard/accounting/quickbooks?quickbooks=connected'
+    );
+  });
+
+  it('disconnect resets quickbooks connection state and keeps environment selection', async () => {
+    const settings = createSettingsDoc();
+    settings.quickbooks.connected = true;
+    settings.quickbooks.environment = 'production';
+    settings.quickbooks.realmId = 'realm-1';
+    settings.quickbooks.companyName = 'RetailSync QB';
+    settings.quickbooks.lastPullStatus = 'error';
+    settings.quickbooks.lastPullAt = new Date('2026-03-10T12:00:00.000Z');
+    settings.quickbooks.lastPullCount = 21;
+    settings.quickbooks.lastPullError = 'sync failed';
+    settings.quickbooks.lastPushStatus = 'running';
+    settings.quickbooks.lastPushAt = new Date('2026-03-10T12:05:00.000Z');
+    settings.quickbooks.lastPushCount = 9;
+    settings.quickbooks.lastPushError = 'queue paused';
+
+    getOrCreateSettingsMock.mockResolvedValue(settings);
+    integrationSecretFindOneAndDeleteMock.mockResolvedValue({ _id: 'secret-1' });
+
+    const { res, status, json } = createResponse();
+    const req = {
+      companyId: 'company-1',
+      user: {
+        id: 'user-1'
+      }
+    } as unknown as Request;
+
+    await disconnectQuickBooks(req, res);
+
+    expect(integrationSecretFindOneAndDeleteMock).toHaveBeenCalledWith({
+      companyId: 'company-1',
+      provider: 'quickbooks_oauth'
+    });
+    expect(settings.quickbooks).toEqual(
+      expect.objectContaining({
+        connected: false,
+        environment: 'production',
+        realmId: null,
+        companyName: null,
+        lastPullStatus: 'idle',
+        lastPullAt: null,
+        lastPullCount: 0,
+        lastPullError: null,
+        lastPushStatus: 'idle',
+        lastPushAt: null,
+        lastPushCount: 0,
+        lastPushError: null
+      })
+    );
+    expect(settings.save).toHaveBeenCalledTimes(1);
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: expect.objectContaining({
+          connected: false,
+          environment: 'production',
+          realmId: null,
+          companyName: null
+        })
+      })
     );
   });
 });
