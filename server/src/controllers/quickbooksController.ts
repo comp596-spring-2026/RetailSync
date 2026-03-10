@@ -30,6 +30,23 @@ import {
 const quickbooksOauthStateCookie = 'quickbooksOAuthState';
 const defaultReturnTo = '/dashboard/accounting/quickbooks';
 
+const oauthStateCookieBaseOptions = () => ({
+  httpOnly: true as const,
+  sameSite: (env.nodeEnv === 'production' ? 'none' : 'lax') as const,
+  secure: env.nodeEnv === 'production'
+});
+
+const setQuickBooksOAuthStateCookie = (res: Response, nonce: string) => {
+  res.cookie(quickbooksOauthStateCookie, nonce, {
+    ...oauthStateCookieBaseOptions(),
+    maxAge: 10 * 60 * 1000
+  });
+};
+
+const clearQuickBooksOAuthStateCookie = (res: Response) => {
+  res.clearCookie(quickbooksOauthStateCookie, oauthStateCookieBaseOptions());
+};
+
 const updateQuickbooksSettingsSchema = z.object({
   environment: z.enum(['sandbox', 'production'])
 });
@@ -233,12 +250,7 @@ export const createQuickBooksConnectUrlResponse = async (
 ) => {
   try {
     const built = await buildQuickBooksConnectUrl(req, returnToPath);
-    res.cookie(quickbooksOauthStateCookie, built.nonce, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: env.nodeEnv === 'production',
-      maxAge: 10 * 60 * 1000
-    });
+    setQuickBooksOAuthStateCookie(res, built.nonce);
     return ok(res, { url: built.url, environment: built.environment });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'QuickBooks OAuth setup failed';
@@ -258,12 +270,7 @@ export const startQuickBooksConnect = async (req: Request, res: Response) => {
     const returnTo =
       typeof req.query.returnTo === 'string' ? req.query.returnTo : defaultReturnTo;
     const built = await buildQuickBooksConnectUrl(req, returnTo);
-    res.cookie(quickbooksOauthStateCookie, built.nonce, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: env.nodeEnv === 'production',
-      maxAge: 10 * 60 * 1000
-    });
+    setQuickBooksOAuthStateCookie(res, built.nonce);
     return res.redirect(built.url);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'QuickBooks OAuth setup failed';
@@ -279,11 +286,7 @@ export const quickBooksCallback = async (req: Request, res: Response) => {
   const callbackError = typeof req.query.error === 'string' ? req.query.error : '';
 
   const nonceFromCookie = req.cookies?.[quickbooksOauthStateCookie];
-  res.clearCookie(quickbooksOauthStateCookie, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: env.nodeEnv === 'production'
-  });
+  clearQuickBooksOAuthStateCookie(res);
 
   let parsedState: QuickBooksOAuthStatePayload;
   try {
@@ -293,9 +296,13 @@ export const quickBooksCallback = async (req: Request, res: Response) => {
   }
 
   const returnTo = normalizeReturnTo(parsedState.returnTo, defaultReturnTo);
+  if (parsedState.purpose !== 'quickbooks_connect') {
+    return redirectWithStatus(res, returnTo, 'error', 'invalid_oauth_state');
+  }
+
   if (
-    parsedState.purpose !== 'quickbooks_connect' ||
-    !nonceFromCookie ||
+    typeof nonceFromCookie === 'string' &&
+    nonceFromCookie.length > 0 &&
     nonceFromCookie !== parsedState.nonce
   ) {
     return redirectWithStatus(res, returnTo, 'error', 'oauth_state_mismatch');
