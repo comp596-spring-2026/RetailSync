@@ -45,11 +45,25 @@ export type QuickBooksAccountRecord = {
   active: boolean;
 };
 
+export type QuickBooksEntityType = 'vendor' | 'customer' | 'employee';
+
+export type QuickBooksEntityRecord = {
+  id: string;
+  displayName: string;
+  active: boolean;
+  raw: Record<string, unknown>;
+};
+
 export type QuickBooksJournalLineInput = {
   accountId: string;
   amount: number;
   postingType: 'Debit' | 'Credit';
   description?: string;
+};
+
+type QuickBooksTxnCreateResult = {
+  txnId: string;
+  txnDate: string;
 };
 
 const QUICKBOOKS_AUTHORIZE_URL = 'https://appcenter.intuit.com/connect/oauth2';
@@ -519,5 +533,246 @@ export const createQuickBooksJournalEntry = async ({
   return {
     journalEntryId,
     txnDate: String(payload.JournalEntry?.TxnDate ?? txnDate)
+  };
+};
+
+const pickDisplayName = (row: Record<string, unknown>) => {
+  const displayName = String(row.DisplayName ?? '').trim();
+  if (displayName) return displayName;
+  const fullyQualifiedName = String(row.FullyQualifiedName ?? '').trim();
+  if (fullyQualifiedName) return fullyQualifiedName;
+  const givenName = String(row.GivenName ?? '').trim();
+  const familyName = String(row.FamilyName ?? '').trim();
+  const combined = `${givenName} ${familyName}`.trim();
+  if (combined) return combined;
+  return String(row.Name ?? '').trim();
+};
+
+export const listQuickBooksEntities = async (
+  companyId: string,
+  entityType: QuickBooksEntityType
+): Promise<QuickBooksEntityRecord[]> => {
+  const secret = await ensureFreshQuickBooksSecret(companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  const typeMap: Record<QuickBooksEntityType, string> = {
+    vendor: 'Vendor',
+    customer: 'Customer',
+    employee: 'Employee'
+  };
+
+  const queryType = typeMap[entityType];
+  const all: QuickBooksEntityRecord[] = [];
+  let startPosition = 1;
+  const maxResults = 1000;
+
+  while (true) {
+    const queryStatement = `select * from ${queryType} startposition ${startPosition} maxresults ${maxResults}`;
+    const payload = (await requestQuickBooksApi({
+      companyId,
+      method: 'GET',
+      path: `/v3/company/${secret.realmId}/query`,
+      query: {
+        query: queryStatement,
+        minorversion: 75
+      }
+    })) as QuickBooksApiEnvelope;
+
+    const rowsRaw = Array.isArray(payload.QueryResponse?.[queryType])
+      ? (payload.QueryResponse?.[queryType] as Array<Record<string, unknown>>)
+      : [];
+
+    const mapped = rowsRaw
+      .map((row) => ({
+        id: String(row.Id ?? '').trim(),
+        displayName: pickDisplayName(row),
+        active: row.Active !== false,
+        raw: row
+      }))
+      .filter((row) => Boolean(row.id) && Boolean(row.displayName));
+
+    all.push(...mapped);
+    if (mapped.length < maxResults) {
+      break;
+    }
+    startPosition += maxResults;
+  }
+
+  return all;
+};
+
+const parseTransactionCreateId = (
+  payload: Record<string, unknown>,
+  key: 'Purchase' | 'Deposit' | 'Transfer'
+) => {
+  const container = payload[key] as { Id?: string; TxnDate?: string } | undefined;
+  const txnId = String(container?.Id ?? '').trim();
+  const txnDate = String(container?.TxnDate ?? '').trim();
+  if (!txnId) {
+    throw new Error(`quickbooks_${key.toLowerCase()}_id_missing`);
+  }
+  return {
+    txnId,
+    txnDate
+  };
+};
+
+export const createQuickBooksExpenseTransaction = async (args: {
+  companyId: string;
+  txnDate: string;
+  amount: number;
+  bankAccountId: string;
+  categoryAccountId: string;
+  payeeRefId?: string;
+  memo?: string;
+}): Promise<QuickBooksTxnCreateResult> => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) throw new Error('quickbooks_not_connected');
+
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/purchase`,
+    query: { minorversion: 75 },
+    body: {
+      TxnDate: args.txnDate,
+      PaymentType: 'Cash',
+      AccountRef: { value: args.bankAccountId },
+      PrivateNote: args.memo ?? '',
+      EntityRef: args.payeeRefId ? { value: args.payeeRefId } : undefined,
+      Line: [
+        {
+          Amount: Number(Math.abs(args.amount).toFixed(2)),
+          Description: args.memo ?? '',
+          DetailType: 'AccountBasedExpenseLineDetail',
+          AccountBasedExpenseLineDetail: {
+            AccountRef: { value: args.categoryAccountId }
+          }
+        }
+      ]
+    }
+  })) as Record<string, unknown>;
+
+  const parsed = parseTransactionCreateId(payload, 'Purchase');
+  return {
+    txnId: parsed.txnId,
+    txnDate: parsed.txnDate || args.txnDate
+  };
+};
+
+export const createQuickBooksCheckTransaction = async (args: {
+  companyId: string;
+  txnDate: string;
+  amount: number;
+  bankAccountId: string;
+  categoryAccountId: string;
+  payeeRefId?: string;
+  memo?: string;
+}): Promise<QuickBooksTxnCreateResult> => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) throw new Error('quickbooks_not_connected');
+
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/purchase`,
+    query: { minorversion: 75 },
+    body: {
+      TxnDate: args.txnDate,
+      PaymentType: 'Check',
+      AccountRef: { value: args.bankAccountId },
+      PrivateNote: args.memo ?? '',
+      EntityRef: args.payeeRefId ? { value: args.payeeRefId } : undefined,
+      Line: [
+        {
+          Amount: Number(Math.abs(args.amount).toFixed(2)),
+          Description: args.memo ?? '',
+          DetailType: 'AccountBasedExpenseLineDetail',
+          AccountBasedExpenseLineDetail: {
+            AccountRef: { value: args.categoryAccountId }
+          }
+        }
+      ]
+    }
+  })) as Record<string, unknown>;
+
+  const parsed = parseTransactionCreateId(payload, 'Purchase');
+  return {
+    txnId: parsed.txnId,
+    txnDate: parsed.txnDate || args.txnDate
+  };
+};
+
+export const createQuickBooksDepositTransaction = async (args: {
+  companyId: string;
+  txnDate: string;
+  amount: number;
+  bankAccountId: string;
+  categoryAccountId: string;
+  memo?: string;
+}): Promise<QuickBooksTxnCreateResult> => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) throw new Error('quickbooks_not_connected');
+
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/deposit`,
+    query: { minorversion: 75 },
+    body: {
+      TxnDate: args.txnDate,
+      PrivateNote: args.memo ?? '',
+      DepositToAccountRef: { value: args.bankAccountId },
+      Line: [
+        {
+          Amount: Number(Math.abs(args.amount).toFixed(2)),
+          DetailType: 'DepositLineDetail',
+          Description: args.memo ?? '',
+          DepositLineDetail: {
+            AccountRef: { value: args.categoryAccountId }
+          }
+        }
+      ]
+    }
+  })) as Record<string, unknown>;
+
+  const parsed = parseTransactionCreateId(payload, 'Deposit');
+  return {
+    txnId: parsed.txnId,
+    txnDate: parsed.txnDate || args.txnDate
+  };
+};
+
+export const createQuickBooksTransferTransaction = async (args: {
+  companyId: string;
+  txnDate: string;
+  amount: number;
+  fromAccountId: string;
+  toAccountId: string;
+  memo?: string;
+}): Promise<QuickBooksTxnCreateResult> => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) throw new Error('quickbooks_not_connected');
+
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/transfer`,
+    query: { minorversion: 75 },
+    body: {
+      TxnDate: args.txnDate,
+      Amount: Number(Math.abs(args.amount).toFixed(2)),
+      FromAccountRef: { value: args.fromAccountId },
+      ToAccountRef: { value: args.toAccountId },
+      PrivateNote: args.memo ?? ''
+    }
+  })) as Record<string, unknown>;
+
+  const parsed = parseTransactionCreateId(payload, 'Transfer');
+  return {
+    txnId: parsed.txnId,
+    txnDate: parsed.txnDate || args.txnDate
   };
 };

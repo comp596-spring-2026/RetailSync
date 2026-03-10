@@ -168,3 +168,26 @@ All import endpoints require `req.companyId` and permissions `pos:create` and `p
 - **Client**: Permissions util, PermissionGate, ImportPOSDataModal (and optionally empty state on POS page).
 
 Adding or updating tests for “no POS data” and “reports empty month” keeps behavior documented and regression-safe.
+
+---
+
+## 10. Accounting workflows (tab-based)
+
+Accounting now runs as a separate module set under `/dashboard/accounting/*`:
+
+1. `Statements` tab
+   - Upload statement PDF
+   - Track pipeline lifecycle and per-check progress
+   - Retry failed checks or reprocess statement
+2. `Ledger` tab
+   - Canonical review surface (approve/edit/exclude)
+   - Bulk approve and post-approved trigger
+3. `QuickBooks Sync` tab
+   - OAuth connect/disconnect and environment selection
+   - Refresh reference data and post approved entries
+4. `Observability` tab
+   - Run health counts, failed runs, and debug actions
+
+Detailed accounting documentation:
+
+- `/Users/trupal/Projects/RetailSync/docs/accounting/README.md`

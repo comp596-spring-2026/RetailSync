@@ -13,6 +13,7 @@ Date: 2026-03-01
 | users | `modules/users/tests/companySlice.test.ts` | company set/clear state transitions |
 | rbac | `modules/rbac/tests/rbacSlice.test.ts` | modules, roles, selected role state transitions |
 | settings | `modules/settings/tests/settingsSlice.test.ts`, `modules/settings/components/googleSheets/debugOutcomeGuide.test.ts` | settings fetch/OAuth state updates and debug outcome helper mappings |
+| accounting | `modules/accounting/pages/*` (coverage expanding), API contract via `AccountingApi.ts` and backend integration suite | statements/ledger/quickbooks/observability tabs map to the unified accounting endpoints and states |
 | dev | `modules/dev/pages/demo/HomeDemoPage.test.tsx` | legal/navigation links and demo landing content render |
 
 ## Server Modules / Domains
@@ -23,6 +24,7 @@ Date: 2026-03-01
 | tenancy | `server/src/tenantIsolation.test.ts` | cross-tenant data isolation |
 | inventory | `server/src/inventoryLedger.immutability.test.ts` | immutable inventory ledger semantics |
 | pos/reports | `server/src/posAndReports.test.ts` | baseline POS/report API behavior for empty and scoped queries |
+| accounting | `server/src/accounting.e2e.test.ts` | upload/create/reprocess/retry, ledger approval actions, post-approved queue path |
 | platform | `server/src/app.test.ts` | app/health route contract |
 
 ## Gaps (Next)

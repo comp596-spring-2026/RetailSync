@@ -97,6 +97,26 @@ This playbook defines end-to-end scenarios to run manually now and automate late
    - Configure sync schedule and timezone
    - Verify server accepts schedule and next run state is reflected
 
+## Accounting
+
+1. Statement Upload to Ledger Readiness
+   - Upload PDF from Statements tab
+   - Verify lifecycle transitions: uploaded -> extracting -> structuring -> checks_queued -> ready_for_review
+   - Verify check cards unlock progressively
+2. Statement Recovery Flows
+   - Trigger failed check and retry from Statement Detail
+   - Trigger statement reprocess and verify pipeline restarts from selected job
+3. Ledger Canonical Review
+   - Filter entries, approve/exclude rows, execute bulk approve
+   - Verify transition guards (posted rows not editable, excluded approve guard)
+4. QuickBooks Approval-Only Posting
+   - Connect QuickBooks and run reference refresh
+   - Run post-approved and verify only approved + not-posted rows are posted
+   - Verify partial failures do not abort batch and are visible in posting status
+5. Observability Diagnostics
+   - Validate summary counts + failed runs render
+   - Run debug diagnostics with/without statementId and verify recommended actions
+
 ## Dev
 
 1. Demo + Legal Navigation

@@ -1,40 +1,23 @@
 import { Schema, model, InferSchemaType } from 'mongoose';
 import { tenantPlugin } from './plugins/tenantPlugin';
 
-const statusValues = ['uploaded', 'processing', 'needs_review', 'confirmed', 'locked', 'failed'] as const;
-const processingStageValues = ['queued', 'pages_ready', 'ocr_ready', 'checks_ready', 'structured_ready', 'confirmed', 'locked', 'failed'] as const;
+const statusValues = [
+  'uploaded',
+  'extracting',
+  'structuring',
+  'checks_queued',
+  'ready_for_review',
+  'failed'
+] as const;
 const sourceValues = ['upload', 'manual', 'email'] as const;
 
-const pageSchema = new Schema(
+const progressSchema = new Schema(
   {
-    pageNo: { type: Number, required: true },
-    gcsPath: { type: String, required: true },
-    width: { type: Number, required: false },
-    height: { type: Number, required: false }
-  },
-  { _id: false }
-);
-
-const checkSchema = new Schema(
-  {
-    checkId: { type: String, required: true },
-    pageNo: { type: Number, required: true },
-    bbox: { type: [Number], default: [] },
-    gcsPath: { type: String, required: true },
-    linkedTransactionId: { type: String }
-  },
-  { _id: false }
-);
-
-const jobRunSchema = new Schema(
-  {
-    taskId: { type: String, required: true },
-    jobType: { type: String, required: true },
-    status: { type: String, enum: ['queued', 'running', 'completed', 'failed'], required: true },
-    attempt: { type: Number, default: 1 },
-    startedAt: { type: Date, required: false },
-    endedAt: { type: Date, required: false },
-    error: { type: String, required: false }
+    totalChecks: { type: Number, default: 0 },
+    checksQueued: { type: Number, default: 0 },
+    checksProcessing: { type: Number, default: 0 },
+    checksReady: { type: Number, default: 0 },
+    checksFailed: { type: Number, default: 0 }
   },
   { _id: false }
 );
@@ -51,26 +34,17 @@ const bankStatementSchema = new Schema(
       default: 'uploaded',
       index: true
     },
-    processingStage: {
-      type: String,
-      enum: processingStageValues,
-      default: 'queued'
+    periodStart: { type: String, required: false },
+    periodEnd: { type: String, required: false },
+    bankName: { type: String, required: false },
+    accountLast4: { type: String, required: false },
+    gcs: {
+      rootPrefix: { type: String, required: true },
+      pdfPath: { type: String, required: true }
     },
-    files: {
-      pdf: {
-        gcsPath: { type: String, required: true },
-        signedUrl: { type: String, required: false }
-      },
-      pages: { type: [pageSchema], default: [] },
-      checks: { type: [checkSchema], default: [] }
-    },
-    extraction: {
-      rawOcrText: { type: String, required: false },
-      structuredJson: { type: Schema.Types.Mixed, required: false },
-      issues: { type: [String], default: [] },
-      confidence: { type: Number, required: false }
-    },
-    jobRuns: { type: [jobRunSchema], default: [] },
+    progress: { type: progressSchema, default: () => ({}) },
+    hash: { type: String, required: false, index: true },
+    issues: { type: [String], default: [] },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true }
   },
   { timestamps: true }

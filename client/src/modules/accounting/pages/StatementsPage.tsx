@@ -31,27 +31,32 @@ type StatementItem = {
   statementMonth: string;
   fileName: string;
   status: BankStatementStatus;
-  processingStage?: string;
-  pageCount: number;
-  checkCount: number;
+  progress: {
+    totalChecks: number;
+    checksQueued: number;
+    checksProcessing: number;
+    checksReady: number;
+    checksFailed: number;
+  };
   issuesCount: number;
   updatedAt: string;
 };
 
-const statusColor = (status: BankStatementStatus): 'default' | 'info' | 'warning' | 'success' | 'error' => {
-  if (status === 'processing') return 'info';
-  if (status === 'needs_review') return 'warning';
-  if (status === 'confirmed' || status === 'locked') return 'success';
+const statusColor = (
+  status: BankStatementStatus
+): 'default' | 'info' | 'warning' | 'success' | 'error' => {
+  if (status === 'extracting' || status === 'structuring' || status === 'checks_queued') return 'info';
+  if (status === 'ready_for_review') return 'warning';
   if (status === 'failed') return 'error';
   return 'default';
 };
 
 const statusOptions: Array<{ value: BankStatementStatus; label: string }> = [
   { value: 'uploaded', label: 'Uploaded' },
-  { value: 'processing', label: 'Processing' },
-  { value: 'needs_review', label: 'Needs review' },
-  { value: 'confirmed', label: 'Confirmed' },
-  { value: 'locked', label: 'Locked' },
+  { value: 'extracting', label: 'Extracting' },
+  { value: 'structuring', label: 'Structuring' },
+  { value: 'checks_queued', label: 'Checks queued' },
+  { value: 'ready_for_review', label: 'Ready for review' },
   { value: 'failed', label: 'Failed' }
 ];
 
@@ -60,11 +65,11 @@ export const StatementsPage = () => {
   const navigate = useNavigate();
   const permissions = useAppSelector((state) => state.auth.permissions);
 
-  const canView = hasPermission(permissions, 'accounting', 'view') || hasPermission(permissions, 'bankStatements', 'view');
+  const canView =
+    hasPermission(permissions, 'accounting', 'view') ||
+    hasPermission(permissions, 'bankStatements', 'view');
   const canCreate = hasPermission(permissions, 'bankStatements', 'create');
   const canEdit = hasPermission(permissions, 'bankStatements', 'edit');
-  const canConfirm = hasPermission(permissions, 'bankStatements', 'actions:confirm');
-  const canLock = hasPermission(permissions, 'bankStatements', 'actions:lock');
 
   const [rows, setRows] = useState<StatementItem[]>([]);
   const [month, setMonth] = useState('');
@@ -96,38 +101,45 @@ export const StatementsPage = () => {
     void load();
   }, [canView]);
 
+  useEffect(() => {
+    if (!canView) return;
+
+    const hasActive = rows.some((row) =>
+      row.status === 'extracting' || row.status === 'structuring' || row.status === 'checks_queued'
+    );
+    if (!hasActive) return;
+
+    const interval = window.setInterval(() => {
+      void load();
+    }, 3000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [canView, rows]);
+
   const reprocess = async (id: string) => {
     try {
       await accountingApi.reprocessStatement(id);
       dispatch(showSnackbar({ message: 'Reprocess started', severity: 'success' }));
       await load();
     } catch (apiError) {
-      dispatch(showSnackbar({ message: extractApiErrorMessage(apiError, 'Failed to reprocess statement'), severity: 'error' }));
-    }
-  };
-
-  const confirm = async (id: string) => {
-    try {
-      await accountingApi.confirmStatement(id);
-      dispatch(showSnackbar({ message: 'Statement confirmed', severity: 'success' }));
-      await load();
-    } catch (apiError) {
-      dispatch(showSnackbar({ message: extractApiErrorMessage(apiError, 'Failed to confirm statement'), severity: 'error' }));
-    }
-  };
-
-  const lock = async (id: string) => {
-    try {
-      await accountingApi.lockStatement(id);
-      dispatch(showSnackbar({ message: 'Statement locked', severity: 'success' }));
-      await load();
-    } catch (apiError) {
-      dispatch(showSnackbar({ message: extractApiErrorMessage(apiError, 'Failed to lock statement'), severity: 'error' }));
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Failed to reprocess statement'),
+          severity: 'error'
+        })
+      );
     }
   };
 
   const onUploaded = async () => {
-    dispatch(showSnackbar({ message: 'Statement uploaded and processing started', severity: 'success' }));
+    dispatch(
+      showSnackbar({
+        message: 'Statement uploaded and processing started',
+        severity: 'success'
+      })
+    );
     await load();
   };
 
@@ -141,14 +153,18 @@ export const StatementsPage = () => {
     <Stack spacing={2}>
       <PageHeader
         title="Bank Statements"
-        subtitle="Upload statements, extract checks, and review transactions before posting."
+        subtitle="Upload statements and monitor extraction/check processing before ledger approval."
         icon={<AccountBalanceIcon />}
       />
       <AccountingTabs />
       {error && <Alert severity="error">{error}</Alert>}
 
       <Paper sx={{ p: 2 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={1.5}
+          alignItems={{ xs: 'stretch', md: 'center' }}
+        >
           <TextField
             label="Month"
             type="month"
@@ -163,7 +179,9 @@ export const StatementsPage = () => {
             label="Status"
             size="small"
             value={status}
-            onChange={(event) => setStatus((event.target.value || '') as BankStatementStatus | '')}
+            onChange={(event) =>
+              setStatus((event.target.value || '') as BankStatementStatus | '')
+            }
             sx={{ minWidth: 170 }}
           >
             <MenuItem value="">All</MenuItem>
@@ -203,8 +221,7 @@ export const StatementsPage = () => {
                 <TableCell>Month</TableCell>
                 <TableCell>File</TableCell>
                 <TableCell>Status</TableCell>
-                <TableCell>Pages</TableCell>
-                <TableCell>Checks</TableCell>
+                <TableCell>Checks Progress</TableCell>
                 <TableCell>Updated</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
@@ -224,29 +241,47 @@ export const StatementsPage = () => {
                     </Stack>
                   </TableCell>
                   <TableCell>
-                    <Chip size="small" label={row.status.replace('_', ' ')} color={statusColor(row.status)} />
+                    <Chip
+                      size="small"
+                      label={row.status.replace(/_/g, ' ')}
+                      color={statusColor(row.status)}
+                    />
                   </TableCell>
-                  <TableCell>{row.pageCount}</TableCell>
-                  <TableCell>{row.checkCount}</TableCell>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                      total {row.progress.totalChecks}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                      queued {row.progress.checksQueued} • processing {row.progress.checksProcessing}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                      ready {row.progress.checksReady} • failed {row.progress.checksFailed}
+                    </Typography>
+                  </TableCell>
                   <TableCell>{formatDate(row.updatedAt, 'short')}</TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={1} justifyContent="flex-end">
-                      <Button size="small" onClick={() => navigate(`/dashboard/accounting/statements/${row.id}`)}>
-                        Review
+                      <Button
+                        size="small"
+                        onClick={() => navigate(`/dashboard/accounting/statements/${row.id}`)}
+                      >
+                        Open
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => navigate('/dashboard/accounting/ledger')}
+                        disabled={row.status !== 'ready_for_review'}
+                      >
+                        Open Ledger
                       </Button>
                       {canEdit && (
-                        <Button size="small" variant="outlined" onClick={() => void reprocess(row.id)}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => void reprocess(row.id)}
+                        >
                           Reprocess
-                        </Button>
-                      )}
-                      {canConfirm && row.status === 'needs_review' && (
-                        <Button size="small" variant="outlined" onClick={() => void confirm(row.id)}>
-                          Confirm
-                        </Button>
-                      )}
-                      {canLock && row.status === 'confirmed' && (
-                        <Button size="small" variant="outlined" color="warning" onClick={() => void lock(row.id)}>
-                          Lock
                         </Button>
                       )}
                     </Stack>

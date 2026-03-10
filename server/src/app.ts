@@ -23,8 +23,8 @@ import integrationsSheetsRoutes from "./routes/integrationsSheetsRoutes";
 import googleSheetsIntegrationRoutes from "./routes/googleSheetsIntegrationRoutes";
 import quickbooksIntegrationRoutes from "./routes/quickbooksIntegrationRoutes";
 import accountingRoutes from "./routes/accountingRoutes";
-import internalTaskRoutes from "./routes/internalTaskRoutes";
 import ledgerRoutes from "./routes/ledgerRoutes";
+import taskRoutes from "./routes/taskRoutes";
 import { notFound } from "./middleware/notFound";
 import { errorHandler } from "./middleware/errorHandler";
 import { withRequestContext } from "./config/requestContext";
@@ -155,7 +155,7 @@ export const createApp = () => {
   app.use("/api/cron", cronRoutes);
   app.use("/api/accounting", accountingRoutes);
   app.use("/api/accounting/ledger", ledgerRoutes);
-  app.use("/api/internal/tasks", internalTaskRoutes);
+  app.use("/api/tasks", taskRoutes);
   app.use("/api", moduleRoutes);
 
   app.use(notFound);

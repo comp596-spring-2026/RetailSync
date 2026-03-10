@@ -163,6 +163,16 @@ RetailSync/
   pnpm-workspace.yaml
 ```
 
+## Accounting Documentation
+
+- Entry point: `/Users/trupal/Projects/RetailSync/docs/accounting/README.md`
+- Workflow lifecycle: `/Users/trupal/Projects/RetailSync/docs/accounting/end-to-end-workflow.md`
+- Module docs:
+  - Statements: `/Users/trupal/Projects/RetailSync/docs/accounting/module-statements.md`
+  - Ledger: `/Users/trupal/Projects/RetailSync/docs/accounting/module-ledger.md`
+  - QuickBooks Sync: `/Users/trupal/Projects/RetailSync/docs/accounting/module-quickbooks-sync.md`
+  - Observability: `/Users/trupal/Projects/RetailSync/docs/accounting/module-observability.md`
+
 ## Local Development
 
 ### Prerequisites
@@ -233,8 +243,8 @@ Local fallback is also supported in non-production:
 | `CRON_SECRET` | No | Secret for `/api/cron/*` endpoints |
 | `GCS_BUCKET_NAME` | No | Bucket used for accounting statement storage |
 | `TASKS_MODE` | No | `inline` (local/default) or `cloud` |
-| `INTERNAL_TASKS_SECRET` | No | Shared secret for `/api/internal/tasks/run` |
-| `INTERNAL_TASKS_ENDPOINT` | No | Worker endpoint for Cloud Tasks HTTP target |
+| `INTERNAL_TASKS_SECRET` | No | Shared secret for task endpoints |
+| `INTERNAL_TASKS_ENDPOINT` | No | Task endpoint base (for example `https://<api-url>/api/tasks`); server appends `/pipeline` or `/sync` by job type |
 | `GCP_PROJECT_ID` | No | Required when `TASKS_MODE=cloud` |
 | `GCP_REGION` | No | Required when `TASKS_MODE=cloud` |
 | `TASKS_QUEUE_PIPELINE` | No | Queue for OCR/extraction jobs |
@@ -301,7 +311,7 @@ Local fallback is also supported in non-production:
 - Cloud mode targets the worker endpoint directly and keeps queue env names aligned for Cloud Tasks migration:
   - pipeline queue: `TASKS_QUEUE_PIPELINE`
   - sync queue: `TASKS_QUEUE_SYNC`
-  - worker endpoint: `${INTERNAL_TASKS_ENDPOINT}` (`/api/internal/tasks/run`)
+  - task endpoint base: `${INTERNAL_TASKS_ENDPOINT}` (`/api/tasks`)
 
 ## Docker
 

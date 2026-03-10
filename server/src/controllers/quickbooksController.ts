@@ -29,7 +29,6 @@ import {
 
 const quickbooksOauthStateCookie = 'quickbooksOAuthState';
 const defaultReturnTo = '/dashboard/accounting/quickbooks';
-const QUICKBOOKS_SYNC_STATEMENT_ID = '__quickbooks_sync__';
 
 const updateQuickbooksSettingsSchema = z.object({
   environment: z.enum(['sandbox', 'production'])
@@ -425,7 +424,7 @@ export const getQuickBooksSettings = async (req: Request, res: Response) => {
   return ok(res, toQuickBooksSettings(settings));
 };
 
-export const queueQuickBooksPullAccounts = async (req: Request, res: Response) => {
+export const queueQuickBooksRefreshReferenceData = async (req: Request, res: Response) => {
   if (!req.companyId || !req.user?.id) {
     return fail(res, 'Company onboarding required', 403);
   }
@@ -436,11 +435,10 @@ export const queueQuickBooksPullAccounts = async (req: Request, res: Response) =
   }
 
   try {
-    await markQuickBooksSyncRunning(req.companyId, 'qb_pull_accounts');
+    await markQuickBooksSyncRunning(req.companyId, 'quickbooks.refresh_reference_data');
     const queue = await enqueueAccountingJob({
       companyId: req.companyId,
-      statementId: QUICKBOOKS_SYNC_STATEMENT_ID,
-      jobType: 'qb_pull_accounts',
+      jobType: 'quickbooks.refresh_reference_data',
       meta: {
         requestedBy: req.user.id
       }
@@ -450,16 +448,16 @@ export const queueQuickBooksPullAccounts = async (req: Request, res: Response) =
   } catch (error) {
     await markQuickBooksSyncFailure(
       req.companyId,
-      'qb_pull_accounts',
+      'quickbooks.refresh_reference_data',
       String((error as Error).message)
     );
-    return fail(res, 'Failed to queue QuickBooks account pull', 500, {
+    return fail(res, 'Failed to queue QuickBooks reference sync', 500, {
       error: String((error as Error).message)
     });
   }
 };
 
-export const queueQuickBooksPushEntries = async (req: Request, res: Response) => {
+export const queueQuickBooksPostApproved = async (req: Request, res: Response) => {
   if (!req.companyId || !req.user?.id) {
     return fail(res, 'Company onboarding required', 403);
   }
@@ -470,11 +468,10 @@ export const queueQuickBooksPushEntries = async (req: Request, res: Response) =>
   }
 
   try {
-    await markQuickBooksSyncRunning(req.companyId, 'qb_push_entries');
+    await markQuickBooksSyncRunning(req.companyId, 'quickbooks.post_approved');
     const queue = await enqueueAccountingJob({
       companyId: req.companyId,
-      statementId: QUICKBOOKS_SYNC_STATEMENT_ID,
-      jobType: 'qb_push_entries',
+      jobType: 'quickbooks.post_approved',
       meta: {
         requestedBy: req.user.id
       }
@@ -484,10 +481,10 @@ export const queueQuickBooksPushEntries = async (req: Request, res: Response) =>
   } catch (error) {
     await markQuickBooksSyncFailure(
       req.companyId,
-      'qb_push_entries',
+      'quickbooks.post_approved',
       String((error as Error).message)
     );
-    return fail(res, 'Failed to queue QuickBooks entry sync', 500, {
+    return fail(res, 'Failed to queue QuickBooks post-approved sync', 500, {
       error: String((error as Error).message)
     });
   }

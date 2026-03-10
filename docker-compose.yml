@@ -32,7 +32,7 @@ services:
       GCS_BUCKET_NAME: retailsync-accounting-local
       TASKS_MODE: inline
       INTERNAL_TASKS_SECRET: local-internal-task-secret
-      INTERNAL_TASKS_ENDPOINT: http://server:4000/api/internal/tasks/run
+      INTERNAL_TASKS_ENDPOINT: http://server:4000/api/tasks
       GCP_PROJECT_ID: local
       GCP_REGION: us-west1
       TASKS_QUEUE_PIPELINE: pipeline-ocr-dev

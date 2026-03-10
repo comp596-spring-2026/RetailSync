@@ -1,6 +1,6 @@
 # RetailSync Module Structure Report
 
-Date: 2026-03-01
+Date: 2026-03-10
 
 ## Confirmed Module Set
 
@@ -13,7 +13,8 @@ The client feature modules are now aligned to:
 5. `users`
 6. `rbac`
 7. `settings`
-8. `dev`
+8. `accounting`
+9. `dev`
 
 ## Store Architecture
 
@@ -49,6 +50,7 @@ Module API wrappers:
 - `client/src/modules/inventory/api/*`
 - `client/src/modules/pos/api/*`
 - `client/src/modules/settings/api/*`
+- `client/src/modules/accounting/api/*`
 
 Legacy `client/src/api.ts` and `client/src/api/index.ts` were removed.
 
@@ -64,6 +66,7 @@ Legacy `client/src/api.ts` and `client/src/api/index.ts` were removed.
 - users pages from `modules/users/pages`
 - rbac pages from `modules/rbac/pages`
 - settings pages from `modules/settings/pages`
+- accounting pages from `modules/accounting/pages`
 
 ## Reports Status
 
@@ -117,6 +120,10 @@ client/src/
       pages/
       state/
       tests/
+    accounting/
+      api/
+      components/
+      pages/
     users/
       api/
       pages/

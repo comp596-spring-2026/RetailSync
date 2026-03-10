@@ -84,6 +84,49 @@ Operations:
 - `POST /inventory/move`
 - `GET /inventory/location/:code`
 
+## Accounting
+
+Statements:
+
+- `POST /accounting/statements/upload-url`
+- `POST /accounting/statements`
+- `GET /accounting/statements`
+- `GET /accounting/statements/:id`
+- `GET /accounting/statements/:id/status`
+- `GET /accounting/statements/:id/checks`
+- `GET /accounting/statements/:id/stream`
+- `POST /accounting/statements/:id/reprocess`
+- `POST /accounting/statements/:id/checks/:checkId/retry`
+
+Ledger:
+
+- `GET /accounting/ledger/entries`
+- `GET /accounting/ledger/entries/:id`
+- `PATCH /accounting/ledger/entries/:id`
+- `POST /accounting/ledger/entries/:id/approve`
+- `POST /accounting/ledger/entries/:id/exclude`
+- `POST /accounting/ledger/entries/bulk-approve`
+- `POST /accounting/ledger/post-approved`
+
+Observability:
+
+- `GET /accounting/observability/summary`
+- `GET /accounting/observability/debug`
+
+Task runners:
+
+- `POST /tasks/pipeline`
+- `POST /tasks/sync`
+
+QuickBooks integration sync endpoints:
+
+- `POST /integrations/quickbooks/sync/refresh-reference-data`
+- `POST /integrations/quickbooks/sync/post-approved`
+
+See full module docs:
+
+- `/Users/trupal/Projects/RetailSync/docs/accounting/README.md`
+
 ## Integrations: Google + Sheets
 
 Google helper routes:
@@ -181,6 +224,7 @@ Debug endpoints:
 ## Cron
 
 - `POST /cron/sync-sheets` (expects `x-cron-secret` when configured)
+- `POST /cron/accounting-sync` (expects `x-cron-secret`; supports `dryRun`, `includeSheets`, `includeQuickBooks`, `postDelaySeconds`)
 
 ## Module Shell CRUD (placeholder)
 

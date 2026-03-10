@@ -1,15 +1,22 @@
 import { ChartOfAccountModel } from '../models/ChartOfAccount';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { LedgerEntryModel } from '../models/LedgerEntry';
+import { QuickBooksReferenceModel } from '../models/QuickBooksReference';
+import { StatementTransactionModel } from '../models/StatementTransaction';
 import { ensureDefaultChartOfAccounts } from './ledgerService';
 import {
   QuickBooksAccountRecord,
-  QuickBooksJournalLineInput,
+  createQuickBooksCheckTransaction,
+  createQuickBooksDepositTransaction,
+  createQuickBooksExpenseTransaction,
   createQuickBooksJournalEntry,
-  listQuickBooksAccounts
+  createQuickBooksTransferTransaction,
+  listQuickBooksAccounts,
+  listQuickBooksEntities
 } from './quickbooksService';
 
 type SyncStatus = 'idle' | 'running' | 'success' | 'error';
+type SyncJobType = 'quickbooks.refresh_reference_data' | 'quickbooks.post_approved';
 
 const normalizeAccountCode = (input: string | null, accountId: string) => {
   const cleaned = (input ?? '').trim().replace(/\s+/g, '');
@@ -71,9 +78,9 @@ const updateQuickBooksSyncFields = async (
 
 export const markQuickBooksSyncRunning = async (
   companyId: string,
-  jobType: 'qb_pull_accounts' | 'qb_push_entries'
+  jobType: SyncJobType
 ) => {
-  if (jobType === 'qb_pull_accounts') {
+  if (jobType === 'quickbooks.refresh_reference_data') {
     await updateQuickBooksSyncFields(companyId, {
       'quickbooks.lastPullStatus': 'running' as SyncStatus,
       'quickbooks.lastPullError': null
@@ -88,11 +95,11 @@ export const markQuickBooksSyncRunning = async (
 
 export const markQuickBooksSyncFailure = async (
   companyId: string,
-  jobType: 'qb_pull_accounts' | 'qb_push_entries',
+  jobType: SyncJobType,
   error: string
 ) => {
   const now = new Date();
-  if (jobType === 'qb_pull_accounts') {
+  if (jobType === 'quickbooks.refresh_reference_data') {
     await updateQuickBooksSyncFields(companyId, {
       'quickbooks.lastPullStatus': 'error' as SyncStatus,
       'quickbooks.lastPullAt': now,
@@ -107,7 +114,50 @@ export const markQuickBooksSyncFailure = async (
   }
 };
 
-export const syncQuickBooksAccountsToChartOfAccounts = async (companyId: string) => {
+const upsertQuickBooksEntities = async (companyId: string) => {
+  const [vendors, customers, employees] = await Promise.all([
+    listQuickBooksEntities(companyId, 'vendor'),
+    listQuickBooksEntities(companyId, 'customer'),
+    listQuickBooksEntities(companyId, 'employee')
+  ]);
+
+  const all = [
+    ...vendors.map((row) => ({ ...row, entityType: 'vendor' as const })),
+    ...customers.map((row) => ({ ...row, entityType: 'customer' as const })),
+    ...employees.map((row) => ({ ...row, entityType: 'employee' as const }))
+  ];
+
+  if (all.length === 0) {
+    return { vendors: 0, customers: 0, employees: 0 };
+  }
+
+  const ops = all.map((entity) => ({
+    updateOne: {
+      filter: { companyId, entityType: entity.entityType, qbId: entity.id },
+      update: {
+        $set: {
+          companyId,
+          entityType: entity.entityType,
+          qbId: entity.id,
+          displayName: entity.displayName,
+          active: entity.active,
+          raw: entity.raw
+        }
+      },
+      upsert: true
+    }
+  }));
+
+  await QuickBooksReferenceModel.bulkWrite(ops as any, { ordered: false });
+
+  return {
+    vendors: vendors.length,
+    customers: customers.length,
+    employees: employees.length
+  };
+};
+
+export const syncQuickBooksReferenceData = async (companyId: string) => {
   await ensureDefaultChartOfAccounts(companyId);
   const accounts = await listQuickBooksAccounts(companyId);
   const activeAccounts = accounts.filter((account) => account.active);
@@ -155,127 +205,295 @@ export const syncQuickBooksAccountsToChartOfAccounts = async (companyId: string)
     await ChartOfAccountModel.bulkWrite(ops as any, { ordered: false });
   }
 
+  const entityCounts = await upsertQuickBooksEntities(companyId);
+
   const now = new Date();
   await updateQuickBooksSyncFields(companyId, {
     'quickbooks.lastPullStatus': 'success' as SyncStatus,
     'quickbooks.lastPullAt': now,
-    'quickbooks.lastPullCount': activeAccounts.length,
+    'quickbooks.lastPullCount':
+      activeAccounts.length + entityCounts.vendors + entityCounts.customers + entityCounts.employees,
     'quickbooks.lastPullError': null
   });
 
   return {
-    pulled: activeAccounts.length
+    pulledAccounts: activeAccounts.length,
+    pulledVendors: entityCounts.vendors,
+    pulledCustomers: entityCounts.customers,
+    pulledEmployees: entityCounts.employees
   };
 };
 
-const buildJournalLines = ({
-  accountIdByCode,
-  entry
-}: {
-  accountIdByCode: Map<string, string>;
-  entry: {
-    _id: string;
-    lines: Array<{ accountCode: string; debit: number; credit: number; category?: string }>;
-  };
+const makeFallbackLines = (entry: {
+  amount: number;
+  proposal?: { categoryAccountId?: string };
+  type: 'debit' | 'credit';
 }) => {
-  const lines: QuickBooksJournalLineInput[] = [];
-  for (const line of entry.lines) {
-    const accountId = accountIdByCode.get(String(line.accountCode));
-    if (!accountId) {
-      throw new Error(`No QuickBooks account mapping for account code ${line.accountCode}`);
-    }
-    const debit = Number(line.debit ?? 0);
-    const credit = Number(line.credit ?? 0);
-    if (debit > 0) {
-      lines.push({
-        accountId,
-        amount: Math.abs(debit),
-        postingType: 'Debit',
-        description: line.category
-      });
-    }
-    if (credit > 0) {
-      lines.push({
-        accountId,
-        amount: Math.abs(credit),
-        postingType: 'Credit',
-        description: line.category
-      });
-    }
+  const categoryCode = entry.proposal?.categoryAccountId ?? '6999';
+  const amount = Math.abs(Number(entry.amount || 0));
+  if (!amount) return [];
+
+  if (entry.type === 'debit') {
+    return [
+      { accountCode: categoryCode, debit: amount, credit: 0, description: 'Fallback expense' },
+      { accountCode: '1000', debit: 0, credit: amount, description: 'Fallback cash/bank offset' }
+    ];
   }
-  if (!lines.length) {
-    throw new Error(`Ledger entry ${entry._id} has no debit/credit lines to sync`);
-  }
-  return lines;
+
+  return [
+    { accountCode: '1000', debit: amount, credit: 0, description: 'Fallback cash/bank offset' },
+    { accountCode: categoryCode, debit: 0, credit: amount, description: 'Fallback income' }
+  ];
 };
 
-export const pushPostedLedgerEntriesToQuickBooks = async (
+const setPostingFailure = async (entryId: string, companyId: string, error: string) => {
+  await LedgerEntryModel.updateOne(
+    { _id: entryId, companyId },
+    {
+      $set: {
+        'posting.status': 'failed',
+        'posting.error': error
+      },
+      $inc: {
+        'posting.attempts': 1
+      }
+    }
+  );
+};
+
+const syncStatementTransactionPosting = async (
+  companyId: string,
+  statementTransactionId: string,
+  status: 'posted' | 'failed',
+  qbTxnId?: string,
+  error?: string
+) => {
+  await StatementTransactionModel.updateOne(
+    { _id: statementTransactionId, companyId },
+    {
+      $set: {
+        'posting.status': status,
+        'posting.qbTxnId': qbTxnId ?? null,
+        'posting.error': error ?? null
+      }
+    }
+  );
+};
+
+export const postApprovedLedgerEntriesToQuickBooks = async (
   companyId: string,
   limit = 200
 ) => {
-  type PostedEntry = {
+  type ApprovedEntry = {
     _id: string;
     date: string;
-    memo?: string;
-    lines: Array<{ accountCode: string; debit: number; credit: number; category?: string }>;
+    description: string;
+    amount: number;
+    type: 'debit' | 'credit';
+    statementTransactionId: string;
+    fallbackJournalLines?: Array<{ accountCode: string; debit: number; credit: number; description?: string }>;
+    proposal?: {
+      qbTxnType?: 'Expense' | 'Deposit' | 'Transfer' | 'Check';
+      bankAccountId?: string;
+      categoryAccountId?: string;
+      payeeType?: 'vendor' | 'customer' | 'employee' | 'other';
+      payeeId?: string;
+      payeeName?: string;
+      transferTargetAccountId?: string;
+      memo?: string;
+    };
   };
-  const mappedAccounts = await ChartOfAccountModel.find({
-    companyId,
-    qbAccountId: { $type: 'string', $ne: '' }
-  }).select('code qbAccountId');
-
-  const accountIdByCode = new Map<string, string>();
-  for (const account of mappedAccounts) {
-    if (account.code && account.qbAccountId) {
-      accountIdByCode.set(String(account.code), String(account.qbAccountId));
-    }
-  }
-  if (!accountIdByCode.size) {
-    throw new Error('No QuickBooks account mappings found. Pull Chart of Accounts first.');
-  }
 
   const entries = await LedgerEntryModel.find({
     companyId,
-    status: 'posted',
-    $or: [{ qbTxnId: null }, { qbTxnId: { $exists: false } }]
+    reviewStatus: 'approved',
+    'posting.status': { $in: ['not_posted', 'failed'] },
+    $or: [
+      { 'posting.qbTxnId': null },
+      { 'posting.qbTxnId': { $exists: false } },
+      { 'posting.qbTxnId': '' }
+    ]
   })
-    .select('_id date memo lines')
-    .sort({ postedAt: 1, createdAt: 1 })
+    .select('_id date description amount type statementTransactionId proposal fallbackJournalLines')
+    .sort({ updatedAt: 1, createdAt: 1 })
     .limit(limit)
-    .lean<PostedEntry[]>();
+    .lean<ApprovedEntry[]>();
 
-  let synced = 0;
+  let posted = 0;
   let failed = 0;
+
   for (const entry of entries) {
-    try {
-      const lines = buildJournalLines({ accountIdByCode, entry });
-      const result = await createQuickBooksJournalEntry({
-        companyId,
-        txnDate: String(entry.date),
-        privateNote: entry.memo ?? '',
-        lines
-      });
-      await LedgerEntryModel.updateOne(
-        { _id: entry._id, companyId },
-        {
-          $set: {
-            qbTxnId: result.journalEntryId,
-            qbSyncedAt: new Date(),
-            qbSyncError: null
-          }
-        }
-      );
-      synced += 1;
-    } catch (error) {
+    const proposal = entry.proposal;
+    if (!proposal?.qbTxnType) {
       failed += 1;
+      await setPostingFailure(entry._id, companyId, 'Missing proposal.qbTxnType');
+      await syncStatementTransactionPosting(
+        companyId,
+        entry.statementTransactionId,
+        'failed',
+        undefined,
+        'Missing proposal.qbTxnType'
+      );
+      continue;
+    }
+
+    try {
+      let qbTxnId: string | undefined;
+
+      if (proposal.qbTxnType === 'Expense') {
+        if (!proposal.bankAccountId || !proposal.categoryAccountId) {
+          throw new Error('Expense requires bankAccountId and categoryAccountId');
+        }
+        const result = await createQuickBooksExpenseTransaction({
+          companyId,
+          txnDate: entry.date,
+          amount: Math.abs(entry.amount),
+          bankAccountId: proposal.bankAccountId,
+          categoryAccountId: proposal.categoryAccountId,
+          payeeRefId: proposal.payeeId,
+          memo: proposal.memo ?? entry.description
+        });
+        qbTxnId = result.txnId;
+      } else if (proposal.qbTxnType === 'Deposit') {
+        if (!proposal.bankAccountId || !proposal.categoryAccountId) {
+          throw new Error('Deposit requires bankAccountId and categoryAccountId');
+        }
+        const result = await createQuickBooksDepositTransaction({
+          companyId,
+          txnDate: entry.date,
+          amount: Math.abs(entry.amount),
+          bankAccountId: proposal.bankAccountId,
+          categoryAccountId: proposal.categoryAccountId,
+          memo: proposal.memo ?? entry.description
+        });
+        qbTxnId = result.txnId;
+      } else if (proposal.qbTxnType === 'Transfer') {
+        if (!proposal.bankAccountId || !proposal.transferTargetAccountId) {
+          throw new Error('Transfer requires bankAccountId and transferTargetAccountId');
+        }
+        const result = await createQuickBooksTransferTransaction({
+          companyId,
+          txnDate: entry.date,
+          amount: Math.abs(entry.amount),
+          fromAccountId: proposal.bankAccountId,
+          toAccountId: proposal.transferTargetAccountId,
+          memo: proposal.memo ?? entry.description
+        });
+        qbTxnId = result.txnId;
+      } else if (proposal.qbTxnType === 'Check') {
+        if (!proposal.bankAccountId || !proposal.categoryAccountId) {
+          throw new Error('Check requires bankAccountId and categoryAccountId');
+        }
+        const result = await createQuickBooksCheckTransaction({
+          companyId,
+          txnDate: entry.date,
+          amount: Math.abs(entry.amount),
+          bankAccountId: proposal.bankAccountId,
+          categoryAccountId: proposal.categoryAccountId,
+          payeeRefId: proposal.payeeId,
+          memo: proposal.memo ?? entry.description
+        });
+        qbTxnId = result.txnId;
+      }
+
+      if (!qbTxnId) {
+        throw new Error('Typed posting did not return txn id');
+      }
+
+      posted += 1;
       await LedgerEntryModel.updateOne(
         { _id: entry._id, companyId },
         {
           $set: {
-            qbSyncError: String((error as Error).message)
+            'posting.status': 'posted',
+            'posting.qbTxnId': qbTxnId,
+            'posting.error': null,
+            'posting.postedAt': new Date()
+          },
+          $inc: {
+            'posting.attempts': 1
           }
         }
       );
+
+      await syncStatementTransactionPosting(
+        companyId,
+        entry.statementTransactionId,
+        'posted',
+        qbTxnId,
+        undefined
+      );
+    } catch (typedError) {
+      const fallbackLines =
+        (entry.fallbackJournalLines && entry.fallbackJournalLines.length > 0
+          ? entry.fallbackJournalLines
+          : makeFallbackLines(entry)) ?? [];
+
+      try {
+        const result = await createQuickBooksJournalEntry({
+          companyId,
+          txnDate: entry.date,
+          privateNote: `${entry.description} (fallback journal)`,
+          lines: fallbackLines
+            .map((line) => {
+              const accountId = String(line.accountCode || '').trim();
+              if (!accountId) return null;
+              if (Number(line.debit || 0) > 0) {
+                return {
+                  accountId,
+                  amount: Math.abs(Number(line.debit)),
+                  postingType: 'Debit' as const,
+                  description: line.description
+                };
+              }
+              if (Number(line.credit || 0) > 0) {
+                return {
+                  accountId,
+                  amount: Math.abs(Number(line.credit)),
+                  postingType: 'Credit' as const,
+                  description: line.description
+                };
+              }
+              return null;
+            })
+            .filter((line): line is NonNullable<typeof line> => Boolean(line))
+        });
+
+        posted += 1;
+        await LedgerEntryModel.updateOne(
+          { _id: entry._id, companyId },
+          {
+            $set: {
+              'posting.status': 'posted',
+              'posting.qbTxnId': result.journalEntryId,
+              'posting.error': `Typed failed, fallback journal posted: ${String((typedError as Error).message)}`,
+              'posting.postedAt': new Date()
+            },
+            $inc: {
+              'posting.attempts': 1
+            }
+          }
+        );
+
+        await syncStatementTransactionPosting(
+          companyId,
+          entry.statementTransactionId,
+          'posted',
+          result.journalEntryId,
+          undefined
+        );
+      } catch (fallbackError) {
+        failed += 1;
+        const errorMessage = `Typed failed: ${String((typedError as Error).message)} | fallback failed: ${String((fallbackError as Error).message)}`;
+        await setPostingFailure(entry._id, companyId, errorMessage);
+        await syncStatementTransactionPosting(
+          companyId,
+          entry.statementTransactionId,
+          'failed',
+          undefined,
+          errorMessage
+        );
+      }
     }
   }
 
@@ -283,13 +501,13 @@ export const pushPostedLedgerEntriesToQuickBooks = async (
   await updateQuickBooksSyncFields(companyId, {
     'quickbooks.lastPushStatus': failed > 0 ? ('error' as SyncStatus) : ('success' as SyncStatus),
     'quickbooks.lastPushAt': now,
-    'quickbooks.lastPushCount': synced,
+    'quickbooks.lastPushCount': posted,
     'quickbooks.lastPushError': failed > 0 ? `${failed} entries failed to sync` : null
   });
 
   return {
     scanned: entries.length,
-    synced,
+    posted,
     failed
   };
 };
