@@ -52,7 +52,7 @@ jobs:
             WIF_PROVIDER GCP_PROJECT_ID GCP_REGION \
             GAR_LOCATION GAR_REPOSITORY GAR_IMAGE_NAME \
             CLOUD_RUN_SERVICE GCP_SERVICE_ACCOUNT GCP_RUNTIME_SERVICE_ACCOUNT \
-            CLIENT_URL TASKS_MODE GCS_BUCKET_NAME TASKS_QUEUE_PIPELINE TASKS_QUEUE_SYNC TASKS_OIDC_SERVICE_ACCOUNT_EMAIL
+            CLIENT_URL TASKS_MODE INTERNAL_TASKS_ENDPOINT GCS_BUCKET_NAME TASKS_QUEUE_PIPELINE TASKS_QUEUE_SYNC TASKS_OIDC_SERVICE_ACCOUNT_EMAIL WORKER_SERVICE_NAME
           do
             if [ -z "${!name}" ]; then
               echo "Missing required GitHub Actions variable: $name"
@@ -82,10 +82,12 @@ jobs:
           GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
           CLIENT_URL: ${{ vars.CLIENT_URL }}
           TASKS_MODE: ${{ vars.TASKS_MODE }}
+          INTERNAL_TASKS_ENDPOINT: ${{ vars.INTERNAL_TASKS_ENDPOINT }}
           GCS_BUCKET_NAME: ${{ vars.GCS_BUCKET_NAME }}
           TASKS_QUEUE_PIPELINE: ${{ vars.TASKS_QUEUE_PIPELINE }}
           TASKS_QUEUE_SYNC: ${{ vars.TASKS_QUEUE_SYNC }}
           TASKS_OIDC_SERVICE_ACCOUNT_EMAIL: ${{ vars.TASKS_OIDC_SERVICE_ACCOUNT_EMAIL }}
+          WORKER_SERVICE_NAME: ${{ vars.WORKER_SERVICE_NAME }}
           # Secrets
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
@@ -154,7 +156,7 @@ jobs:
             --platform managed \
             --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
             --set-secrets "$secrets_list" \
-            --set-env-vars "NODE_ENV=production,CLIENT_URL=${{ vars.CLIENT_URL }},TASKS_MODE=${{ vars.TASKS_MODE }},GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }},GCP_REGION=${{ vars.GCP_REGION }},GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }},TASKS_QUEUE_PIPELINE=${{ vars.TASKS_QUEUE_PIPELINE }},TASKS_QUEUE_SYNC=${{ vars.TASKS_QUEUE_SYNC }},TASKS_OIDC_SERVICE_ACCOUNT_EMAIL=${{ vars.TASKS_OIDC_SERVICE_ACCOUNT_EMAIL }},API_SERVICE_NAME=${{ vars.CLOUD_RUN_SERVICE }}" \
+            --set-env-vars "NODE_ENV=production,CLIENT_URL=${{ vars.CLIENT_URL }},TASKS_MODE=${{ vars.TASKS_MODE }},INTERNAL_TASKS_ENDPOINT=${{ vars.INTERNAL_TASKS_ENDPOINT }},GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }},GCP_REGION=${{ vars.GCP_REGION }},GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }},TASKS_QUEUE_PIPELINE=${{ vars.TASKS_QUEUE_PIPELINE }},TASKS_QUEUE_SYNC=${{ vars.TASKS_QUEUE_SYNC }},TASKS_OIDC_SERVICE_ACCOUNT_EMAIL=${{ vars.TASKS_OIDC_SERVICE_ACCOUNT_EMAIL }},API_SERVICE_NAME=${{ vars.CLOUD_RUN_SERVICE }},WORKER_SERVICE_NAME=${{ vars.WORKER_SERVICE_NAME }}" \
             --allow-unauthenticated
 
           API_URL="$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" --region "${{ vars.GCP_REGION }}" --format='value(status.url)')"
