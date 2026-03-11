@@ -30,5 +30,5 @@ export const moduleActionCatalog = {
     rolesSettings: ['cloneRole'],
     accounting: ['process', 'confirm', 'lock'],
     ledger: ['post', 'adjust'],
-    quickbooks: ['connect', 'sync', 'disconnect']
+    quickbooks: ['connect', 'sync', 'disconnect', 'post']
 };

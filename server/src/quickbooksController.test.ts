@@ -11,6 +11,7 @@ const {
   exchangeQuickBooksAuthorizationCodeMock,
   fetchQuickBooksCompanyNameMock,
   loadQuickBooksSecretMock,
+  runQuickBooksReadQueryMock,
   saveQuickBooksSecretMock,
   toQuickBooksSecretPayloadMock
 } = vi.hoisted(() => ({
@@ -21,6 +22,7 @@ const {
   exchangeQuickBooksAuthorizationCodeMock: vi.fn(),
   fetchQuickBooksCompanyNameMock: vi.fn(),
   loadQuickBooksSecretMock: vi.fn(),
+  runQuickBooksReadQueryMock: vi.fn(),
   saveQuickBooksSecretMock: vi.fn(),
   toQuickBooksSecretPayloadMock: vi.fn()
 }));
@@ -46,6 +48,7 @@ vi.mock('./services/quickbooksService', () => ({
   fetchQuickBooksCompanyName: (...args: unknown[]) =>
     fetchQuickBooksCompanyNameMock(...args),
   loadQuickBooksSecret: (...args: unknown[]) => loadQuickBooksSecretMock(...args),
+  runQuickBooksReadQuery: (...args: unknown[]) => runQuickBooksReadQueryMock(...args),
   saveQuickBooksSecret: (...args: unknown[]) => saveQuickBooksSecretMock(...args),
   toQuickBooksSecretPayload: (...args: unknown[]) =>
     toQuickBooksSecretPayloadMock(...args)
@@ -140,6 +143,7 @@ describe('quickbooksController oauth flow', () => {
   ) => Promise<unknown>;
   let quickBooksCallback: (req: Request, res: Response) => Promise<unknown>;
   let disconnectQuickBooks: (req: Request, res: Response) => Promise<unknown>;
+  let quickBooksReadQuery: (req: Request, res: Response) => Promise<unknown>;
   let originalNodeEnv: string;
   let originalClientUrl: string;
 
@@ -181,6 +185,7 @@ describe('quickbooksController oauth flow', () => {
     createQuickBooksConnectUrlResponse = controller.createQuickBooksConnectUrlResponse;
     quickBooksCallback = controller.quickBooksCallback;
     disconnectQuickBooks = controller.disconnectQuickBooks;
+    quickBooksReadQuery = controller.quickBooksReadQuery;
   });
 
   beforeEach(() => {
@@ -215,7 +220,7 @@ describe('quickbooksController oauth flow', () => {
         httpOnly: true,
         sameSite: 'none',
         secure: true,
-        maxAge: 10 * 60 * 1000
+        maxAge: 30 * 60 * 1000
       })
     );
     expect(status).toHaveBeenCalledWith(200);
@@ -384,6 +389,62 @@ describe('quickbooksController oauth flow', () => {
           realmId: null,
           companyName: null
         })
+      })
+    );
+  });
+
+  it('returns quickbooks query payload when direct select query succeeds', async () => {
+    const payload = {
+      QueryResponse: {
+        Account: [{ Id: '1', Name: 'Cash' }]
+      }
+    };
+    runQuickBooksReadQueryMock.mockResolvedValue(payload);
+
+    const { res, status, json } = createResponse();
+    const req = {
+      companyId: 'company-1',
+      body: {
+        query: 'select * from Account maxresults 1'
+      }
+    } as unknown as Request;
+
+    await quickBooksReadQuery(req, res);
+
+    expect(runQuickBooksReadQueryMock).toHaveBeenCalledWith(
+      'company-1',
+      'select * from Account maxresults 1'
+    );
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: expect.objectContaining({
+          query: 'select * from Account maxresults 1',
+          payload
+        })
+      })
+    );
+  });
+
+  it('returns 422 when direct query is not a select statement', async () => {
+    runQuickBooksReadQueryMock.mockRejectedValue(new Error('quickbooks_query_must_be_select'));
+
+    const { res, status, json } = createResponse();
+    const req = {
+      companyId: 'company-1',
+      body: {
+        query: 'delete from Account'
+      }
+    } as unknown as Request;
+
+    await quickBooksReadQuery(req, res);
+
+    expect(status).toHaveBeenCalledWith(422);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'error',
+        message: 'quickbooks_query_must_be_select'
       })
     );
   });

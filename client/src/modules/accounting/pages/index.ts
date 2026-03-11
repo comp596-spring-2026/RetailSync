@@ -3,3 +3,4 @@ export * from './StatementDetailPage';
 export * from './LedgerPage';
 export * from './QuickBooksSyncPage';
 export * from './ObservabilityPage';
+export * from './TaxDashboardPage';

@@ -305,6 +305,220 @@ export const quickBooksSettingsSchema = z.object({
   updatedAt: z.string().nullable().optional()
 });
 
+export const quickBooksTaxBasisSchema = z.enum(['cash', 'accrual']);
+
+export const quickBooksTaxReportKeySchema = z.enum([
+  'profit-loss',
+  'balance-sheet',
+  'trial-balance',
+  'general-ledger',
+  'ar-aging',
+  'ap-aging'
+]);
+
+export const quickBooksTaxDateSchema = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const coercePositiveInt = (min: number, max: number) =>
+  z
+    .union([z.number(), z.string().trim().min(1)])
+    .transform((value) => Number(value))
+    .refine((value) => Number.isInteger(value), 'Expected an integer')
+    .refine((value) => value >= min, `Must be >= ${min}`)
+    .refine((value) => value <= max, `Must be <= ${max}`);
+
+export const quickBooksTaxReportRowSchema = z.object({
+  label: z.string().trim().min(1),
+  amount: z.number().nullable(),
+  path: z.array(z.string().trim()).default([])
+});
+
+export const quickBooksTaxReportSchema = z.object({
+  reportKey: quickBooksTaxReportKeySchema,
+  from: quickBooksTaxDateSchema,
+  to: quickBooksTaxDateSchema,
+  basis: quickBooksTaxBasisSchema,
+  generatedAt: z.string().trim(),
+  rows: z.array(quickBooksTaxReportRowSchema),
+  raw: z.record(z.unknown())
+});
+
+export const quickBooksTaxOverviewSchema = z.object({
+  from: quickBooksTaxDateSchema,
+  to: quickBooksTaxDateSchema,
+  basis: quickBooksTaxBasisSchema,
+  cards: z.object({
+    netIncome: z.number().nullable(),
+    totalAssets: z.number().nullable(),
+    totalLiabilities: z.number().nullable(),
+    totalEquity: z.number().nullable(),
+    arOpen: z.number().nullable(),
+    apOpen: z.number().nullable()
+  })
+});
+
+export const quickBooksTaxWindowQuerySchema = z.object({
+  from: quickBooksTaxDateSchema.optional(),
+  to: quickBooksTaxDateSchema.optional(),
+  basis: quickBooksTaxBasisSchema.optional()
+});
+
+export const quickBooksTaxChartAccountSchema = z.object({
+  id: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  code: z.string().nullable(),
+  accountType: z.string().nullable(),
+  active: z.boolean()
+});
+
+export const quickBooksTaxLedgerEntrySchema = z.object({
+  id: z.string().trim().min(1),
+  txnDate: quickBooksTaxDateSchema.optional(),
+  description: z.string().trim().min(1),
+  accountId: z.string().nullable(),
+  accountName: z.string().nullable(),
+  amount: z.number().nullable(),
+  raw: z.record(z.unknown()).optional()
+});
+
+export const quickBooksTaxLedgerResponseSchema = z.object({
+  from: quickBooksTaxDateSchema,
+  to: quickBooksTaxDateSchema,
+  basis: quickBooksTaxBasisSchema,
+  accountId: z.string().nullable(),
+  total: z.number().int().nonnegative(),
+  nextCursor: z.string().nullable(),
+  entries: z.array(quickBooksTaxLedgerEntrySchema)
+});
+
+export const quickBooksTaxLedgerQuerySchema = quickBooksTaxWindowQuerySchema.extend({
+  accountId: z.string().trim().optional(),
+  limit: coercePositiveInt(1, 500).optional(),
+  cursor: z.string().trim().optional()
+});
+
+export const quickBooksTaxPaymentTypeSchema = z.enum(['customer', 'vendor']);
+
+export const quickBooksTaxPaymentSchema = z.object({
+  id: z.string().trim().min(1),
+  paymentType: quickBooksTaxPaymentTypeSchema,
+  sourceTxnType: z.string().trim().min(1),
+  txnDate: quickBooksTaxDateSchema,
+  amount: z.number(),
+  entityId: z.string().nullable(),
+  entityName: z.string().nullable(),
+  memo: z.string().nullable(),
+  raw: z.record(z.unknown()).optional()
+});
+
+export const quickBooksTaxPaymentsResponseSchema = z.object({
+  from: quickBooksTaxDateSchema,
+  to: quickBooksTaxDateSchema,
+  type: z.union([quickBooksTaxPaymentTypeSchema, z.literal('all')]),
+  nextCursor: z.string().nullable(),
+  payments: z.array(quickBooksTaxPaymentSchema)
+});
+
+export const quickBooksTaxPaymentsQuerySchema = z.object({
+  from: quickBooksTaxDateSchema.optional(),
+  to: quickBooksTaxDateSchema.optional(),
+  type: z.union([quickBooksTaxPaymentTypeSchema, z.literal('all')]).optional(),
+  limit: coercePositiveInt(1, 200).optional(),
+  cursor: z.string().trim().optional()
+});
+
+export const quickBooksRecoverPaymentInputSchema = z
+  .object({
+    clientRequestId: z.string().trim().min(6).max(120),
+    paymentType: quickBooksTaxPaymentTypeSchema,
+    txnDate: quickBooksTaxDateSchema,
+    amount: z.number().positive(),
+    bankAccountId: z.string().trim().min(1),
+    customerId: z.string().trim().optional(),
+    vendorId: z.string().trim().optional(),
+    categoryAccountId: z.string().trim().optional(),
+    memo: z.string().trim().max(1000).optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.paymentType === 'customer' && !value.customerId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'customerId is required for customer payment recovery',
+        path: ['customerId']
+      });
+    }
+    if (value.paymentType === 'vendor') {
+      if (!value.vendorId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'vendorId is required for vendor payment recovery',
+          path: ['vendorId']
+        });
+      }
+      if (!value.categoryAccountId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'categoryAccountId is required for vendor payment recovery',
+          path: ['categoryAccountId']
+        });
+      }
+    }
+  });
+
+export const quickBooksRecoverPaymentResultSchema = z.object({
+  created: z.boolean(),
+  clientRequestId: z.string().trim().min(1),
+  paymentId: z.string().trim().min(1),
+  txnType: z.enum(['Payment', 'Purchase']),
+  txnDate: quickBooksTaxDateSchema,
+  amount: z.number()
+});
+
+export const quickBooksJournalAdjustmentLineSchema = z.object({
+  accountId: z.string().trim().min(1),
+  debit: z.number().nonnegative().optional(),
+  credit: z.number().nonnegative().optional(),
+  description: z.string().trim().max(1000).optional()
+});
+
+export const quickBooksJournalAdjustmentInputSchema = z
+  .object({
+    clientRequestId: z.string().trim().min(6).max(120),
+    txnDate: quickBooksTaxDateSchema,
+    memo: z.string().trim().max(1000).optional(),
+    lines: z.array(quickBooksJournalAdjustmentLineSchema).min(2)
+  })
+  .superRefine((value, ctx) => {
+    let debitTotal = 0;
+    let creditTotal = 0;
+    value.lines.forEach((line, index) => {
+      const debit = Number(line.debit ?? 0);
+      const credit = Number(line.credit ?? 0);
+      if ((debit > 0 && credit > 0) || (debit <= 0 && credit <= 0)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Each line must have exactly one side: debit or credit',
+          path: ['lines', index]
+        });
+      }
+      debitTotal += debit;
+      creditTotal += credit;
+    });
+    if (Math.abs(debitTotal - creditTotal) > 0.009) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Journal adjustment must be balanced (debit total equals credit total)',
+        path: ['lines']
+      });
+    }
+  });
+
+export const quickBooksJournalAdjustmentResultSchema = z.object({
+  created: z.boolean(),
+  clientRequestId: z.string().trim().min(1),
+  journalEntryId: z.string().trim().min(1),
+  txnDate: quickBooksTaxDateSchema
+});
+
 export const runSchema = z.object({
   id: z.string().trim().min(1),
   companyId: z.string().trim().min(1),
@@ -394,6 +608,26 @@ export type StatementCheck = z.infer<typeof statementCheckSchema>;
 export type LedgerEntry = z.infer<typeof ledgerEntrySchema>;
 export type QuickBooksSyncStatus = z.infer<typeof quickbooksSyncStatusSchema>;
 export type QuickBooksSettings = z.infer<typeof quickBooksSettingsSchema>;
+export type QuickBooksTaxBasis = z.infer<typeof quickBooksTaxBasisSchema>;
+export type QuickBooksTaxReportKey = z.infer<typeof quickBooksTaxReportKeySchema>;
+export type QuickBooksTaxReportRow = z.infer<typeof quickBooksTaxReportRowSchema>;
+export type QuickBooksTaxReport = z.infer<typeof quickBooksTaxReportSchema>;
+export type QuickBooksTaxOverview = z.infer<typeof quickBooksTaxOverviewSchema>;
+export type QuickBooksTaxWindowQuery = z.infer<typeof quickBooksTaxWindowQuerySchema>;
+export type QuickBooksTaxChartAccount = z.infer<typeof quickBooksTaxChartAccountSchema>;
+export type QuickBooksTaxLedgerEntry = z.infer<typeof quickBooksTaxLedgerEntrySchema>;
+export type QuickBooksTaxLedgerResponse = z.infer<typeof quickBooksTaxLedgerResponseSchema>;
+export type QuickBooksTaxLedgerQuery = z.infer<typeof quickBooksTaxLedgerQuerySchema>;
+export type QuickBooksTaxPaymentType = z.infer<typeof quickBooksTaxPaymentTypeSchema>;
+export type QuickBooksTaxPayment = z.infer<typeof quickBooksTaxPaymentSchema>;
+export type QuickBooksTaxPaymentsResponse = z.infer<typeof quickBooksTaxPaymentsResponseSchema>;
+export type QuickBooksTaxPaymentsQuery = z.infer<typeof quickBooksTaxPaymentsQuerySchema>;
+export type QuickBooksRecoverPaymentInput = z.infer<typeof quickBooksRecoverPaymentInputSchema>;
+export type QuickBooksRecoverPaymentResult = z.infer<typeof quickBooksRecoverPaymentResultSchema>;
+export type QuickBooksJournalAdjustmentInput = z.infer<typeof quickBooksJournalAdjustmentInputSchema>;
+export type QuickBooksJournalAdjustmentResult = z.infer<
+  typeof quickBooksJournalAdjustmentResultSchema
+>;
 export type AccountingObservabilitySummary = z.infer<
   typeof accountingObservabilitySummarySchema
 >;
