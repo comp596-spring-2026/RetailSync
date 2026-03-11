@@ -18,9 +18,26 @@ import { StatementTransactionModel } from './models/StatementTransaction';
 import { RunModel } from './models/Run';
 import { getOrCreateSettings } from './utils/googleSheetsSettings';
 
-const { enqueueAccountingJobMock, runAccountingTaskMock } = vi.hoisted(() => ({
+const {
+  enqueueAccountingJobMock,
+  runAccountingTaskMock,
+  fetchQuickBooksTaxOverviewMock,
+  fetchQuickBooksTaxReportMock,
+  listQuickBooksTaxChartOfAccountsMock,
+  listQuickBooksTaxLedgerMock,
+  listQuickBooksTaxPaymentsMock,
+  recoverQuickBooksPaymentMock,
+  createQuickBooksJournalAdjustmentMock
+} = vi.hoisted(() => ({
   enqueueAccountingJobMock: vi.fn(),
-  runAccountingTaskMock: vi.fn()
+  runAccountingTaskMock: vi.fn(),
+  fetchQuickBooksTaxOverviewMock: vi.fn(),
+  fetchQuickBooksTaxReportMock: vi.fn(),
+  listQuickBooksTaxChartOfAccountsMock: vi.fn(),
+  listQuickBooksTaxLedgerMock: vi.fn(),
+  listQuickBooksTaxPaymentsMock: vi.fn(),
+  recoverQuickBooksPaymentMock: vi.fn(),
+  createQuickBooksJournalAdjustmentMock: vi.fn()
 }));
 
 vi.mock('./jobs/accountingQueue', () => ({
@@ -29,6 +46,19 @@ vi.mock('./jobs/accountingQueue', () => ({
 
 vi.mock('./jobs/accountingTaskRunner', () => ({
   runAccountingTask: runAccountingTaskMock
+}));
+
+vi.mock('./services/quickbooksTaxService', () => ({
+  fetchQuickBooksTaxOverview: (...args: unknown[]) =>
+    fetchQuickBooksTaxOverviewMock(...args),
+  fetchQuickBooksTaxReport: (...args: unknown[]) => fetchQuickBooksTaxReportMock(...args),
+  listQuickBooksTaxChartOfAccounts: (...args: unknown[]) =>
+    listQuickBooksTaxChartOfAccountsMock(...args),
+  listQuickBooksTaxLedger: (...args: unknown[]) => listQuickBooksTaxLedgerMock(...args),
+  listQuickBooksTaxPayments: (...args: unknown[]) => listQuickBooksTaxPaymentsMock(...args),
+  recoverQuickBooksPayment: (...args: unknown[]) => recoverQuickBooksPaymentMock(...args),
+  createQuickBooksJournalAdjustment: (...args: unknown[]) =>
+    createQuickBooksJournalAdjustmentMock(...args)
 }));
 
 vi.mock('@google-cloud/storage', () => {
@@ -88,6 +118,13 @@ describe('Accounting e2e', () => {
     await clearTestDb();
     enqueueAccountingJobMock.mockReset();
     runAccountingTaskMock.mockReset();
+    fetchQuickBooksTaxOverviewMock.mockReset();
+    fetchQuickBooksTaxReportMock.mockReset();
+    listQuickBooksTaxChartOfAccountsMock.mockReset();
+    listQuickBooksTaxLedgerMock.mockReset();
+    listQuickBooksTaxPaymentsMock.mockReset();
+    recoverQuickBooksPaymentMock.mockReset();
+    createQuickBooksJournalAdjustmentMock.mockReset();
 
     enqueueAccountingJobMock.mockImplementation(async (args: { jobType: string }) => ({
       taskId: `task-${String(args.jobType).replace(/\./g, '-')}`,
@@ -114,6 +151,60 @@ describe('Accounting e2e', () => {
         status: 'completed'
       })
     );
+
+    fetchQuickBooksTaxOverviewMock.mockResolvedValue({
+      from: '2026-01-01',
+      to: '2026-03-10',
+      basis: 'accrual',
+      cards: {
+        netIncome: 10,
+        totalAssets: 20,
+        totalLiabilities: 30,
+        totalEquity: 40,
+        arOpen: 50,
+        apOpen: 60
+      }
+    });
+    fetchQuickBooksTaxReportMock.mockResolvedValue({
+      reportKey: 'profit-loss',
+      from: '2026-01-01',
+      to: '2026-03-10',
+      basis: 'accrual',
+      generatedAt: new Date().toISOString(),
+      rows: [],
+      raw: {}
+    });
+    listQuickBooksTaxChartOfAccountsMock.mockResolvedValue([]);
+    listQuickBooksTaxLedgerMock.mockResolvedValue({
+      from: '2026-01-01',
+      to: '2026-03-10',
+      basis: 'accrual',
+      accountId: null,
+      total: 0,
+      nextCursor: null,
+      entries: []
+    });
+    listQuickBooksTaxPaymentsMock.mockResolvedValue({
+      from: '2026-01-01',
+      to: '2026-03-10',
+      type: 'all',
+      nextCursor: null,
+      payments: []
+    });
+    recoverQuickBooksPaymentMock.mockResolvedValue({
+      created: true,
+      clientRequestId: 'req-1',
+      paymentId: '11',
+      txnType: 'Payment',
+      txnDate: '2026-03-10',
+      amount: 99
+    });
+    createQuickBooksJournalAdjustmentMock.mockResolvedValue({
+      created: true,
+      clientRequestId: 'jrnl-1',
+      journalEntryId: '22',
+      txnDate: '2026-03-10'
+    });
   });
 
   afterAll(async () => {
@@ -414,6 +505,61 @@ describe('Accounting e2e', () => {
       await request(app)
         .post('/api/integrations/quickbooks/sync/refresh-reference-data')
         .set('Authorization', `Bearer ${accessToken}`)
+        .expect(403);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'handles quickbooks tax endpoints with read/write RBAC',
+    async () => {
+      const { accessToken, email } = await registerAndCreateCompany(app, 'QuickbooksTaxSuite');
+      const { companyId, roleId } = await extractCompanyContext(email);
+
+      await request(app)
+        .get('/api/integrations/quickbooks/tax/overview')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      await request(app)
+        .get('/api/integrations/quickbooks/tax/reports/profit-loss')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      await request(app)
+        .post('/api/integrations/quickbooks/tax/recover-payment')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          clientRequestId: 'req-abc-123',
+          paymentType: 'customer',
+          txnDate: '2026-03-10',
+          amount: 45,
+          bankAccountId: '35',
+          customerId: '42'
+        })
+        .expect(200);
+
+      const role = await RoleModel.findOne({ _id: roleId, companyId });
+      if (!role) {
+        throw new Error('Role not found');
+      }
+
+      const nextPermissions = role.permissions as any;
+      nextPermissions.quickbooks.actions = ['connect', 'sync'];
+      role.permissions = nextPermissions;
+      await role.save();
+
+      await request(app)
+        .post('/api/integrations/quickbooks/tax/recover-payment')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          clientRequestId: 'req-abc-456',
+          paymentType: 'customer',
+          txnDate: '2026-03-10',
+          amount: 45,
+          bankAccountId: '35',
+          customerId: '42'
+        })
         .expect(403);
     },
     TEST_TIMEOUT_MS

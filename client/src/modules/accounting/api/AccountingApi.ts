@@ -4,7 +4,20 @@ import {
   AccountingJobType,
   BankStatementStatus,
   CreateBankStatementInput,
+  QuickBooksJournalAdjustmentInput,
+  QuickBooksJournalAdjustmentResult,
+  QuickBooksRecoverPaymentInput,
+  QuickBooksRecoverPaymentResult,
   ListBankStatementsQuery,
+  QuickBooksTaxChartAccount,
+  QuickBooksTaxLedgerResponse,
+  QuickBooksTaxLedgerQuery,
+  QuickBooksTaxOverview,
+  QuickBooksTaxPaymentsQuery,
+  QuickBooksTaxPaymentsResponse,
+  QuickBooksTaxReport,
+  QuickBooksTaxReportKey,
+  QuickBooksTaxWindowQuery,
   QuickBooksSettings,
   RequestStatementUploadUrlInput
 } from '@retailsync/shared';
@@ -156,6 +169,51 @@ export class AccountingApi {
 
   postApprovedToQuickbooks() {
     return api.post('/integrations/quickbooks/sync/post-approved');
+  }
+
+  getQuickbooksTaxOverview(params?: QuickBooksTaxWindowQuery) {
+    return api.get<{
+      data: QuickBooksTaxOverview;
+    }>('/integrations/quickbooks/tax/overview', { params });
+  }
+
+  getQuickbooksTaxReport(
+    reportKey: QuickBooksTaxReportKey,
+    params?: QuickBooksTaxWindowQuery
+  ) {
+    return api.get<{
+      data: QuickBooksTaxReport;
+    }>(`/integrations/quickbooks/tax/reports/${reportKey}`, { params });
+  }
+
+  getQuickbooksTaxChartOfAccounts() {
+    return api.get<{
+      data: QuickBooksTaxChartAccount[];
+    }>('/integrations/quickbooks/tax/chart-of-accounts');
+  }
+
+  getQuickbooksTaxLedger(params?: QuickBooksTaxLedgerQuery) {
+    return api.get<{
+      data: QuickBooksTaxLedgerResponse;
+    }>('/integrations/quickbooks/tax/ledger', { params });
+  }
+
+  getQuickbooksTaxPayments(params?: QuickBooksTaxPaymentsQuery) {
+    return api.get<{
+      data: QuickBooksTaxPaymentsResponse;
+    }>('/integrations/quickbooks/tax/payments', { params });
+  }
+
+  recoverQuickbooksPayment(payload: QuickBooksRecoverPaymentInput) {
+    return api.post<{
+      data: QuickBooksRecoverPaymentResult;
+    }>('/integrations/quickbooks/tax/recover-payment', payload);
+  }
+
+  createQuickbooksJournalAdjustment(payload: QuickBooksJournalAdjustmentInput) {
+    return api.post<{
+      data: QuickBooksJournalAdjustmentResult;
+    }>('/integrations/quickbooks/tax/journal-adjustment', payload);
   }
 
   getObservabilitySummary() {

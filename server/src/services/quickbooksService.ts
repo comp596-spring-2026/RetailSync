@@ -54,6 +54,8 @@ export type QuickBooksEntityRecord = {
   raw: Record<string, unknown>;
 };
 
+export type QuickBooksReadQueryResult = Record<string, unknown>;
+
 export type QuickBooksJournalLineInput = {
   accountId: string;
   amount: number;
@@ -211,6 +213,13 @@ const parseFaultMessage = (payload: Record<string, unknown> | null) => {
   const message = first?.Detail || first?.Message;
   return message ? String(message) : null;
 };
+
+const QUICKBOOKS_RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+const sleep = async (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 export const buildQuickBooksAuthorizationUrl = (state: string) => {
   const { clientId, redirectUri } = ensureQuickBooksConfig();
@@ -395,7 +404,7 @@ export const fetchQuickBooksCompanyName = async ({
   }
 };
 
-const requestQuickBooksApi = async ({
+export const requestQuickBooksApi = async ({
   companyId,
   method,
   path,
@@ -413,25 +422,92 @@ const requestQuickBooksApi = async ({
     throw new Error('quickbooks_not_connected');
   }
 
-  let attempt = await performQuickBooksRequest({ secret, method, path, query, body });
-  if (attempt.response.status === 401) {
-    secret = await refreshQuickBooksSecretForCompany(companyId);
-    attempt = await performQuickBooksRequest({ secret, method, path, query, body });
-  }
+  const maxAttempts = 3;
+  for (let attemptNo = 0; attemptNo < maxAttempts; attemptNo += 1) {
+    let attempt: Awaited<ReturnType<typeof performQuickBooksRequest>>;
+    const attemptStartedAt = Date.now();
+    try {
+      attempt = await performQuickBooksRequest({ secret, method, path, query, body });
+      if (attempt.response.status === 401) {
+        secret = await refreshQuickBooksSecretForCompany(companyId);
+        attempt = await performQuickBooksRequest({ secret, method, path, query, body });
+      }
+      // eslint-disable-next-line no-console
+      console.info('[quickbooks.api.request]', {
+        companyId,
+        method,
+        path,
+        attempt: attemptNo + 1,
+        status: attempt.response.status,
+        latencyMs: Date.now() - attemptStartedAt
+      });
+    } catch (error) {
+      if (attemptNo < maxAttempts - 1) {
+        await sleep(250 * 2 ** attemptNo);
+        continue;
+      }
+      // eslint-disable-next-line no-console
+      console.error('[quickbooks.api.request.error]', {
+        companyId,
+        method,
+        path,
+        attempt: attemptNo + 1,
+        latencyMs: Date.now() - attemptStartedAt
+      });
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`quickbooks_api_failed:network:${message}`);
+    }
 
-  if (!attempt.response.ok) {
+    if (!attempt.response.ok) {
+      if (
+        QUICKBOOKS_RETRYABLE_STATUS.has(attempt.response.status) &&
+        attemptNo < maxAttempts - 1
+      ) {
+        await sleep(250 * 2 ** attemptNo);
+        continue;
+      }
+      const fault = parseFaultMessage(attempt.parsed);
+      throw new Error(
+        `quickbooks_api_failed:${attempt.response.status}:${fault ?? (attempt.raw || 'unknown')}`
+      );
+    }
+
     const fault = parseFaultMessage(attempt.parsed);
-    throw new Error(
-      `quickbooks_api_failed:${attempt.response.status}:${fault ?? (attempt.raw || 'unknown')}`
-    );
+    if (fault) {
+      throw new Error(`quickbooks_api_fault:${fault}`);
+    }
+
+    return attempt.parsed ?? {};
   }
 
-  const fault = parseFaultMessage(attempt.parsed);
-  if (fault) {
-    throw new Error(`quickbooks_api_fault:${fault}`);
+  throw new Error('quickbooks_api_failed:retry_exhausted');
+};
+
+export const runQuickBooksReadQuery = async (
+  companyId: string,
+  query: string
+): Promise<QuickBooksReadQueryResult> => {
+  const secret = await ensureFreshQuickBooksSecret(companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
   }
 
-  return attempt.parsed ?? {};
+  const normalizedQuery = query.trim().replace(/\s+/g, ' ');
+  if (!/^select\s+/i.test(normalizedQuery)) {
+    throw new Error('quickbooks_query_must_be_select');
+  }
+
+  const payload = (await requestQuickBooksApi({
+    companyId,
+    method: 'GET',
+    path: `/v3/company/${secret.realmId}/query`,
+    query: {
+      query: normalizedQuery,
+      minorversion: 75
+    }
+  })) as Record<string, unknown>;
+
+  return payload;
 };
 
 export const listQuickBooksAccounts = async (companyId: string) => {

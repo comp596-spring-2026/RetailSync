@@ -45,7 +45,7 @@ export const memberPermissions = (): PermissionsMap => ({
   rolesSettings: makePermission('rolesSettings', { view: false }),
   accounting: makePermission('accounting', { view: true }),
   ledger: makePermission('ledger', { view: true, create: true, edit: true, actions: ['post', 'adjust'] }),
-  quickbooks: makePermission('quickbooks', { view: true, actions: ['connect', 'sync'] })
+  quickbooks: makePermission('quickbooks', { view: true, actions: ['connect', 'sync', 'post'] })
 });
 
 export const viewerPermissions = (): PermissionsMap => {

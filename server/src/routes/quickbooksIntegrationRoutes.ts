@@ -4,12 +4,22 @@ import {
   getQuickBooksConnectUrl,
   getQuickBooksOAuthStatus,
   getQuickBooksSettings,
+  quickBooksReadQuery,
   queueQuickBooksPostApproved,
   queueQuickBooksRefreshReferenceData,
   quickBooksCallback,
   startQuickBooksConnect,
   updateQuickBooksSettings
 } from '../controllers/quickbooksController';
+import {
+  getQuickBooksTaxChartOfAccounts,
+  getQuickBooksTaxLedger,
+  getQuickBooksTaxOverview,
+  getQuickBooksTaxPayments,
+  getQuickBooksTaxReport,
+  postQuickBooksJournalAdjustment,
+  postQuickBooksRecoverPayment
+} from '../controllers/quickbooksTaxController';
 import { requireAuth } from '../middleware/requireAuth';
 import { requirePermission } from '../middleware/requirePermission';
 
@@ -56,6 +66,54 @@ router.post(
   requireAuth,
   requirePermission('quickbooks', 'sync'),
   queueQuickBooksPostApproved
+);
+router.post(
+  '/query',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  quickBooksReadQuery
+);
+router.get(
+  '/tax/overview',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksTaxOverview
+);
+router.get(
+  '/tax/reports/:reportKey',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksTaxReport
+);
+router.get(
+  '/tax/chart-of-accounts',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksTaxChartOfAccounts
+);
+router.get(
+  '/tax/ledger',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksTaxLedger
+);
+router.get(
+  '/tax/payments',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksTaxPayments
+);
+router.post(
+  '/tax/recover-payment',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  postQuickBooksRecoverPayment
+);
+router.post(
+  '/tax/journal-adjustment',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  postQuickBooksJournalAdjustment
 );
 
 router.post(

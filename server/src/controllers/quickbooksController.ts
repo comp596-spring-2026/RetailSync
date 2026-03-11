@@ -23,12 +23,15 @@ import {
   exchangeQuickBooksAuthorizationCode,
   fetchQuickBooksCompanyName,
   loadQuickBooksSecret,
+  runQuickBooksReadQuery,
   saveQuickBooksSecret,
   toQuickBooksSecretPayload
 } from '../services/quickbooksService';
 
 const quickbooksOauthStateCookie = 'quickbooksOAuthState';
 const defaultReturnTo = '/dashboard/accounting/quickbooks';
+const quickbooksOauthStateTtlMs = 30 * 60 * 1000;
+const quickbooksOauthStateTtlJwt = '30m';
 
 const oauthStateCookieBaseOptions = () => ({
   httpOnly: true,
@@ -39,7 +42,7 @@ const oauthStateCookieBaseOptions = () => ({
 const setQuickBooksOAuthStateCookie = (res: Response, nonce: string) => {
   res.cookie(quickbooksOauthStateCookie, nonce, {
     ...oauthStateCookieBaseOptions(),
-    maxAge: 10 * 60 * 1000
+    maxAge: quickbooksOauthStateTtlMs
   });
 };
 
@@ -49,6 +52,10 @@ const clearQuickBooksOAuthStateCookie = (res: Response) => {
 
 const updateQuickbooksSettingsSchema = z.object({
   environment: z.enum(['sandbox', 'production'])
+});
+
+const quickBooksReadQuerySchema = z.object({
+  query: z.string().trim().min(1).max(2000)
 });
 
 type QuickBooksSettingsState = {
@@ -232,7 +239,7 @@ const buildQuickBooksConnectUrl = async (
   };
   const signedState = jwt.sign(statePayload, env.accessSecret, {
     algorithm: 'HS256',
-    expiresIn: '10m'
+    expiresIn: quickbooksOauthStateTtlJwt
   });
   const url = buildQuickBooksAuthorizationUrl(signedState);
 
@@ -541,4 +548,29 @@ export const disconnectQuickBooks = async (req: Request, res: Response) => {
   await settings.save();
 
   return ok(res, toQuickBooksSettings(settings));
+};
+
+export const quickBooksReadQuery = async (req: Request, res: Response) => {
+  if (!req.companyId) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  const parsed = quickBooksReadQuerySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  try {
+    const payload = await runQuickBooksReadQuery(req.companyId, parsed.data.query);
+    return ok(res, { query: parsed.data.query, payload });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks query failed';
+    const status =
+      message === 'quickbooks_not_connected'
+        ? 409
+        : message === 'quickbooks_query_must_be_select'
+          ? 422
+          : 500;
+    return fail(res, message, status);
+  }
 };

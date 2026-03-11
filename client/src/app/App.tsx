@@ -37,7 +37,8 @@ import {
   ObservabilityPage,
   QuickBooksSyncPage,
   StatementDetailPage,
-  StatementsPage
+  StatementsPage,
+  TaxDashboardPage
 } from "../modules/accounting/pages";
 
 const App = () => {
@@ -98,6 +99,7 @@ const App = () => {
             <Route path="statements/:statementId" element={<StatementDetailPage />} />
             <Route path="ledger" element={<LedgerPage />} />
             <Route path="quickbooks" element={<QuickBooksSyncPage />} />
+            <Route path="tax" element={<TaxDashboardPage />} />
             <Route path="observability" element={<ObservabilityPage />} />
           </Route>
           <Route path="settings" element={<SettingsPage />} />
