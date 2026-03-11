@@ -60,10 +60,12 @@ const createResponse = (): TestResponse => {
 };
 
 describe('quickbooksTaxController', () => {
-  let getQuickBooksTaxOverview: (req: Request, res: Response) => Promise<void>;
-  let getQuickBooksTaxReport: (req: Request, res: Response) => Promise<void>;
-  let getQuickBooksTaxPayments: (req: Request, res: Response) => Promise<void>;
-  let postQuickBooksRecoverPayment: (req: Request, res: Response) => Promise<void>;
+  type ControllerFn = (req: Request, res: Response) => Promise<Response | undefined>;
+
+  let getQuickBooksTaxOverview: ControllerFn;
+  let getQuickBooksTaxReport: ControllerFn;
+  let getQuickBooksTaxPayments: ControllerFn;
+  let postQuickBooksRecoverPayment: ControllerFn;
 
   beforeAll(async () => {
     setupTestEnv();
