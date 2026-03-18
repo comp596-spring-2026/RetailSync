@@ -32,7 +32,8 @@ const MONTH_NAMES = Object.keys(MONTH_LOOKUP)
   .join('|');
 
 const CONTEXT_KEYWORDS = /\b(statement|period|ending|closing|from|through|summary)\b/i;
-const METADATA_CONTEXT = /\b(modifydate|createdate|metadatadate|creationdate|moddate|xmp:|pdf:producer|creatortool|documentid|instanceid)\b/i;
+const METADATA_CONTEXT =
+  /\b(modifydate|createdate|metadatadate|creationdate|moddate|xmp:|x:xmptk|pdf:producer|creatortool|documentid|instanceid|adobe xmp core|rdf:rdf|rdf:description|quadient|adobe pdf library)\b/i;
 
 export type StatementMonthDetectionConfidence = 'high' | 'medium' | 'low' | 'none';
 export type StatementMonthDetectionSource = 'pdf_text' | 'filename' | 'unknown';
