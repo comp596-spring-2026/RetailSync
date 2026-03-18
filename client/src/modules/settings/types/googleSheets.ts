@@ -58,20 +58,3 @@ export type GoogleSheetsCanonicalSettings = {
   };
   updatedAt?: string | null;
 };
-
-export type IntegrationSettingsCanonical = {
-  id: string;
-  companyId: string;
-  ownerUserId: string;
-  googleSheets: GoogleSheetsCanonicalSettings;
-  quickbooks: {
-    connected: boolean;
-    environment: 'sandbox' | 'production';
-    realmId: string | null;
-    companyName: string | null;
-  };
-  lastImportSource?: 'file' | 'google_sheets' | null;
-  lastImportAt?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
-};

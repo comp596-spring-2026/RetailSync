@@ -101,6 +101,20 @@ Local convenience fallback is also supported for Sheets calls:
 
 In non-production mode, if this file exists, the server uses it automatically for Google Sheets API auth.
 
+For direct browser uploads to the accounting bucket, local development also needs a bucket CORS policy that allows the client origin. Apply it with:
+
+```bash
+pnpm --filter @retailsync/server run storage:cors:accounting -- --apply
+```
+
+By default this applies CORS for `CLIENT_URL` plus local dev origins such as `http://localhost:4630` and `http://localhost:8080`.
+
+If the configured bucket does not exist yet, bootstrap it and apply CORS in one step:
+
+```bash
+pnpm --filter @retailsync/server run storage:cors:accounting -- --apply --ensure-bucket
+```
+
 ## Quality and Validation
 
 ```bash
@@ -147,3 +161,7 @@ make reset-hard
 
 4. OAuth connect returns 401:
 - Use connect-url flow and ensure auth/cookie strategy is configured.
+
+5. Statement upload fails with a browser CORS error:
+- Run `pnpm --filter @retailsync/server run storage:cors:accounting -- --apply` to update the configured bucket CORS policy for local origins.
+- If Google reports that the bucket does not exist, re-run with `--ensure-bucket`.

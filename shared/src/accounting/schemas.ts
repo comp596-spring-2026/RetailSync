@@ -166,6 +166,14 @@ export const requestStatementUploadUrlResponseSchema = z.object({
   expiresAt: z.string().trim()
 });
 
+export const detectStatementMonthResponseSchema = z.object({
+  statementMonth: statementMonthSchema.nullable(),
+  confidence: z.enum(['high', 'medium', 'low', 'none']),
+  source: z.enum(['pdf_text', 'filename', 'unknown']),
+  summary: z.string().trim().min(1),
+  evidence: z.string().trim().nullable()
+});
+
 export const createBankStatementSchema = z.object({
   statementId: z.string().trim().min(1),
   fileName: z.string().trim().min(1),
@@ -598,6 +606,7 @@ export type AccountingJobType = z.infer<typeof accountingJobTypeSchema>;
 export type AccountingTaskPayload = z.infer<typeof accountingTaskPayloadSchema>;
 export type RequestStatementUploadUrlInput = z.infer<typeof requestStatementUploadUrlSchema>;
 export type RequestStatementUploadUrlOutput = z.infer<typeof requestStatementUploadUrlResponseSchema>;
+export type DetectStatementMonthResponse = z.infer<typeof detectStatementMonthResponseSchema>;
 export type CreateBankStatementInput = z.infer<typeof createBankStatementSchema>;
 export type ListBankStatementsQuery = z.infer<typeof listBankStatementsQuerySchema>;
 export type ReprocessBankStatementInput = z.infer<typeof reprocessBankStatementSchema>;

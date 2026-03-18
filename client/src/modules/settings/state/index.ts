@@ -35,3 +35,4 @@ export {
   selectSettingsRoot,
   selectSheetInfoDisplay,
 } from './selectors/googleSheetsSelectors';
+export type * from '../types';

@@ -1,34 +1,18 @@
-import {
-  Alert,
-  Button,
-  Chip,
-  Paper,
-  Stack,
-  ToggleButton,
-  ToggleButtonGroup,
-  Typography
-} from '@mui/material';
 import SyncIcon from '@mui/icons-material/Sync';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import LinkOffIcon from '@mui/icons-material/LinkOff';
-import { QuickBooksSettings } from '@retailsync/shared';
+import Alert from '@mui/material/Alert';
+import Stack from '@mui/material/Stack';
+import type { QuickBooksSettings } from '@retailsync/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { NoAccess, PageHeader } from '../../../components';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import { getAppErrorMessage } from '../../../constants/errorCodes';
-import { NoAccess, PageHeader } from '../../../components';
 import { hasPermission } from '../../../utils/permissions';
 import { extractApiErrorMessage } from '../../../utils/apiError';
-import { formatDate } from '../../../utils/date';
+import { QuickBooksIntegrationCard, type QuickBooksOAuthStatus } from '../../settings/components';
 import { accountingApi } from '../api';
 import { AccountingTabs } from '../components';
-
-type QuickBooksOAuthStatus = {
-  ok: boolean;
-  reason: string | null;
-  expiresInSec: number | null;
-};
 
 export const QuickBooksSyncPage = () => {
   const dispatch = useAppDispatch();
@@ -46,13 +30,16 @@ export const QuickBooksSyncPage = () => {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (!canView) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const [settingsResponse, statusResponse] = await Promise.all([
         accountingApi.getQuickbooksSettings(),
-        accountingApi.getQuickbooksOAuthStatus()
+        accountingApi.getQuickbooksOAuthStatus(),
       ]);
       setSettings(settingsResponse.data.data);
       setOauthStatus(statusResponse.data.data);
@@ -75,8 +62,8 @@ export const QuickBooksSyncPage = () => {
       dispatch(
         showSnackbar({
           message: 'QuickBooks connected successfully.',
-          severity: 'success'
-        })
+          severity: 'success',
+        }),
       );
       void load().finally(() => {
         navigate('/dashboard/accounting/quickbooks', { replace: true });
@@ -87,8 +74,8 @@ export const QuickBooksSyncPage = () => {
       dispatch(
         showSnackbar({
           message: getAppErrorMessage(reason, 'QuickBooks connection failed.'),
-          severity: 'error'
-        })
+          severity: 'error',
+        }),
       );
       void load().finally(() => {
         navigate('/dashboard/accounting/quickbooks', { replace: true });
@@ -100,7 +87,7 @@ export const QuickBooksSyncPage = () => {
     try {
       setBusy(true);
       const response = await accountingApi.getQuickbooksConnectUrl(
-        '/dashboard/accounting/quickbooks'
+        '/dashboard/accounting/quickbooks',
       );
       const url = response.data.data.url;
       if (typeof window !== 'undefined') {
@@ -108,24 +95,6 @@ export const QuickBooksSyncPage = () => {
       }
     } catch (apiError) {
       setError(extractApiErrorMessage(apiError, 'Failed to start QuickBooks connection'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onEnvironmentChange = async (environment: 'sandbox' | 'production') => {
-    try {
-      setBusy(true);
-      await accountingApi.updateQuickbooksSettings({ environment });
-      await load();
-      dispatch(
-        showSnackbar({
-          message: 'QuickBooks environment updated.',
-          severity: 'success'
-        })
-      );
-    } catch (apiError) {
-      setError(extractApiErrorMessage(apiError, 'Failed to update QuickBooks environment'));
     } finally {
       setBusy(false);
     }
@@ -139,8 +108,8 @@ export const QuickBooksSyncPage = () => {
       dispatch(
         showSnackbar({
           message: 'QuickBooks disconnected.',
-          severity: 'success'
-        })
+          severity: 'success',
+        }),
       );
     } catch (apiError) {
       setError(extractApiErrorMessage(apiError, 'Failed to disconnect QuickBooks'));
@@ -160,8 +129,8 @@ export const QuickBooksSyncPage = () => {
             queue.mode === 'inline'
               ? 'QuickBooks reference data refreshed.'
               : 'QuickBooks reference refresh queued.',
-          severity: 'success'
-        })
+          severity: 'success',
+        }),
       );
       await load();
     } catch (apiError) {
@@ -182,8 +151,8 @@ export const QuickBooksSyncPage = () => {
             queue.mode === 'inline'
               ? 'Approved ledger entries posted to QuickBooks.'
               : 'Post-approved sync queued.',
-          severity: 'success'
-        })
+          severity: 'success',
+        }),
       );
       await load();
     } catch (apiError) {
@@ -206,122 +175,22 @@ export const QuickBooksSyncPage = () => {
       />
       <AccountingTabs />
       {error && <Alert severity="error">{error}</Alert>}
-      {loading ? (
-        <Paper sx={{ p: 3 }}>
-          <Typography color="text.secondary">Loading QuickBooks settings...</Typography>
-        </Paper>
-      ) : (
-        <Paper sx={{ p: 3, borderRadius: 2 }}>
-          <Stack spacing={2}>
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              justifyContent="space-between"
-              alignItems={{ sm: 'center' }}
-              spacing={1}
-            >
-              <Typography variant="h6">Connection</Typography>
-              <Chip
-                size="small"
-                color={settings?.connected ? 'success' : 'default'}
-                label={settings?.connected ? 'Connected' : 'Not connected'}
-                icon={settings?.connected ? <CheckCircleIcon /> : undefined}
-                variant={settings?.connected ? 'filled' : 'outlined'}
-              />
-            </Stack>
-
-            <Stack spacing={0.5}>
-              <Typography variant="body2" color="text.secondary">
-                Environment
-              </Typography>
-              <ToggleButtonGroup
-                exclusive
-                size="small"
-                value={settings?.environment ?? 'sandbox'}
-                onChange={(_event, value: 'sandbox' | 'production' | null) => {
-                  if (!value || busy || !canConnect) return;
-                  void onEnvironmentChange(value);
-                }}
-              >
-                <ToggleButton value="sandbox">Sandbox</ToggleButton>
-                <ToggleButton value="production">Production</ToggleButton>
-              </ToggleButtonGroup>
-            </Stack>
-
-            <Stack spacing={0.5}>
-              <Typography variant="body2" color="text.secondary">
-                Realm ID: {settings?.realmId ?? 'Not set'}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Company: {settings?.companyName ?? 'Not set'}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Token status:{' '}
-                {oauthStatus?.ok
-                  ? `Valid${oauthStatus.expiresInSec != null ? ` (${oauthStatus.expiresInSec}s remaining)` : ''}`
-                  : getAppErrorMessage(oauthStatus?.reason ?? undefined, 'Unknown')}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Refresh status: {settings?.lastPullStatus ?? 'idle'}
-                {settings?.lastPullAt
-                  ? ` (${formatDate(settings.lastPullAt, 'short')})`
-                  : ''}
-                {typeof settings?.lastPullCount === 'number'
-                  ? ` • count ${settings.lastPullCount}`
-                  : ''}
-                {settings?.lastPullError ? ` - ${settings.lastPullError}` : ''}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Post status: {settings?.lastPushStatus ?? 'idle'}
-                {settings?.lastPushAt
-                  ? ` (${formatDate(settings.lastPushAt, 'short')})`
-                  : ''}
-                {typeof settings?.lastPushCount === 'number'
-                  ? ` • posted ${settings.lastPushCount}`
-                  : ''}
-                {settings?.lastPushError ? ` - ${settings.lastPushError}` : ''}
-              </Typography>
-            </Stack>
-
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <Button
-                variant="outlined"
-                disabled={!canConnect || busy}
-                onClick={() => void onConnect()}
-              >
-                {settings?.connected ? 'Reconnect QuickBooks' : 'Connect QuickBooks'}
-              </Button>
-              <Button
-                color="error"
-                startIcon={<LinkOffIcon />}
-                disabled={!canConnect || busy || !settings?.connected}
-                onClick={() => void onDisconnect()}
-              >
-                Disconnect
-              </Button>
-              <Button
-                variant="outlined"
-                disabled={!canSync || !settings?.connected || busy}
-                onClick={() => void onRefreshReferences()}
-              >
-                Refresh Reference Data
-              </Button>
-              <Button
-                variant="contained"
-                disabled={!canSync || !settings?.connected || busy}
-                onClick={() => void onPostApproved()}
-              >
-                Post Approved
-              </Button>
-              <Button disabled={busy} onClick={() => void load()}>
-                Refresh Status
-              </Button>
-            </Stack>
-            <Typography color="text.secondary" variant="body2">
-              Always refresh reference data before posting newly approved entries.
-            </Typography>
-          </Stack>
-        </Paper>
-      )}
+      <QuickBooksIntegrationCard
+        settings={settings}
+        oauthStatus={oauthStatus}
+        canManageConnection={canConnect}
+        canSync={canSync}
+        canRefreshStatus={canView}
+        canViewHealth={canView}
+        busy={busy}
+        loading={loading}
+        onConnect={onConnect}
+        onDisconnect={onDisconnect}
+        onRefreshReferences={onRefreshReferences}
+        onPostApproved={onPostApproved}
+        onRefreshStatus={load}
+        initialExpanded
+      />
     </Stack>
   );
 };

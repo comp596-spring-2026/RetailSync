@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
   createStatement,
+  detectStatementMonth,
   getStatementById,
   getStatementChecks,
   getStatementStatus,
@@ -18,8 +20,15 @@ import { requireAuth } from '../middleware/requireAuth';
 import { requirePermission } from '../middleware/requirePermission';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(requireAuth);
+router.post(
+  '/statements/detect-month',
+  requirePermission('bankStatements', 'create'),
+  upload.single('file'),
+  detectStatementMonth
+);
 router.get('/statements', requirePermission('bankStatements', 'view'), listStatements);
 router.get('/statements/:id', requirePermission('bankStatements', 'view'), getStatementById);
 router.get('/statements/:id/status', requirePermission('bankStatements', 'view'), getStatementStatus);

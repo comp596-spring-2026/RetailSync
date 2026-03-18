@@ -3,17 +3,18 @@ import {
   bankStatementListItemSchema,
   bankStatementStatusResponseSchema,
   createBankStatementSchema,
+  detectStatementMonthResponseSchema,
   listBankStatementsQuerySchema,
   listChecksQuerySchema,
   reprocessBankStatementSchema,
   requestStatementUploadUrlResponseSchema,
   requestStatementUploadUrlSchema
 } from '@retailsync/shared';
-import { Storage } from '@google-cloud/storage';
 import { createHash } from 'node:crypto';
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { env } from '../config/env';
+import { getStorageClient } from '../integrations/google/storage.client';
 import { enqueueAccountingJob } from '../jobs/accountingQueue';
 import { BankStatement } from '../models/BankStatement';
 import { StatementCheckModel } from '../models/StatementCheck';
@@ -21,9 +22,10 @@ import {
   buildStatementPdfPath,
   buildStatementRootPrefix
 } from '../services/accountingStorageService';
+import { detectStatementMonthFromPdf } from '../services/accountingPdfAnalysisService';
 import { fail, ok } from '../utils/apiResponse';
 
-const storage = new Storage();
+const storage = getStorageClient();
 
 const sanitizeFileName = (name: string) => name.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 
@@ -164,6 +166,32 @@ export const getUploadUrl = async (req: Request, res: Response) => {
     // eslint-disable-next-line no-console
     console.error('[accounting.upload-url] failed', error);
     return fail(res, 'Failed to generate upload URL', 500);
+  }
+};
+
+export const detectStatementMonth = async (req: Request, res: Response) => {
+  if (!req.file) return fail(res, 'PDF file is required', 400);
+
+  const mime = req.file.mimetype?.toLowerCase() ?? '';
+  const originalName = req.file.originalname?.toLowerCase() ?? '';
+  const looksLikePdf = mime === 'application/pdf' || originalName.endsWith('.pdf');
+
+  if (!looksLikePdf) {
+    return fail(res, 'PDF file is required', 400);
+  }
+
+  try {
+    const payload = detectStatementMonthResponseSchema.parse(
+      detectStatementMonthFromPdf({
+        pdfBuffer: req.file.buffer,
+        fileName: req.file.originalname,
+      }),
+    );
+    return ok(res, payload);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.detect-statement-month] failed', error);
+    return fail(res, 'Failed to inspect statement PDF', 500);
   }
 };
 
