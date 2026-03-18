@@ -8,7 +8,9 @@ export {
   IconLoader,
   LogoBig,
   LogoHorizontal,
-  LogoStacked
+  LogoStacked,
+  QUICKBOOKS_BRAND,
+  QuickBooksLogo
 } from './brand';
 export {
   ConfirmDeleteDialog,

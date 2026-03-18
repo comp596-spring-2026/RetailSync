@@ -5,3 +5,4 @@ export { IconLoader } from './IconLoader';
 export { LogoBig } from './LogoBig';
 export { LogoHorizontal } from './LogoHorizontal';
 export { LogoStacked } from './LogoStacked';
+export { QUICKBOOKS_BRAND, QuickBooksLogo } from './QuickBooksLogo';

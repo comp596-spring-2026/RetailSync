@@ -43,7 +43,11 @@ const statementCheckSchema = new Schema(
     },
     errors: { type: [String], default: [] }
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    // Keep the persisted/API field name `errors` without emitting startup warnings.
+    suppressReservedKeysWarning: true
+  }
 );
 
 statementCheckSchema.index({ companyId: 1, statementId: 1, createdAt: -1 });

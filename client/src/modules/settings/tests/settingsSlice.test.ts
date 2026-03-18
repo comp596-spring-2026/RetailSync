@@ -44,7 +44,16 @@ describe('settingsSlice', () => {
             connected: false,
             environment: 'sandbox',
             realmId: null,
-            companyName: null
+            companyName: null,
+            lastPullStatus: 'idle',
+            lastPullAt: null,
+            lastPullCount: 0,
+            lastPullError: null,
+            lastPushStatus: 'idle',
+            lastPushAt: null,
+            lastPushCount: 0,
+            lastPushError: null,
+            updatedAt: null
           },
           lastImportSource: null,
           lastImportAt: null

@@ -2,8 +2,10 @@ import {
   AccountingObservabilityDebug,
   AccountingObservabilitySummary,
   AccountingJobType,
+  BankStatementListItem,
   BankStatementStatus,
   CreateBankStatementInput,
+  DetectStatementMonthResponse,
   QuickBooksJournalAdjustmentInput,
   QuickBooksJournalAdjustmentResult,
   QuickBooksRecoverPaymentInput,
@@ -54,7 +56,21 @@ export class AccountingApi {
   }
 
   getStatementStatus(id: string) {
-    return api.get('/accounting/statements/' + id + '/status');
+    return api.get<{
+      data: {
+        statementId: string;
+        status: BankStatementStatus;
+        progress: {
+          totalChecks: number;
+          checksQueued: number;
+          checksProcessing: number;
+          checksReady: number;
+          checksFailed: number;
+        };
+        updatedAt: string;
+        issues: string[];
+      };
+    }>('/accounting/statements/' + id + '/status');
   }
 
   listStatementChecks(id: string, status?: string) {
@@ -75,8 +91,24 @@ export class AccountingApi {
     }>('/accounting/statements/upload-url', payload);
   }
 
+  detectStatementMonth(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post<{
+      data: DetectStatementMonthResponse;
+    }>('/accounting/statements/detect-month', formData);
+  }
+
   createStatement(payload: CreateBankStatementInput) {
-    return api.post('/accounting/statements', payload);
+    return api.post<{
+      data: {
+        statement: BankStatementListItem;
+        queue: {
+          taskId?: string;
+          queueName?: string;
+        } | null;
+      };
+    }>('/accounting/statements', payload);
   }
 
   reprocessStatement(id: string, fromJobType: AccountingJobType = 'statement.extract') {

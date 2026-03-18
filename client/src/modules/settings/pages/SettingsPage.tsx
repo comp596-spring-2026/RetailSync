@@ -5,9 +5,6 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
-  Chip,
   Collapse,
   Dialog,
   DialogActions,
@@ -18,15 +15,11 @@ import {
   ListItemIcon,
   ListItemText,
   Stack,
-  ToggleButton,
-  ToggleButtonGroup,
   Typography,
 } from "@mui/material";
 import SettingsSuggestIcon from "@mui/icons-material/SettingsSuggest";
-import SyncAltIcon from "@mui/icons-material/SyncAlt";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ErrorIcon from "@mui/icons-material/Error";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import AutorenewIcon from "@mui/icons-material/Autorenew";
@@ -39,10 +32,15 @@ import {
   type GoogleSheetsSyncOverview,
 } from "../components/googleSheets/GoogleSheetsIntegrationCard";
 import {
+  QuickBooksIntegrationCard,
+  type QuickBooksOAuthStatus,
+} from "../components";
+import {
   getDebugOutcome,
 } from "../components/googleSheets/debugOutcomeGuide";
 import { settingsApi, type GoogleSheetMode } from '../api';
 import { posApi } from '../../pos/api';
+import { accountingApi } from "../../accounting/api";
 import { useAppDispatch, useAppSelector } from "../../../app/store/hooks";
 import { showSnackbar } from "../../../app/store/uiSlice";
 import { hasPermission } from "../../../utils/permissions";
@@ -94,6 +92,8 @@ export const SettingsPage = () => {
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, "rolesSettings", "view");
   const canEdit = hasPermission(permissions, "rolesSettings", "edit");
+  const canViewQuickbooks = hasPermission(permissions, "quickbooks", "view");
+  const canSyncQuickbooks = hasPermission(permissions, "quickbooks", "actions:sync");
 
   const settings = useAppSelector(selectSettings);
   const loading = useAppSelector(selectSettingsLoading);
@@ -114,6 +114,7 @@ export const SettingsPage = () => {
   const [debugRunning, setDebugRunning] = useState(false);
   const [googleSheetsSyncOverview, setGoogleSheetsSyncOverview] = useState<GoogleSheetsSyncOverview | null>(null);
   const [googleSheetsSyncProgress, setGoogleSheetsSyncProgress] = useState<{ percent: number; stage: string } | null>(null);
+  const [quickbooksOauthStatus, setQuickbooksOauthStatus] = useState<QuickBooksOAuthStatus | null>(null);
 
   const loadGoogleSheetsSyncOverview = useCallback(async () => {
     try {
@@ -123,6 +124,28 @@ export const SettingsPage = () => {
       setGoogleSheetsSyncOverview(null);
     }
   }, []);
+
+  const loadQuickbooksOAuthStatus = useCallback(async () => {
+    if (!canViewQuickbooks) {
+      setQuickbooksOauthStatus(null);
+      return;
+    }
+    try {
+      const response = await accountingApi.getQuickbooksOAuthStatus();
+      setQuickbooksOauthStatus(response.data.data);
+    } catch {
+      setQuickbooksOauthStatus(null);
+    }
+  }, [canViewQuickbooks]);
+
+  const reloadQuickbooksSurface = useCallback(async () => {
+    const nextSettings = await dispatch(fetchSettings()).unwrap();
+    if (nextSettings.quickbooks.connected && canViewQuickbooks) {
+      await loadQuickbooksOAuthStatus();
+      return;
+    }
+    setQuickbooksOauthStatus(null);
+  }, [dispatch, canViewQuickbooks, loadQuickbooksOAuthStatus]);
 
   useEffect(() => {
     void dispatch(fetchSettings());
@@ -268,12 +291,26 @@ export const SettingsPage = () => {
     void loadGoogleSheetsSyncOverview();
   }, [settings, loadGoogleSheetsSyncOverview]);
 
+  useEffect(() => {
+    if (!settings?.quickbooks.connected || !canViewQuickbooks) {
+      setQuickbooksOauthStatus(null);
+      return;
+    }
+    void loadQuickbooksOAuthStatus();
+  }, [
+    settings?.quickbooks.connected,
+    settings?.quickbooks.updatedAt,
+    canViewQuickbooks,
+    loadQuickbooksOAuthStatus,
+  ]);
+
   if (!canView) {
     return <NoAccess />;
   }
   const defaultSharedProfile =
     settings?.googleSheets.sharedSheets?.find((sheet) => sheet.isDefault) ??
     settings?.googleSheets.sharedSheets?.[0];
+  const quickbooks = settings?.quickbooks ?? null;
 
   const onModeChange = async (mode: GoogleSheetMode) => {
     if (!canEdit) return;
@@ -562,30 +599,6 @@ export const SettingsPage = () => {
     }
   };
 
-  const onQuickbooksEnvironment = async (value: "sandbox" | "production") => {
-    if (!canEdit) return;
-    try {
-      setIsBusyLocal(true);
-      await settingsApi.setQuickbooks({ environment: value });
-      dispatch(
-        showSnackbar({
-          message: "QuickBooks environment updated",
-          severity: "success",
-        }),
-      );
-      await dispatch(fetchSettings());
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "QuickBooks update failed"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
-    }
-  };
-
   const onDisconnectQuickbooks = async () => {
     if (!canEdit) return;
     try {
@@ -597,11 +610,89 @@ export const SettingsPage = () => {
           severity: "success",
         }),
       );
-      await dispatch(fetchSettings());
+      await reloadQuickbooksSurface();
     } catch (err) {
       dispatch(
         showSnackbar({
           message: getErrorMessage(err, "Failed to disconnect QuickBooks"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusyLocal(false);
+    }
+  };
+
+  const onRefreshQuickbooksReferences = async () => {
+    if (!canSyncQuickbooks) return;
+    try {
+      setIsBusyLocal(true);
+      const response = await accountingApi.refreshQuickbooksReferenceData();
+      const queueMode = (response.data as { data?: { queue?: { mode?: string } } })?.data?.queue?.mode;
+      dispatch(
+        showSnackbar({
+          message:
+            queueMode === "inline"
+              ? "QuickBooks reference data refreshed."
+              : "QuickBooks reference refresh queued.",
+          severity: "success",
+        }),
+      );
+      await reloadQuickbooksSurface();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "Failed to refresh QuickBooks references"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusyLocal(false);
+    }
+  };
+
+  const onPostApprovedQuickbooks = async () => {
+    if (!canSyncQuickbooks) return;
+    try {
+      setIsBusyLocal(true);
+      const response = await accountingApi.postApprovedToQuickbooks();
+      const queueMode = (response.data as { data?: { queue?: { mode?: string } } })?.data?.queue?.mode;
+      dispatch(
+        showSnackbar({
+          message:
+            queueMode === "inline"
+              ? "Approved ledger entries posted to QuickBooks."
+              : "Post-approved sync queued.",
+          severity: "success",
+        }),
+      );
+      await reloadQuickbooksSurface();
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "Failed to queue post-approved sync"),
+          severity: "error",
+        }),
+      );
+    } finally {
+      setIsBusyLocal(false);
+    }
+  };
+
+  const onRefreshQuickbooksStatus = async () => {
+    try {
+      setIsBusyLocal(true);
+      await reloadQuickbooksSurface();
+      dispatch(
+        showSnackbar({
+          message: "QuickBooks status refreshed.",
+          severity: "success",
+        }),
+      );
+    } catch (err) {
+      dispatch(
+        showSnackbar({
+          message: getErrorMessage(err, "Failed to refresh QuickBooks status"),
           severity: "error",
         }),
       );
@@ -818,86 +909,29 @@ export const SettingsPage = () => {
                 initialExpandConfigureSection={expandGoogleConfigureSection}
                 onConsumedExpandConfigure={() => setExpandGoogleConfigureSection(false)}
               />
-              <Card>
-                <CardContent>
-                  <Stack spacing={2}>
-                    <Stack
-                      direction="row"
-                      justifyContent="space-between"
-                      alignItems="center"
-                    >
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <AccountBalanceWalletIcon
-                          color="primary"
-                          fontSize="small"
-                        />
-                        <Typography variant="h6">QuickBooks</Typography>
-                      </Stack>
-                      <Chip
-                        size="small"
-                        label={
-                          settings.quickbooks.connected
-                            ? "Connected"
-                            : "Not connected"
-                        }
-                        color={
-                          settings.quickbooks.connected ? "success" : "default"
-                        }
-                        variant={
-                          settings.quickbooks.connected ? "filled" : "outlined"
-                        }
-                      />
-                    </Stack>
-                    <Stack spacing={0.5}>
-                      <Typography variant="subtitle2" color="text.secondary">
-                        Environment
-                      </Typography>
-                      <ToggleButtonGroup
-                        exclusive
-                        size="small"
-                        value={settings.quickbooks.environment}
-                        onChange={(
-                          _e,
-                          value: "sandbox" | "production" | null,
-                        ) => {
-                          if (!value || !canEdit || isBusy) return;
-                          void onQuickbooksEnvironment(value);
-                        }}
-                      >
-                        <ToggleButton value="sandbox">Sandbox</ToggleButton>
-                        <ToggleButton value="production">
-                          Production
-                        </ToggleButton>
-                      </ToggleButtonGroup>
-                    </Stack>
-
-                    <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
-                      <Button
-                        variant="outlined"
-                        startIcon={<SyncAltIcon />}
-                        onClick={onConnectQuickbooks}
-                        disabled={isBusy || !canEdit}
-                      >
-                        Connect QuickBooks
-                      </Button>
-                      <Button
-                        color="error"
-                        onClick={onDisconnectQuickbooks}
-                        disabled={isBusy || !canEdit}
-                      >
-                        Disconnect
-                      </Button>
-                    </Stack>
-
-                    <Typography variant="body2" color="text.secondary">
-                      Realm ID: {settings.quickbooks.realmId ?? "Not set"}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Company: {settings.quickbooks.companyName ?? "Not set"}
-                    </Typography>
-                  </Stack>
-                </CardContent>
-              </Card>
+              <QuickBooksIntegrationCard
+                settings={quickbooks}
+                oauthStatus={quickbooksOauthStatus}
+                canManageConnection={canEdit}
+                canSync={canSyncQuickbooks}
+                canRefreshStatus={canViewQuickbooks}
+                canViewHealth={canViewQuickbooks}
+                busy={isBusy}
+                loading={false}
+                onConnect={onConnectQuickbooks}
+                onDisconnect={onDisconnectQuickbooks}
+                onRefreshReferences={onRefreshQuickbooksReferences}
+                onPostApproved={onPostApprovedQuickbooks}
+                onRefreshStatus={onRefreshQuickbooksStatus}
+                detailAction={
+                  canViewQuickbooks
+                    ? {
+                        label: "Open QuickBooks Sync",
+                        to: "/dashboard/accounting/quickbooks",
+                      }
+                    : undefined
+                }
+              />
             </Stack>
           </AccordionDetails>
         </Accordion>

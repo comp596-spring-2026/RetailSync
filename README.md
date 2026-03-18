@@ -49,6 +49,7 @@ RetailSync is a TypeScript monorepo with React/Vite on the client and Express/Mo
 | Tenant and RBAC | `companyId`-scoped data, server-side permission checks |
 | POS | CSV import, daily views, monthly reporting |
 | Inventory | Items, locations, immutable `InventoryLedger` movements |
+| Accounting | Statement upload, fallback OCR pipeline, check review, ledger approval, QuickBooks sync, tax dashboard, observability |
 | Integrations | Google Sheets (service account + OAuth connect), QuickBooks OAuth + CoA pull + posted ledger sync |
 | Quality | Vitest test suites, Docker workflows, CI quality gates |
 
@@ -59,7 +60,7 @@ Recent UI foundation upgrades now ship in the client:
 - Onboarding company setup:
   - `Timezone` uses searchable `Autocomplete`.
   - `Currency` uses searchable `Autocomplete` with `CODE (SYMBOL) - Name` labels.
--- Reusable CRUD building blocks for module shells:
+- Reusable CRUD building blocks for module shells:
   - `SearchableCrudTable`
   - `CrudEntityDialog` (create/edit)
   - `ConfirmDeleteDialog`
@@ -166,12 +167,34 @@ RetailSync/
 ## Accounting Documentation
 
 - Entry point: `/Users/trupal/Projects/RetailSync/docs/accounting/README.md`
+- UI wireframes + user lifecycle: `/Users/trupal/Projects/RetailSync/docs/accounting/wireframes-and-user-lifecycle.md`
 - Workflow lifecycle: `/Users/trupal/Projects/RetailSync/docs/accounting/end-to-end-workflow.md`
+- OCR/storage runtime: `/Users/trupal/Projects/RetailSync/docs/accounting/ocr-pipeline-and-storage.md`
 - Module docs:
   - Statements: `/Users/trupal/Projects/RetailSync/docs/accounting/module-statements.md`
   - Ledger: `/Users/trupal/Projects/RetailSync/docs/accounting/module-ledger.md`
   - QuickBooks Sync: `/Users/trupal/Projects/RetailSync/docs/accounting/module-quickbooks-sync.md`
+  - Tax Dashboard: `/Users/trupal/Projects/RetailSync/docs/accounting/module-tax.md`
   - Observability: `/Users/trupal/Projects/RetailSync/docs/accounting/module-observability.md`
+
+### Accounting Workspace At A Glance
+
+```mermaid
+flowchart LR
+  A["Statements"] --> B["Statement Detail"]
+  B --> C["Ledger"]
+  C --> D["QuickBooks Sync"]
+  D --> E["Tax"]
+  E --> F["Observability"]
+```
+
+Notes:
+
+- `Statements` owns upload, processing progress, and retry entry points.
+- `Ledger` is the approval gate before QuickBooks posting.
+- `QuickBooks Sync` handles OAuth, reference refresh, and post-approved dispatch.
+- `Tax` is a live QuickBooks reporting/recovery surface.
+- `Observability` reads run history, failures, and environment readiness.
 
 ## Local Development
 
@@ -312,6 +335,12 @@ Local fallback is also supported in non-production:
   - pipeline queue: `TASKS_QUEUE_PIPELINE`
   - sync queue: `TASKS_QUEUE_SYNC`
   - task endpoint base: `${INTERNAL_TASKS_ENDPOINT}` (`/api/tasks`)
+- Current statement extraction is a fallback pipeline:
+  - uploaded PDFs are saved to GCS
+  - worker writes placeholder page images plus `ocr/text.txt` and `ocr/docai.json`
+  - transaction normalization is saved to `derived/gemini/normalized.v1.json`
+  - check artifacts and posting state are persisted separately
+- Full runtime breakdown: `/Users/trupal/Projects/RetailSync/docs/accounting/ocr-pipeline-and-storage.md`
 
 ## Docker
 

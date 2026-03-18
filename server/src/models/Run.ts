@@ -32,7 +32,11 @@ const runSchema = new Schema(
     errors: { type: [String], default: [] },
     traceId: { type: String, required: false }
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    // Keep the persisted/API field name `errors` without emitting startup warnings.
+    suppressReservedKeysWarning: true
+  }
 );
 
 runSchema.index({ companyId: 1, runType: 1, status: 1, updatedAt: -1 });

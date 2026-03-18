@@ -41,6 +41,7 @@ type NavItem = {
   label: string;
   path: string;
   icon: JSX.Element;
+  matchPrefix?: string;
 };
 
 export const DashboardLayout = () => {
@@ -55,7 +56,18 @@ export const DashboardLayout = () => {
   const profileMenuOpen = Boolean(profileAnchorEl);
 
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
+  const isDevelopment = import.meta.env.DEV;
   const userDisplayName = user ? `${user.firstName} ${user.lastName}` : 'User';
+  const canViewAccountingStatements =
+    hasPermission(permissions, 'accounting', 'view') || hasPermission(permissions, 'bankStatements', 'view');
+  const canViewAccountingLedger = hasPermission(permissions, 'ledger', 'view');
+  const canViewAccountingQuickbooks = hasPermission(permissions, 'quickbooks', 'view');
+  const accountingEntryPath = canViewAccountingStatements
+    ? '/dashboard/accounting/statements'
+    : canViewAccountingLedger
+      ? '/dashboard/accounting/ledger'
+      : '/dashboard/accounting/quickbooks';
+  const canViewAccounting = canViewAccountingStatements || canViewAccountingLedger || canViewAccountingQuickbooks;
 
   const onLogout = async () => {
     try {
@@ -76,12 +88,18 @@ export const DashboardLayout = () => {
   };
 
   const renderNavLink = (item: NavItem) => {
+    const isSelected = item.matchPrefix
+      ? location.pathname === item.matchPrefix || location.pathname.startsWith(`${item.matchPrefix}/`)
+      : item.path === '/dashboard'
+        ? location.pathname === item.path
+        : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+
     return (
       <ListItemButton
         key={item.path}
         component={Link}
         to={item.path}
-        selected={location.pathname === item.path}
+        selected={isSelected}
         sx={{ borderRadius: 2, mb: 0.5 }}
       >
         <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
@@ -97,8 +115,13 @@ export const DashboardLayout = () => {
     ...(hasPermission(permissions, 'pos', 'view')
       ? [{ label: 'POS', path: '/dashboard/pos', icon: <PointOfSaleIcon fontSize="small" /> }]
       : []),
-    ...(hasPermission(permissions, 'dashboard', 'view')
-      ? [{ label: 'Playground', path: '/dashboard/playground', icon: <ScienceOutlinedIcon fontSize="small" /> }]
+    ...(canViewAccounting
+      ? [{
+          label: 'Accounting',
+          path: accountingEntryPath,
+          matchPrefix: '/dashboard/accounting',
+          icon: <AccountBalanceIcon fontSize="small" />
+        }]
       : []),
     { label: 'Settings', path: '/dashboard/settings', icon: <SettingsOutlinedIcon fontSize="small" /> }
   ];
@@ -117,9 +140,6 @@ export const DashboardLayout = () => {
       : []),
     ...(hasPermission(permissions, 'reconciliation', 'view') || hasPermission(permissions, 'bankStatements', 'view')
       ? [{ label: 'Finance', path: '/dashboard/reconciliation', icon: <SyncAltIcon fontSize="small" /> }]
-      : []),
-    ...(hasPermission(permissions, 'accounting', 'view')
-      ? [{ label: 'Accounting', path: '/dashboard/accounting/statements', icon: <AccountBalanceIcon fontSize="small" /> }]
       : [])
   ];
 
@@ -218,6 +238,15 @@ export const DashboardLayout = () => {
           </Stack>
         </Box>
         <Divider />
+        {isDevelopment && hasPermission(permissions, 'dashboard', 'view') ? (
+          <MenuItem component={Link} to="/dashboard/playground" onClick={onCloseProfileMenu}>
+            <ListItemIcon>
+              <ScienceOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Playground</ListItemText>
+          </MenuItem>
+        ) : null}
+        {isDevelopment && hasPermission(permissions, 'dashboard', 'view') ? <Divider /> : null}
         <MenuItem component={Link} to="/dashboard/settings" onClick={onCloseProfileMenu}>
           <ListItemIcon>
             <SettingsOutlinedIcon fontSize="small" />

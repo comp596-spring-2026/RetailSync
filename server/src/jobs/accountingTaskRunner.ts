@@ -3,9 +3,9 @@ import {
   AccountingTaskPayload,
   accountingTaskPayloadSchema
 } from '@retailsync/shared';
-import { Storage } from '@google-cloud/storage';
 import { env } from '../config/env';
 import { setRequestContext } from '../config/requestContext';
+import { getStorageClient } from '../integrations/google/storage.client';
 import { BankStatement } from '../models/BankStatement';
 import { LedgerEntryModel } from '../models/LedgerEntry';
 import { RunModel } from '../models/Run';
@@ -18,6 +18,7 @@ import {
   buildOcrPath,
   buildPageImagePath
 } from '../services/accountingStorageService';
+import { extractPdfFallbackText } from '../services/accountingPdfAnalysisService';
 import { buildMatchingProposal } from '../services/matchingEngine';
 import {
   markQuickBooksSyncFailure,
@@ -53,7 +54,7 @@ const syncJobTypes: AccountingJobType[] = [
   'quickbooks.post_approved'
 ];
 
-const storage = new Storage();
+const storage = getStorageClient();
 const TRANSPARENT_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgJ7xLQwAAAAASUVORK5CYII=';
 
@@ -105,15 +106,6 @@ const parsePdfPageCount = (pdfBuffer: Buffer) => {
   const matches = pdfText.match(/\/Type\s*\/Page\b/g);
   const count = matches?.length ?? 0;
   return Math.max(1, count);
-};
-
-const extractOcrFallbackText = (pdfBuffer: Buffer) => {
-  const text = pdfBuffer
-    .toString('latin1')
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-  return text.slice(0, 50000);
 };
 
 const normalizeDate = (value: string) => {
@@ -275,7 +267,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
 
       const pdfBuffer = await downloadFileBuffer(bucketName, pdfPath);
       const pageCount = parsePdfPageCount(pdfBuffer);
-      const rawText = extractOcrFallbackText(pdfBuffer);
+      const rawText = extractPdfFallbackText(pdfBuffer);
 
       const pagePaths: string[] = [];
       for (let pageNo = 1; pageNo <= pageCount; pageNo += 1) {

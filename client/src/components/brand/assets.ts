@@ -8,5 +8,7 @@ export const BRAND_ASSETS = {
   /** Full logo - large (icon + wordmark) */
   logoBig: '/brand/BigLogo.png',
   /** Horizontal lockup (icon + wordmark side by side) */
-  logoHorizontal: '/brand/logo-horizontal-removebg.png'
+  logoHorizontal: '/brand/logo-horizontal-removebg.png',
+  /** QuickBooks preferred logo */
+  quickbooksLogo: '/brand/quickbooks-logo.svg'
 } as const;

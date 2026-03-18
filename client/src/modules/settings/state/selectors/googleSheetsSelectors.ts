@@ -4,11 +4,11 @@ import { POS_DAILY_REQUIRED_FIELDS } from '../../constants/posDailyRequiredField
 import type {
   GoogleSheetsCanonicalSettings,
   IntegrationMode,
-  IntegrationSettingsCanonical,
   OAuthSource,
   SharedProfile,
   SheetConnector,
 } from '../../types/googleSheets';
+import type { IntegrationSettingsCanonical } from '../../types/integrationSettings';
 
 export const selectSettingsRoot = (state: RootState) =>
   ((state as unknown as { settings?: { settings?: IntegrationSettingsCanonical | null } }).settings?.settings ?? null);

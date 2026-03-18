@@ -186,7 +186,12 @@ export class SettingsApi {
   }
 
   connectQuickbooks(returnTo = '/dashboard/settings') {
-    return this.getQuickbooksConnectUrl(returnTo);
+    return api.post<{
+      data: {
+        url: string;
+        environment: QuickbooksEnvironment;
+      };
+    }>('/settings/quickbooks/connect', { returnTo });
   }
 
   disconnectQuickbooks() {

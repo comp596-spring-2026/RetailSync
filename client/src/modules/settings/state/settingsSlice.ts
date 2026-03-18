@@ -2,7 +2,9 @@ import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { settingsApi } from '../api';
 import type { RootState } from '../../../app/store';
 import { showSnackbar } from '../../../app/store/uiSlice';
-import type { GoogleSheetsCanonicalSettings, IntegrationSettingsCanonical } from '../types/googleSheets';
+import type { GoogleSheetsCanonicalSettings } from '../types/googleSheets';
+import type { IntegrationSettingsCanonical } from '../types/integrationSettings';
+import type { QuickBooksCanonicalSettings, QuickBooksSyncStatus } from '../types/quickbooks';
 
 export type GoogleSheetsSettings = {
   mode: 'service_account' | 'oauth';
@@ -75,12 +77,7 @@ export type GoogleSheetsSettings = {
 
 export type IntegrationSettings = {
   googleSheets: GoogleSheetsSettings;
-  quickbooks: {
-    connected: boolean;
-    environment: 'sandbox' | 'production';
-    realmId: string | null;
-    companyName: string | null;
-  };
+  quickbooks: QuickBooksCanonicalSettings;
   lastImportSource?: 'file' | 'google_sheets' | null;
   lastImportAt?: string | null;
 };
@@ -112,6 +109,13 @@ const asStringRecord = (value: unknown): Record<string, string> => {
 const connectorLabelFallback = (key: string) => {
   if (key === 'pos_daily') return 'POS Daily Summary';
   return key || 'Connector';
+};
+
+const normalizeQuickbooksSyncStatus = (
+  value: unknown,
+): QuickBooksSyncStatus => {
+  if (value === 'running' || value === 'success' || value === 'error') return value;
+  return 'idle';
 };
 
 const normalizeCanonicalGoogleSheetsSettings = (raw: unknown): GoogleSheetsCanonicalSettings => {
@@ -384,6 +388,15 @@ const normalizeIntegrationSettingsCanonical = (raw: unknown): IntegrationSetting
       environment: quickbooks.environment === 'production' ? 'production' : 'sandbox',
       realmId: quickbooks.realmId == null ? null : String(quickbooks.realmId),
       companyName: quickbooks.companyName == null ? null : String(quickbooks.companyName),
+      lastPullStatus: normalizeQuickbooksSyncStatus(quickbooks.lastPullStatus),
+      lastPullAt: quickbooks.lastPullAt == null ? null : String(quickbooks.lastPullAt),
+      lastPullCount: Number.isFinite(Number(quickbooks.lastPullCount)) ? Number(quickbooks.lastPullCount) : 0,
+      lastPullError: quickbooks.lastPullError == null ? null : String(quickbooks.lastPullError),
+      lastPushStatus: normalizeQuickbooksSyncStatus(quickbooks.lastPushStatus),
+      lastPushAt: quickbooks.lastPushAt == null ? null : String(quickbooks.lastPushAt),
+      lastPushCount: Number.isFinite(Number(quickbooks.lastPushCount)) ? Number(quickbooks.lastPushCount) : 0,
+      lastPushError: quickbooks.lastPushError == null ? null : String(quickbooks.lastPushError),
+      updatedAt: quickbooks.updatedAt == null ? null : String(quickbooks.updatedAt)
     },
     lastImportSource:
       lastImportSourceRaw === 'file' || lastImportSourceRaw === 'google_sheets'
