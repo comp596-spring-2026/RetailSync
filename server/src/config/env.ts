@@ -10,6 +10,17 @@ const parseBooleanFlag = (...values: Array<string | undefined>) =>
     return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
   });
 
+const TEST_ENCRYPTION_KEY = Buffer.from("12345678901234567890123456789012").toString("base64");
+
+const isValidEncryptionKey = (value: string | undefined) => {
+  if (!value) return false;
+  try {
+    return Buffer.from(value, "base64").length === 32;
+  } catch {
+    return false;
+  }
+};
+
 const getEncryptionKeyBuffer = (value: string | undefined) => {
   if (!value) {
     throw new Error("Missing env var: ENCRYPTION_KEY");
@@ -31,11 +42,6 @@ const envCandidates = [
   resolve(process.cwd(), ".env"),
 ];
 
-const exampleCandidates = [
-  resolve(process.cwd(), "server/.env.example"),
-  resolve(process.cwd(), ".env.example"),
-];
-
 for (const path of envCandidates) {
   if (existsSync(path)) {
     dotenv.config({ path, override: false });
@@ -43,10 +49,17 @@ for (const path of envCandidates) {
   }
 }
 
-for (const path of exampleCandidates) {
-  if (existsSync(path)) {
-    dotenv.config({ path, override: false });
-    break;
+const isTestRuntime =
+  process.env.NODE_ENV === "test" ||
+  parseBooleanFlag(process.env.VITEST) ||
+  process.argv.some((arg) => arg.includes("vitest"));
+
+if (isTestRuntime) {
+  process.env.PORT = process.env.PORT ?? "4000";
+  process.env.MONGO_URI = process.env.MONGO_URI ?? "mongodb://127.0.0.1:27017/retailsync-test";
+  process.env.CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
+  if (!isValidEncryptionKey(process.env.ENCRYPTION_KEY)) {
+    process.env.ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
   }
 }
 
