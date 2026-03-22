@@ -252,10 +252,9 @@ Local fallback is also supported in non-production:
 |---|---|---|
 | `PORT` | Yes | API port (`4000`) |
 | `MONGO_URI` | Yes | Mongo connection string |
-| `JWT_ACCESS_SECRET` | Yes | Access token signing secret |
-| `JWT_REFRESH_SECRET` | Yes | Refresh token signing secret |
 | `CLIENT_URL` | Yes | Allowed CORS origin |
 | `NODE_ENV` | Yes | `development` / `test` / `production` |
+| `ENCRYPTION_KEY` | Yes | Base64-encoded 32-byte master key used for encrypted integration secrets, derived JWT secrets, and internal service auth |
 | `GOOGLE_OAUTH_CLIENT_ID` | No | Google OAuth |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | No | Google OAuth |
 | `GOOGLE_AUTH_REDIRECT_URI` | No | Google OAuth callback |
@@ -263,10 +262,8 @@ Local fallback is also supported in non-production:
 | `QUICKBOOKS_CLIENT_ID` | No | QuickBooks OAuth client id |
 | `QUICKBOOKS_CLIENT_SECRET` | No | QuickBooks OAuth client secret |
 | `QUICKBOOKS_INTEGRATION_REDIRECT_URI` | No | QuickBooks OAuth callback (`/api/integrations/quickbooks/callback`) |
-| `CRON_SECRET` | No | Secret for `/api/cron/*` endpoints |
 | `GCS_BUCKET_NAME` | No | Bucket used for accounting statement storage |
 | `TASKS_MODE` | No | `inline` (local/default) or `cloud` |
-| `INTERNAL_TASKS_SECRET` | No | Shared secret for task endpoints |
 | `INTERNAL_TASKS_ENDPOINT` | No | Task endpoint base (for example `https://<api-url>/api/tasks`); server appends `/pipeline` or `/sync` by job type |
 | `GCP_PROJECT_ID` | No | Required when `TASKS_MODE=cloud` |
 | `GCP_REGION` | No | Required when `TASKS_MODE=cloud` |
@@ -274,7 +271,6 @@ Local fallback is also supported in non-production:
 | `TASKS_QUEUE_SYNC` | No | Queue for integration sync jobs |
 | `TASKS_OIDC_SERVICE_ACCOUNT_EMAIL` | No | OIDC service account for Cloud Tasks calls |
 | `API_SERVICE_NAME` | No | Cloud Run API service name used by observability log links |
-| `WORKER_SERVICE_NAME` | No | Cloud Run worker service name used by observability log links |
 
 ### Client (`/client/.env`)
 
@@ -284,8 +280,7 @@ Local fallback is also supported in non-production:
 
 ## Deployment Snapshot
 
-- Production services: `retailsync-api`, `retailsync-worker`
-- Development services: `retailsync-api-dev`, `retailsync-worker-dev`
+- Cloud Run service name is exposed as `API_SERVICE_NAME` for observability log links.
 - Client build expects: `VITE_API_URL=<deployed-api-url>/api`
 - Docker Compose build arg for client: `VITE_API_URL=/api` (when reverse-proxying API from same host)
 
@@ -319,12 +314,12 @@ Local fallback is also supported in non-production:
 ### Daily Google Sheets → POS Sync
 
 - **Cloud Scheduler (production)**: configure a daily HTTP POST job to  
-  `https://<cloud-run-url>/api/cron/sync-sheets` with header `x-cron-secret: $CRON_SECRET`.  
-  The secret comes from the `CRON_SECRET` secret wired in the Cloud Run deploy step.
+  `https://<cloud-run-url>/api/cron/sync-sheets` with header `x-service-secret: $ENCRYPTION_KEY`.  
+  The header uses the same master key value already configured on the service.
 - **Local dev cron (optional)**: set `ENABLE_LOCAL_CRON=true` and optionally override  
   `LOCAL_CRON_EXPR` (default: `0 2 * * *`) in `server/.env` to run the sync on a schedule.
 - **Manual / dry run**: you can test without writing to the DB via:  
-  `curl -X POST 'http://localhost:4000/api/cron/sync-sheets?dryRun=true' -H 'x-cron-secret: <value-or-empty>'`
+  `curl -X POST 'http://localhost:4000/api/cron/sync-sheets?dryRun=true' -H 'x-service-secret: <your-ENCRYPTION_KEY>'`
 
 ### Accounting Worker + Tasks
 

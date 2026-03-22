@@ -53,7 +53,7 @@ Tab label: `Observability`
 [Observability]
 - health chips: total/extracting/structuring/checks queued/ready/failed
 - buttons: Refresh, Refresh Refs, Post Approved
-- log shortcut section: API logs | Worker logs | Failed tasks | QB sync
+- log shortcut section: API logs | Task logs | Failed tasks | QB sync
 - recent statements table
 - failed runs table
 - debug diagnostics: optional statementId + actions list

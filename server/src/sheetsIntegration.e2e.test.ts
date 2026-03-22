@@ -101,7 +101,6 @@ describe('Google Sheets integration e2e (connector architecture)', () => {
 
   beforeAll(async () => {
     setupTestEnv();
-    process.env.CRON_SECRET = process.env.CRON_SECRET ?? 'test-cron-secret';
     const module = await import('./app');
     app = module.createApp();
     await connectTestDb();
@@ -290,7 +289,7 @@ describe('Google Sheets integration e2e (connector architecture)', () => {
 
     const cron = await request(app)
       .post('/api/cron/sync-sheets')
-      .set('x-cron-secret', process.env.CRON_SECRET ?? '')
+      .set('x-service-secret', process.env.ENCRYPTION_KEY ?? '')
       .expect(200);
 
     expect(cron.body.ok).toBe(true);

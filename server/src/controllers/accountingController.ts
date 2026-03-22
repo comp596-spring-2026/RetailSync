@@ -29,6 +29,124 @@ const storage = getStorageClient();
 
 const sanitizeFileName = (name: string) => name.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 
+type UploadUrlFailure = {
+  reason:
+    | 'missing_google_credentials'
+    | 'storage_signing_permission_denied'
+    | 'storage_signing_not_configured'
+    | 'storage_access_denied'
+    | 'storage_bucket_not_found'
+    | 'upload_url_generation_failed';
+  clientMessage: string;
+  hint: string;
+  errorCode: number | null;
+  errorMessage: string;
+};
+
+const extractErrorCode = (error: unknown) => {
+  const value =
+    typeof error === 'object' && error && 'code' in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const extractErrorMessage = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error) {
+    if ('message' in error && typeof (error as { message?: unknown }).message === 'string') {
+      return String((error as { message?: unknown }).message);
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return 'Unknown error';
+    }
+  }
+  return 'Unknown error';
+};
+
+const classifyUploadUrlFailure = (error: unknown): UploadUrlFailure => {
+  const errorCode = extractErrorCode(error);
+  const errorMessage = extractErrorMessage(error);
+  const normalized = errorMessage.toLowerCase();
+
+  if (normalized.includes('could not load the default credentials')) {
+    return {
+      reason: 'missing_google_credentials',
+      clientMessage: 'Google Cloud credentials are not configured on the server',
+      hint:
+        'Attach a Cloud Run service account with the required roles or provide GOOGLE_SERVICE_ACCOUNT_JSON.',
+      errorCode,
+      errorMessage
+    };
+  }
+
+  if (
+    normalized.includes('iam.serviceaccounts.signblob') ||
+    normalized.includes('signblob') ||
+    normalized.includes('cannot sign data') ||
+    normalized.includes('private_key') ||
+    normalized.includes('private key')
+  ) {
+    return {
+      reason: normalized.includes('iam.serviceaccounts.signblob')
+        ? 'storage_signing_permission_denied'
+        : 'storage_signing_not_configured',
+      clientMessage: 'Storage URL signing is not configured on the server',
+      hint:
+        'Grant roles/iam.serviceAccountTokenCreator to the runtime service account or provide GOOGLE_SERVICE_ACCOUNT_JSON with a signing key.',
+      errorCode,
+      errorMessage
+    };
+  }
+
+  if (
+    errorCode === 404 ||
+    normalized.includes('no such bucket') ||
+    normalized.includes('bucket') && normalized.includes('not found')
+  ) {
+    return {
+      reason: 'storage_bucket_not_found',
+      clientMessage: 'Accounting storage bucket was not found',
+      hint: `Verify GCS_BUCKET_NAME and ensure the bucket exists.`,
+      errorCode,
+      errorMessage
+    };
+  }
+
+  if (
+    errorCode === 403 ||
+    normalized.includes('permission denied') ||
+    normalized.includes('forbidden') ||
+    normalized.includes('does not have storage.objects') ||
+    normalized.includes('access denied')
+  ) {
+    return {
+      reason: 'storage_access_denied',
+      clientMessage: 'Storage access is denied for the configured server identity',
+      hint:
+        'Grant the runtime service account access to the configured GCS bucket in addition to URL-signing permissions.',
+      errorCode,
+      errorMessage
+    };
+  }
+
+  return {
+    reason: 'upload_url_generation_failed',
+    clientMessage: 'Failed to generate upload URL',
+    hint: 'Check GCS bucket configuration, service account permissions, and signed URL support.',
+    errorCode,
+    errorMessage
+  };
+};
+
 const computeStatementHash = async (bucketName: string, objectPath: string) => {
   const file = storage.bucket(bucketName).file(objectPath);
   const [buffer] = await file.download();
@@ -163,9 +281,18 @@ export const getUploadUrl = async (req: Request, res: Response) => {
 
     return ok(res, { ...payload, fileName: sanitizeFileName(parsed.data.fileName), statementMonth });
   } catch (error) {
+    const failure = classifyUploadUrlFailure(error);
     // eslint-disable-next-line no-console
-    console.error('[accounting.upload-url] failed', error);
-    return fail(res, 'Failed to generate upload URL', 500);
+    console.error('[accounting.upload-url] failed', {
+      bucketName: env.gcsBucketName,
+      projectId: env.gcpProjectId ?? null,
+      reason: failure.reason,
+      hint: failure.hint,
+      errorCode: failure.errorCode,
+      errorMessage: failure.errorMessage,
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    return fail(res, failure.clientMessage, 500, { reason: failure.reason });
   }
 };
 
@@ -271,8 +398,10 @@ export const createStatement = async (req: Request, res: Response) => {
         jobType: 'statement.extract',
         meta: { requestedBy: req.user.id }
       });
-      statement.status = 'extracting' as any;
-      await statement.save();
+      if (queueMeta.mode !== 'inline') {
+        statement.status = 'extracting' as any;
+        await statement.save();
+      }
     } catch (enqueueError) {
       statement.status = 'failed' as any;
       statement.issues = [

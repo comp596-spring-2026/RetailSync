@@ -27,7 +27,9 @@ const {
   listQuickBooksTaxLedgerMock,
   listQuickBooksTaxPaymentsMock,
   recoverQuickBooksPaymentMock,
-  createQuickBooksJournalAdjustmentMock
+  createQuickBooksJournalAdjustmentMock,
+  storageGetSignedUrlMock,
+  storageDownloadMock
 } = vi.hoisted(() => ({
   enqueueAccountingJobMock: vi.fn(),
   runAccountingTaskMock: vi.fn(),
@@ -37,7 +39,9 @@ const {
   listQuickBooksTaxLedgerMock: vi.fn(),
   listQuickBooksTaxPaymentsMock: vi.fn(),
   recoverQuickBooksPaymentMock: vi.fn(),
-  createQuickBooksJournalAdjustmentMock: vi.fn()
+  createQuickBooksJournalAdjustmentMock: vi.fn(),
+  storageGetSignedUrlMock: vi.fn(),
+  storageDownloadMock: vi.fn()
 }));
 
 vi.mock('./jobs/accountingQueue', () => ({
@@ -66,10 +70,9 @@ vi.mock('@google-cloud/storage', () => {
     bucket(bucketName: string) {
       return {
         file: (objectPath: string) => ({
-          getSignedUrl: async () => [
-            `https://storage.mock/${encodeURIComponent(bucketName)}/${encodeURIComponent(objectPath)}`
-          ],
-          download: async () => [Buffer.from('%PDF-1.7 mock content', 'utf-8')]
+          getSignedUrl: (...args: unknown[]) =>
+            storageGetSignedUrlMock(bucketName, objectPath, ...args),
+          download: (...args: unknown[]) => storageDownloadMock(bucketName, objectPath, ...args)
         })
       };
     }
@@ -100,10 +103,11 @@ describe('Accounting e2e', () => {
     process.env.GCP_PROJECT_ID = 'retailsync-test-project';
     process.env.GCP_REGION = 'us-west1';
     process.env.API_SERVICE_NAME = 'retailsync-api-dev';
-    process.env.WORKER_SERVICE_NAME = 'retailsync-worker-dev';
-    process.env.INTERNAL_TASKS_SECRET = 'internal-test-secret';
+    process.env.ENCRYPTION_KEY =
+      process.env.ENCRYPTION_KEY ??
+      Buffer.from('12345678901234567890123456789012').toString('base64');
     process.env.INTERNAL_TASKS_ENDPOINT =
-      'https://retailsync-worker-dev.example.com/api/tasks';
+      'https://retailsync-api-dev.example.com/api/tasks';
     process.env.QUICKBOOKS_CLIENT_ID = 'qb-client-id';
     process.env.QUICKBOOKS_CLIENT_SECRET = 'qb-client-secret';
     process.env.QUICKBOOKS_INTEGRATION_REDIRECT_URI =
@@ -125,6 +129,8 @@ describe('Accounting e2e', () => {
     listQuickBooksTaxPaymentsMock.mockReset();
     recoverQuickBooksPaymentMock.mockReset();
     createQuickBooksJournalAdjustmentMock.mockReset();
+    storageGetSignedUrlMock.mockReset();
+    storageDownloadMock.mockReset();
 
     enqueueAccountingJobMock.mockImplementation(async (args: { jobType: string }) => ({
       taskId: `task-${String(args.jobType).replace(/\./g, '-')}`,
@@ -134,6 +140,11 @@ describe('Accounting e2e', () => {
         ? 'sync-integrations-dev'
         : 'pipeline-ocr-dev'
     }));
+
+    storageGetSignedUrlMock.mockImplementation(async (bucketName: string, objectPath: string) => [
+      `https://storage.mock/${encodeURIComponent(bucketName)}/${encodeURIComponent(objectPath)}`
+    ]);
+    storageDownloadMock.mockResolvedValue([Buffer.from('%PDF-1.7 mock content', 'utf-8')]);
 
     runAccountingTaskMock.mockImplementation(
       async (payload: {
@@ -346,6 +357,52 @@ describe('Accounting e2e', () => {
     },
     TEST_TIMEOUT_MS
   );
+
+  it('returns a specific error when signed URL permissions are missing', async () => {
+    const { accessToken } = await registerAndCreateCompany(app, 'AcctUploadPerms');
+    storageGetSignedUrlMock.mockRejectedValueOnce({
+      code: 403,
+      message: 'Permission iam.serviceAccounts.signBlob is required'
+    });
+
+    const response = await request(app)
+      .post('/api/accounting/statements/upload-url')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        fileName: 'April Statement 2026.pdf',
+        statementMonth: '2026-04',
+        contentType: 'application/pdf'
+      })
+      .expect(500);
+
+    expect(response.body.message).toBe('Storage URL signing is not configured on the server');
+    expect(response.body.details).toEqual({
+      reason: 'storage_signing_permission_denied'
+    });
+  });
+
+  it('returns a specific error when the accounting bucket is missing', async () => {
+    const { accessToken } = await registerAndCreateCompany(app, 'AcctMissingBucket');
+    storageGetSignedUrlMock.mockRejectedValueOnce({
+      code: 404,
+      message: 'The specified bucket does not exist'
+    });
+
+    const response = await request(app)
+      .post('/api/accounting/statements/upload-url')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        fileName: 'May Statement 2026.pdf',
+        statementMonth: '2026-05',
+        contentType: 'application/pdf'
+      })
+      .expect(500);
+
+    expect(response.body.message).toBe('Accounting storage bucket was not found');
+    expect(response.body.details).toEqual({
+      reason: 'storage_bucket_not_found'
+    });
+  });
 
   it(
     'returns observability summary + debug diagnostics with new run and status model',
@@ -569,7 +626,7 @@ describe('Accounting e2e', () => {
     'enforces task endpoint auth, validates payload, and executes routing contract',
     async () => {
       const { env } = await import('./config/env');
-      const taskSecret = env.internalTasksSecret ?? 'internal-test-secret';
+      const taskSecret = env.serviceSecret ?? process.env.ENCRYPTION_KEY ?? '';
 
       await request(app)
         .post('/api/tasks/pipeline')
@@ -578,13 +635,13 @@ describe('Accounting e2e', () => {
 
       await request(app)
         .post('/api/tasks/pipeline')
-        .set('x-internal-task-secret', taskSecret)
+        .set('x-service-secret', taskSecret)
         .send({ companyId: 'c1', jobType: 'quickbooks.post_approved' })
         .expect(422);
 
       const pipelineResponse = await request(app)
         .post('/api/tasks/pipeline')
-        .set('x-internal-task-secret', taskSecret)
+        .set('x-service-secret', taskSecret)
         .send({
           companyId: 'company-1',
           statementId: 'statement-1',
@@ -600,7 +657,7 @@ describe('Accounting e2e', () => {
 
       const syncResponse = await request(app)
         .post('/api/tasks/sync')
-        .set('x-internal-task-secret', taskSecret)
+        .set('x-service-secret', taskSecret)
         .send({
           companyId: 'company-1',
           jobType: 'quickbooks.post_approved',

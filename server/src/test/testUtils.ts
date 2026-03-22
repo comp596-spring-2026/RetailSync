@@ -11,8 +11,9 @@ let mongo: MongoMemoryServer | null = null;
 export const setupTestEnv = () => {
   process.env.PORT = process.env.PORT ?? '4000';
   process.env.MONGO_URI = process.env.MONGO_URI ?? 'mongodb://127.0.0.1:27017/retailsync-test';
-  process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET ?? 'test-access-secret';
-  process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET ?? 'test-refresh-secret';
+  process.env.ENCRYPTION_KEY =
+    process.env.ENCRYPTION_KEY ??
+    Buffer.from('12345678901234567890123456789012').toString('base64');
   process.env.CLIENT_URL = process.env.CLIENT_URL ?? 'http://localhost:5173';
   process.env.NODE_ENV = 'test';
 };

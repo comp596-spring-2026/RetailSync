@@ -4,7 +4,7 @@
 
 - Variable: `WIF_PROVIDER` (Workload Identity Provider resource path)
 - Secret: `FIREBASE_TOKEN` (required for production client deploy only)
-- Secret in Secret Manager: `INTERNAL_TASKS_SECRET`
+- Secret in Secret Manager: `ENCRYPTION_KEY`
 - Optional secrets in Secret Manager for QuickBooks OAuth:
   - `QUICKBOOKS_CLIENT_ID`
   - `QUICKBOOKS_CLIENT_SECRET`
@@ -55,20 +55,19 @@ gcloud iam service-accounts add-iam-policy-binding retailsync-ci-sa@lively-infin
 
 ## Deploy behavior by branch
 
-- Push to `development`: deploys `retailsync-api-dev` + `retailsync-worker-dev`
-- Push to `production`: deploys `retailsync-api` + `retailsync-worker` and Firebase Hosting client
+- Push to `production`: deploys `retailsync-api` and Firebase Hosting client
 - Cloud Tasks queues are auto-created/updated by workflow:
   - `pipeline-ocr-dev` / `sync-integrations-dev`
   - `pipeline-ocr-prod` / `sync-integrations-prod`
 - Current task endpoint security model:
   - Cloud Run task HTTP target must be reachable by Cloud Tasks
-  - `/api/tasks/*` endpoints are protected with `x-internal-task-secret`
+  - `/api/tasks/*` endpoints are protected with `x-service-secret`
   - `INTERNAL_TASKS_ENDPOINT` should point to `/api/tasks` base; dispatcher routes to `/pipeline` or `/sync`
 - Deploy workflow includes QuickBooks env wiring only when the corresponding secrets exist.
-- Deploy workflow also injects `API_SERVICE_NAME` and `WORKER_SERVICE_NAME` for observability log shortcuts.
+- Deploy workflow injects `API_SERVICE_NAME` for observability log shortcuts.
 - Daily integration sync is managed by Cloud Scheduler calling:
   - `POST /api/cron/accounting-sync`
-  - with header `x-cron-secret: <CRON_SECRET>`
+  - with header `x-service-secret: <ENCRYPTION_KEY>`
   - optional query flags: `dryRun`, `includeSheets`, `includeQuickBooks`, `postDelaySeconds`
 
 ## Daily scheduler (example)
@@ -81,7 +80,7 @@ gcloud scheduler jobs create http retailsync-accounting-daily-prod \
   --time-zone "America/New_York" \
   --uri "https://<api-url>/api/cron/accounting-sync?includeSheets=true&includeQuickBooks=true&postDelaySeconds=120" \
   --http-method POST \
-  --headers "x-cron-secret=<CRON_SECRET>"
+  --headers "x-service-secret=<ENCRYPTION_KEY>"
 ```
 
 Full rollout checklist: `/Users/trupal/Projects/RetailSync/docs/operations/accounting-observability-rollout.md`
@@ -100,12 +99,4 @@ gcloud run revisions list --service retailsync-api --region us-west1 --project l
 
 ```bash
 gcloud run services update-traffic retailsync-api --region us-west1 --project lively-infinity-488304-m9 --to-revisions REVISION_NAME=100
-```
-
-```bash
-gcloud run revisions list --service retailsync-worker --region us-west1 --project lively-infinity-488304-m9
-```
-
-```bash
-gcloud run services update-traffic retailsync-worker --region us-west1 --project lively-infinity-488304-m9 --to-revisions REVISION_NAME=100
 ```

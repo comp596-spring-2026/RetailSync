@@ -1,6 +1,7 @@
 import { AccountingJobType, accountingTaskPayloadSchema } from '@retailsync/shared';
 import { google } from 'googleapis';
 import { env } from '../config/env';
+import { attachServiceSecretHeaders } from '../utils/internalAuth';
 import { runAccountingTask } from './accountingTaskRunner';
 
 type EnqueueAccountingJobArgs = {
@@ -86,9 +87,10 @@ const dispatchTaskViaHttp = async (args: EnqueueAccountingJobArgs, taskId: strin
     'content-type': 'application/json',
     'x-accounting-queue': queueName
   };
-  if (env.internalTasksSecret) {
-    headers['x-internal-task-secret'] = env.internalTasksSecret;
-  }
+  attachServiceSecretHeaders({
+    headers,
+    secret: env.serviceSecret
+  });
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -126,13 +128,13 @@ const dispatchTaskViaCloudTasksApi = async (args: EnqueueAccountingJobArgs, task
     httpRequest: {
       httpMethod: 'POST',
       url: endpoint,
-      headers: {
+      headers: attachServiceSecretHeaders({
+        headers: {
         'content-type': 'application/json',
-        ...(env.internalTasksSecret
-          ? { 'x-internal-task-secret': env.internalTasksSecret }
-          : {}),
         'x-accounting-queue': queueName
-      },
+        },
+        secret: env.serviceSecret
+      }),
       body: Buffer.from(JSON.stringify(payload)).toString('base64'),
       ...(env.tasksOidcServiceAccountEmail
         ? {

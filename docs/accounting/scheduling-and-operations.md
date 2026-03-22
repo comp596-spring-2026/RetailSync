@@ -28,7 +28,7 @@ TASKS_QUEUE_PIPELINE=pipeline-ocr-dev
 TASKS_QUEUE_SYNC=sync-integrations-dev
 TASKS_OIDC_SERVICE_ACCOUNT_EMAIL=retailsync-run-sa@lively-infinity-488304-m9.iam.gserviceaccount.com
 INTERNAL_TASKS_ENDPOINT=https://<worker-or-api-url>/api/tasks
-INTERNAL_TASKS_SECRET=<same-secret-used-by-cron-and-task-caller>
+ENCRYPTION_KEY=<base64-encoded-32-byte-master-key>
 GCP_PROJECT_ID=lively-infinity-488304-m9
 GCP_REGION=us-west1
 GCS_BUCKET_NAME=<bucket-name>
@@ -38,13 +38,12 @@ Service names used for ops links/debug:
 
 ```env
 API_SERVICE_NAME=retailsync-api
-WORKER_SERVICE_NAME=retailsync-worker-dev
 ```
 
 ## 3) Cloud resources checklist
 
 1. Cloud Run service for API (`retailsync-api`).
-2. Cloud Run service for worker target (`retailsync-worker-dev` in dev, `retailsync-worker` in prod) or API itself if single-service.
+2. Cloud Run task target, which can be the API service itself in a single-service setup.
 3. Cloud Tasks queues:
    - `pipeline-ocr-dev` / `pipeline-ocr-prod`
    - `sync-integrations-dev` / `sync-integrations-prod`
@@ -64,7 +63,7 @@ gcloud scheduler jobs create http retailsync-accounting-daily-dev \
   --time-zone="America/New_York" \
   --uri="https://<dev-api-url>/api/cron/accounting-sync?includeSheets=true&includeQuickBooks=true&postDelaySeconds=120" \
   --http-method=POST \
-  --headers="x-cron-secret=<CRON_SECRET>"
+  --headers="x-service-secret=<ENCRYPTION_KEY>"
 ```
 
 ### Prod
@@ -77,7 +76,7 @@ gcloud scheduler jobs create http retailsync-accounting-daily-prod \
   --time-zone="America/New_York" \
   --uri="https://<prod-api-url>/api/cron/accounting-sync?includeSheets=true&includeQuickBooks=true&postDelaySeconds=120" \
   --http-method=POST \
-  --headers="x-cron-secret=<CRON_SECRET>"
+  --headers="x-service-secret=<ENCRYPTION_KEY>"
 ```
 
 ## 5) Manage and verify daily sync
@@ -106,7 +105,7 @@ gcloud scheduler jobs create http retailsync-accounting-daily-prod \
    - `/api/tasks/pipeline` for OCR/statement/check jobs.
    - `/api/tasks/sync` for QuickBooks sync jobs.
 4. Task endpoints validate:
-   - `x-internal-task-secret`
+   - `x-service-secret`
    - strict payload schema
    - job-type endpoint compatibility.
 

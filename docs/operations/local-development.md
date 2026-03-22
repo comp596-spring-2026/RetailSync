@@ -53,9 +53,7 @@ make start
 
 - Production API health: `https://<retailsync-api-url>/health`
 - Production API base for client env: `https://<retailsync-api-url>/api`
-- Production worker service: `retailsync-worker` (internal Cloud Tasks target)
 - Development API service: `retailsync-api-dev`
-- Development worker service: `retailsync-worker-dev`
 
 Useful Docker commands:
 
@@ -91,9 +89,10 @@ For accounting task processing:
 
 - local default mode is `TASKS_MODE=inline`
 - cloud mode requires `GCP_PROJECT_ID`, `GCP_REGION`, queue names, task endpoint base, and OIDC service account env vars
-- task endpoint base is `/api/tasks` and is protected by `x-internal-task-secret`
+- task endpoint base is `/api/tasks` and is protected by `x-service-secret`
 - task dispatch automatically routes to `/api/tasks/pipeline` or `/api/tasks/sync` by job type
-- for observability log shortcuts, set `API_SERVICE_NAME` and `WORKER_SERVICE_NAME`
+- for observability log shortcuts, set `API_SERVICE_NAME`
+- set `DEBUG_VERBOSE_API=true` (or `DEBUG=true`) to enable structured request/response and error tracing across the API
 
 Local convenience fallback is also supported for Sheets calls:
 
@@ -114,6 +113,39 @@ If the configured bucket does not exist yet, bootstrap it and apply CORS in one 
 ```bash
 pnpm --filter @retailsync/server run storage:cors:accounting -- --apply --ensure-bucket
 ```
+
+## API Debug Mode
+
+To turn on end-to-end API tracing locally:
+
+```bash
+DEBUG_VERBOSE_API=true make dev-server
+```
+
+Or if you already use `server/.env`, set:
+
+```bash
+DEBUG_VERBOSE_API=true
+```
+
+What you will see in server logs:
+
+- `[api.request.start]`
+- `[api.request.finish]`
+- `[api.response.fail]`
+- `[api.error]`
+
+Each log includes a request id. The API also echoes it back in the `x-request-id` response header.
+
+To confirm the flag is active:
+
+```bash
+curl -s http://localhost:4000/health/env-readiness
+```
+
+Look for:
+
+- `optional.DEBUG_VERBOSE_API: true`
 
 ## Quality and Validation
 

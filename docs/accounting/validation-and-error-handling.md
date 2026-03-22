@@ -22,7 +22,7 @@
 1. `/api/tasks/pipeline` accepts only pipeline job types.
 2. `/api/tasks/sync` accepts only sync job types.
 3. payload must satisfy `accountingTaskPayloadSchema`.
-4. secret auth via `x-internal-task-secret` when configured.
+4. secret auth via `x-service-secret` when configured.
 
 ### 2.3 Ledger and posting
 

@@ -169,8 +169,8 @@ export const ObservabilityPage = () => {
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
                 {[
                   { label: 'API logs', href: summary.gcpLinks.apiLogsUrl },
-                  { label: 'Worker logs', href: summary.gcpLinks.workerLogsUrl },
-                  { label: 'Failed tasks', href: summary.gcpLinks.failedAccountingTasksUrl },
+                  { label: 'Task logs', href: summary.gcpLinks.taskLogsUrl },
+                  { label: 'Failed tasks', href: summary.gcpLinks.failedTaskLogsUrl },
                   { label: 'QuickBooks sync', href: summary.gcpLinks.quickbooksSyncUrl }
                 ].map((link) =>
                   link.href ? (

@@ -2,13 +2,14 @@ import { Router, Request, Response } from 'express';
 import { env } from '../config/env';
 import { runDailyAccountingSync } from '../jobs/dailyAccountingSync';
 import { runSheetsSync } from '../jobs/syncSheets';
+import { readRequestSecretHeader } from '../utils/internalAuth';
 
 const router = Router();
 
 const isAuthorized = (req: Request) => {
-  const secretHeader = req.header('x-cron-secret');
-  if (!env.cronSecret) return true;
-  return Boolean(secretHeader && secretHeader === env.cronSecret);
+  const secretHeader = readRequestSecretHeader(req);
+  if (!env.serviceSecret) return true;
+  return Boolean(secretHeader && secretHeader === env.serviceSecret);
 };
 
 const parseBoolean = (value: unknown, fallback: boolean) => {

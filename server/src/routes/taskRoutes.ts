@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { Router } from 'express';
 import { env } from '../config/env';
 import { runAccountingTask } from '../jobs/accountingTaskRunner';
+import { readRequestSecretHeader } from '../utils/internalAuth';
 import { fail, ok } from '../utils/apiResponse';
 
 const router = Router();
@@ -21,8 +22,8 @@ const syncJobTypes = new Set([
 ]);
 
 const authorize = (incomingSecret: string | undefined) => {
-  if (!env.internalTasksSecret) return true;
-  return incomingSecret === env.internalTasksSecret;
+  if (!env.serviceSecret) return true;
+  return incomingSecret === env.serviceSecret;
 };
 
 const runTask = async (
@@ -30,7 +31,7 @@ const runTask = async (
   res: Response,
   allowedJobTypes: Set<string>
 ) => {
-  const incomingSecret = req.header('x-internal-task-secret');
+  const incomingSecret = readRequestSecretHeader(req);
   if (!authorize(incomingSecret)) {
     return fail(res, 'Unauthorized', 401);
   }
