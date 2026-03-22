@@ -156,7 +156,7 @@ stateDiagram-v2
 
 ## 7) Daily scheduled sync lifecycle
 
-1. Cloud Scheduler calls `POST /api/cron/accounting-sync` with `x-cron-secret`.
+1. Cloud Scheduler calls `POST /api/cron/accounting-sync` with `x-service-secret`.
 2. Route can run both domains together or independently:
    - `includeSheets=true|false`
    - `includeQuickBooks=true|false`

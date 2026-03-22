@@ -28,6 +28,7 @@ import taskRoutes from "./routes/taskRoutes";
 import { notFound } from "./middleware/notFound";
 import { errorHandler } from "./middleware/errorHandler";
 import { withRequestContext } from "./config/requestContext";
+import { requestDebugLogger } from "./middleware/requestDebugLogger";
 
 export const createApp = () => {
   const app = express();
@@ -38,9 +39,10 @@ export const createApp = () => {
       credentials: true,
     }),
   );
+  app.use(withRequestContext);
+  app.use(requestDebugLogger);
   app.use(express.json());
   app.use(cookieParser());
-  app.use(withRequestContext);
 
   app.get("/", (_req, res) => {
     res.type("html").send(`<!doctype html>
@@ -108,8 +110,7 @@ export const createApp = () => {
     const required = {
       PORT: Boolean(env.port),
       MONGO_URI: Boolean(env.mongoUri),
-      JWT_ACCESS_SECRET: Boolean(env.accessSecret),
-      JWT_REFRESH_SECRET: Boolean(env.refreshSecret),
+      ENCRYPTION_KEY: Boolean(env.encryptionKey),
       CLIENT_URL: Boolean(env.clientUrl),
     };
 
@@ -121,7 +122,7 @@ export const createApp = () => {
       QUICKBOOKS_CLIENT_SECRET: Boolean(env.quickbooksClientSecret),
       QUICKBOOKS_INTEGRATION_REDIRECT_URI: Boolean(env.quickbooksIntegrationRedirectUri),
       API_SERVICE_NAME: Boolean(env.apiServiceName),
-      WORKER_SERVICE_NAME: Boolean(env.workerServiceName),
+      DEBUG_VERBOSE_API: env.debugVerboseApi,
     };
 
     res.json({

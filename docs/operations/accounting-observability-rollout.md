@@ -23,11 +23,7 @@ Create/update these secrets in project `lively-infinity-488304-m9`:
 ### Required baseline secrets
 
 - `MONGO_URI`
-- `JWT_ACCESS_SECRET`
-- `JWT_REFRESH_SECRET`
 - `ENCRYPTION_KEY`
-- `CRON_SECRET`
-- `INTERNAL_TASKS_SECRET`
 - `GOOGLE_OAUTH_CLIENT_ID`
 - `GOOGLE_OAUTH_CLIENT_SECRET`
 - `GOOGLE_AUTH_REDIRECT_URI`
@@ -73,16 +69,13 @@ Deploy workflow now sets these env vars on API/worker:
 - `TASKS_OIDC_SERVICE_ACCOUNT_EMAIL`
 - `INTERNAL_TASKS_ENDPOINT` (API only)
 - `API_SERVICE_NAME`
-- `WORKER_SERVICE_NAME`
 
 Expected service names:
 
 - Development:
   - API: `retailsync-api-dev`
-  - Worker: `retailsync-worker-dev`
 - Production:
   - API: `retailsync-api`
-  - Worker: `retailsync-worker`
 
 ## 5) QuickBooks OAuth App Configuration (Intuit)
 
@@ -101,7 +94,7 @@ The URI configured in Intuit must equal `QUICKBOOKS_INTEGRATION_REDIRECT_URI`.
 
 - `GET /health`
 - `GET /health/env-readiness`
-  - verify `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_INTEGRATION_REDIRECT_URI`, `API_SERVICE_NAME`, `WORKER_SERVICE_NAME` are present where expected.
+  - verify `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_INTEGRATION_REDIRECT_URI`, and `API_SERVICE_NAME` are present where expected.
 
 ### App checks
 
@@ -123,7 +116,7 @@ Detailed accounting lifecycle + module docs:
 
 1. Configure daily scheduler:
    - `POST /api/cron/accounting-sync`
-   - include header `x-cron-secret`
+   - include header `x-service-secret`
 2. Smoke test with dry-run:
    - `POST /api/cron/accounting-sync?dryRun=true`
 3. Confirm outputs:

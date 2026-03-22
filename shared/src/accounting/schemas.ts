@@ -575,8 +575,8 @@ export const accountingObservabilitySummarySchema = z.object({
   quickbooks: quickBooksSettingsSchema.nullable(),
   gcpLinks: z.object({
     apiLogsUrl: z.string().nullable(),
-    workerLogsUrl: z.string().nullable(),
-    failedAccountingTasksUrl: z.string().nullable(),
+    taskLogsUrl: z.string().nullable(),
+    failedTaskLogsUrl: z.string().nullable(),
     quickbooksSyncUrl: z.string().nullable()
   })
 });
@@ -586,14 +586,13 @@ export const accountingObservabilityDebugSchema = z.object({
   envReadiness: z.object({
     tasksMode: z.enum(['inline', 'cloud']),
     hasGcsBucketName: z.boolean(),
-    hasInternalTasksSecret: z.boolean(),
+    hasServiceSecret: z.boolean(),
     hasInternalTasksEndpoint: z.boolean(),
     hasGcpProjectId: z.boolean(),
     hasPipelineQueue: z.boolean(),
     hasSyncQueue: z.boolean(),
     hasQuickBooksOAuthConfig: z.boolean(),
-    apiServiceName: z.string().nullable(),
-    workerServiceName: z.string().nullable()
+    apiServiceName: z.string().nullable()
   }),
   actions: z.array(z.string())
 });

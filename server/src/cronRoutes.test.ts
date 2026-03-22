@@ -24,7 +24,7 @@ vi.mock('./config/env', () => ({
     googleOAuthClientSecret: undefined,
     googleAuthRedirectUri: undefined,
     googleIntegrationRedirectUri: undefined,
-    cronSecret: 'test-secret'
+    serviceSecret: 'test-secret'
   }
 }));
 
@@ -36,13 +36,13 @@ describe('cronRoutes /api/cron/sync-sheets', () => {
     app = module.createApp();
   });
 
-  it('rejects when x-cron-secret is missing or invalid', async () => {
+  it('rejects when x-service-secret is missing or invalid', async () => {
     const res1 = await request(app).post('/api/cron/sync-sheets');
     expect(res1.status).toBe(401);
 
     const res2 = await request(app)
       .post('/api/cron/sync-sheets')
-      .set('x-cron-secret', 'wrong');
+      .set('x-service-secret', 'wrong');
     expect(res2.status).toBe(401);
   });
 
@@ -60,7 +60,7 @@ describe('cronRoutes /api/cron/sync-sheets', () => {
 
     const res = await request(app)
       .post('/api/cron/sync-sheets')
-      .set('x-cron-secret', 'test-secret');
+      .set('x-service-secret', 'test-secret');
 
     expect(res.status).toBe(200);
     expect(runSheetsSyncMock).toHaveBeenCalledWith({
@@ -90,7 +90,7 @@ describe('cronRoutes /api/cron/sync-sheets', () => {
 
     const res = await request(app)
       .post('/api/cron/sync-sheets?dryRun=true')
-      .set('x-cron-secret', 'test-secret');
+      .set('x-service-secret', 'test-secret');
 
     expect(res.status).toBe(200);
     expect(runSheetsSyncMock).toHaveBeenCalledWith({
@@ -127,7 +127,7 @@ describe('cronRoutes /api/cron/sync-sheets', () => {
 
     const res = await request(app)
       .post('/api/cron/accounting-sync')
-      .set('x-cron-secret', 'test-secret');
+      .set('x-service-secret', 'test-secret');
 
     expect(res.status).toBe(200);
     expect(runDailyAccountingSyncMock).toHaveBeenCalledWith({
@@ -157,7 +157,7 @@ describe('cronRoutes /api/cron/sync-sheets', () => {
 
     const res = await request(app)
       .post('/api/cron/accounting-sync?dryRun=true&includeSheets=false&includeQuickBooks=true&postDelaySeconds=300')
-      .set('x-cron-secret', 'test-secret');
+      .set('x-service-secret', 'test-secret');
 
     expect(res.status).toBe(200);
     expect(runDailyAccountingSyncMock).toHaveBeenCalledWith({

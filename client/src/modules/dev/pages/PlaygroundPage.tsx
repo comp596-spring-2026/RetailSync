@@ -37,8 +37,7 @@ const SERVER_ENV_ITEMS = [
   'PORT',
   'MONGO_URI',
   'CLIENT_URL',
-  'JWT_ACCESS_SECRET',
-  'JWT_REFRESH_SECRET'
+  'ENCRYPTION_KEY'
 ];
 
 const getHealthUrl = (apiBase: string) => {
@@ -191,7 +190,7 @@ export const PlaygroundPage = () => {
                 <ListItem>
                   <ListItemText
                     primary="Server env file is present"
-                    secondary="Required: PORT, MONGO_URI, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, CLIENT_URL"
+                    secondary="Required: PORT, MONGO_URI, ENCRYPTION_KEY, CLIENT_URL"
                   />
                 </ListItem>
                 <ListItem>

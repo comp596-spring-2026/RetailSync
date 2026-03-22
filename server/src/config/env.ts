@@ -1,6 +1,30 @@
 import dotenv from "dotenv";
+import { createHmac } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+
+const parseBooleanFlag = (...values: Array<string | undefined>) =>
+  values.some((value) => {
+    if (!value) return false;
+    const normalized = value.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+  });
+
+const getEncryptionKeyBuffer = (value: string | undefined) => {
+  if (!value) {
+    throw new Error("Missing env var: ENCRYPTION_KEY");
+  }
+
+  const key = Buffer.from(value, "base64");
+  if (key.length !== 32) {
+    throw new Error("ENCRYPTION_KEY must be base64-encoded 32-byte key");
+  }
+
+  return key;
+};
+
+const deriveSecret = (masterKey: Buffer, purpose: string) =>
+  createHmac("sha256", masterKey).update(`retailsync:${purpose}`).digest("base64url");
 
 const envCandidates = [
   resolve(process.cwd(), "server/.env"),
@@ -29,8 +53,7 @@ for (const path of exampleCandidates) {
 const required = [
   "PORT",
   "MONGO_URI",
-  "JWT_ACCESS_SECRET",
-  "JWT_REFRESH_SECRET",
+  "ENCRYPTION_KEY",
   "CLIENT_URL",
 ] as const;
 
@@ -40,14 +63,16 @@ for (const key of required) {
   }
 }
 
+const encryptionKeyBuffer = getEncryptionKeyBuffer(process.env.ENCRYPTION_KEY);
+
 export const env = {
   port: Number(process.env.PORT ?? 4000),
   mongoUri: process.env.MONGO_URI as string,
-  accessSecret: process.env.JWT_ACCESS_SECRET as string,
-  refreshSecret: process.env.JWT_REFRESH_SECRET as string,
+  accessSecret: deriveSecret(encryptionKeyBuffer, "jwt-access"),
+  refreshSecret: deriveSecret(encryptionKeyBuffer, "jwt-refresh"),
   clientUrl: process.env.CLIENT_URL as string,
   nodeEnv: process.env.NODE_ENV ?? "development",
-  encryptionKey: process.env.ENCRYPTION_KEY,
+  encryptionKey: process.env.ENCRYPTION_KEY as string,
   googleOAuthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
   googleOAuthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
   googleAuthRedirectUri: process.env.GOOGLE_AUTH_REDIRECT_URI,
@@ -56,10 +81,9 @@ export const env = {
   quickbooksClientSecret: process.env.QUICKBOOKS_CLIENT_SECRET,
   quickbooksIntegrationRedirectUri: process.env.QUICKBOOKS_INTEGRATION_REDIRECT_URI,
   googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
-  cronSecret: process.env.CRON_SECRET,
+  serviceSecret: process.env.ENCRYPTION_KEY as string,
   gcsBucketName: process.env.GCS_BUCKET_NAME,
   tasksMode: process.env.TASKS_MODE === 'cloud' ? 'cloud' : 'inline',
-  internalTasksSecret: process.env.INTERNAL_TASKS_SECRET ?? process.env.CRON_SECRET,
   internalTasksEndpoint: process.env.INTERNAL_TASKS_ENDPOINT,
   gcpProjectId: process.env.GCP_PROJECT_ID,
   gcpRegion: process.env.GCP_REGION ?? 'us-west1',
@@ -67,5 +91,5 @@ export const env = {
   tasksQueueSync: process.env.TASKS_QUEUE_SYNC ?? 'sync-integrations-dev',
   tasksOidcServiceAccountEmail: process.env.TASKS_OIDC_SERVICE_ACCOUNT_EMAIL,
   apiServiceName: process.env.API_SERVICE_NAME,
-  workerServiceName: process.env.WORKER_SERVICE_NAME,
+  debugVerboseApi: parseBooleanFlag(process.env.DEBUG_VERBOSE_API, process.env.DEBUG),
 };

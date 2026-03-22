@@ -350,7 +350,7 @@ Main UI pieces:
   Generated at
 
 [Log Shortcuts]
-  API logs | Worker logs | Failed tasks | QuickBooks sync
+  API logs | Task logs | Failed tasks | QuickBooks sync
 
 [Recent Statements Table]
 [Failed Runs Table]

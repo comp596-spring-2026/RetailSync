@@ -11,6 +11,7 @@ Base URL: `http://localhost:4000/api`
 
 - `GET /health`
 - `GET /health/env-readiness`
+  - includes optional runtime flags such as `DEBUG_VERBOSE_API`
 
 ## Auth
 
@@ -223,8 +224,8 @@ Debug endpoints:
 
 ## Cron
 
-- `POST /cron/sync-sheets` (expects `x-cron-secret` when configured)
-- `POST /cron/accounting-sync` (expects `x-cron-secret`; supports `dryRun`, `includeSheets`, `includeQuickBooks`, `postDelaySeconds`)
+- `POST /cron/sync-sheets` (expects `x-service-secret` when configured)
+- `POST /cron/accounting-sync` (expects `x-service-secret`; supports `dryRun`, `includeSheets`, `includeQuickBooks`, `postDelaySeconds`)
 
 ## Module Shell CRUD (placeholder)
 

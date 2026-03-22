@@ -4,6 +4,7 @@ import { NextFunction, Request, Response } from 'express';
 type RequestContext = {
   tenantId?: string;
   userId?: string;
+  requestId?: string;
 };
 
 const storage = new AsyncLocalStorage<RequestContext>();
@@ -21,6 +22,9 @@ export const setRequestContext = (partial: RequestContext) => {
   }
   if (partial.userId !== undefined) {
     store.userId = partial.userId;
+  }
+  if (partial.requestId !== undefined) {
+    store.requestId = partial.requestId;
   }
 };
 

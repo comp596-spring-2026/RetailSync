@@ -23,23 +23,19 @@ const buildLogsUrl = (projectId: string, query: string) => {
   return `https://console.cloud.google.com/logs/query;query=${encoded}?project=${projectId}`;
 };
 
-const getServiceNames = () => {
-  const apiName = env.apiServiceName ?? 'retailsync-api-dev';
-  const workerName = env.workerServiceName ?? 'retailsync-worker-dev';
-  return { apiName, workerName };
-};
+const getApiServiceName = () => env.apiServiceName ?? 'retailsync-api-dev';
 
 const buildGcpLinks = () => {
   if (!env.gcpProjectId) {
     return {
       apiLogsUrl: null,
-      workerLogsUrl: null,
-      failedAccountingTasksUrl: null,
+      taskLogsUrl: null,
+      failedTaskLogsUrl: null,
       quickbooksSyncUrl: null
     };
   }
 
-  const { apiName, workerName } = getServiceNames();
+  const apiName = getApiServiceName();
   const region = env.gcpRegion ?? 'us-west1';
   const commonFilters = `resource.type="cloud_run_revision" AND resource.labels.location="${region}"`;
 
@@ -48,17 +44,17 @@ const buildGcpLinks = () => {
       env.gcpProjectId,
       `${commonFilters} AND resource.labels.service_name="${apiName}"`
     ),
-    workerLogsUrl: buildLogsUrl(
+    taskLogsUrl: buildLogsUrl(
       env.gcpProjectId,
-      `${commonFilters} AND resource.labels.service_name="${workerName}"`
+      `${commonFilters} AND resource.labels.service_name="${apiName}" AND (textPayload:"[accounting.task." OR textPayload:"[accounting.queue.")`
     ),
-    failedAccountingTasksUrl: buildLogsUrl(
+    failedTaskLogsUrl: buildLogsUrl(
       env.gcpProjectId,
-      `${commonFilters} AND resource.labels.service_name="${workerName}" AND textPayload:"[accounting.task.failed]"`
+      `${commonFilters} AND resource.labels.service_name="${apiName}" AND textPayload:"[accounting.task.failed]"`
     ),
     quickbooksSyncUrl: buildLogsUrl(
       env.gcpProjectId,
-      `${commonFilters} AND resource.labels.service_name="${workerName}" AND (textPayload:"quickbooks.refresh_reference_data" OR textPayload:"quickbooks.post_approved")`
+      `${commonFilters} AND resource.labels.service_name="${apiName}" AND (textPayload:"quickbooks.refresh_reference_data" OR textPayload:"quickbooks.post_approved")`
     )
   };
 };
@@ -213,7 +209,7 @@ export const runAccountingObservabilityDebug = async (req: Request, res: Respons
   const envReadiness = {
     tasksMode: env.tasksMode,
     hasGcsBucketName: Boolean(env.gcsBucketName),
-    hasInternalTasksSecret: Boolean(env.internalTasksSecret),
+    hasServiceSecret: Boolean(env.serviceSecret),
     hasInternalTasksEndpoint: Boolean(env.internalTasksEndpoint),
     hasGcpProjectId: Boolean(env.gcpProjectId),
     hasPipelineQueue: Boolean(env.tasksQueuePipeline),
@@ -223,8 +219,7 @@ export const runAccountingObservabilityDebug = async (req: Request, res: Respons
         env.quickbooksClientSecret &&
         env.quickbooksIntegrationRedirectUri
     ),
-    apiServiceName: env.apiServiceName ?? null,
-    workerServiceName: env.workerServiceName ?? null
+    apiServiceName: env.apiServiceName ?? null
   };
 
   const actions: string[] = [];
