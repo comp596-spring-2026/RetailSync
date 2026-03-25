@@ -38,25 +38,25 @@ const {
 vi.mock('axios', () => ({
   default: {
     create: vi.fn(() => apiInstanceMock),
-    post: (...args: unknown[]) => axiosPostMock(...args)
+    post: axiosPostMock
   }
 }));
 
 vi.mock('../store', () => ({
   store: {
-    dispatch: (...args: unknown[]) => dispatchMock(...args),
-    getState: (...args: unknown[]) => getStateMock(...args)
+    dispatch: dispatchMock,
+    getState: getStateMock
   }
 }));
 
 vi.mock('../../modules/users/state', () => ({
-  clearCompany: (...args: unknown[]) => clearCompanyMock(...args)
+  clearCompany: clearCompanyMock
 }));
 
 vi.mock('../../modules/auth/state', () => ({
-  logout: (...args: unknown[]) => logoutMock(...args),
-  setAccessToken: (...args: unknown[]) => setAccessTokenMock(...args),
-  syncAuthContextThunk: (...args: unknown[]) => syncAuthContextThunkMock(...args)
+  logout: logoutMock,
+  setAccessToken: setAccessTokenMock,
+  syncAuthContextThunk: syncAuthContextThunkMock
 }));
 
 describe('api client refresh interceptor', () => {
