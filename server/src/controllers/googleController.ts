@@ -157,9 +157,8 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
     secure: env.nodeEnv === "production",
   });
 
-  let oauthClient;
   try {
-    oauthClient = createGoogleOAuthClient();
+    createGoogleOAuthClient();
   } catch {
     return redirectWithStatus(res, "error", "google_oauth_not_configured");
   }
@@ -185,7 +184,7 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
   try {
     const exchanged = await exchangeGoogleAuthorizationCode(code);
     const tokens = exchanged.tokens;
-    oauthClient = exchanged.oauthClient;
+    const oauthClient = exchanged.oauthClient;
 
     if (!tokens.access_token) {
       return redirectWithStatus(res, "error", "access_token_missing");

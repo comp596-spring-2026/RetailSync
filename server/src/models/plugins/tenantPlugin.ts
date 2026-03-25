@@ -12,7 +12,6 @@ const toIdString = (value: unknown) => {
   if (typeof value === "string") return value;
   if (
     typeof value === "object" &&
-    value &&
     "toString" in value &&
     typeof value.toString === "function"
   ) {

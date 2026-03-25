@@ -1,4 +1,4 @@
-import { PosDailySummaryInput, posDailyQuerySchema } from '@retailsync/shared';
+import { posDailyQuerySchema } from '@retailsync/shared';
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
