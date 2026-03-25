@@ -3,7 +3,7 @@ import { authApi } from '../api';
 import { setAuthContext } from '../../modules/auth/state';
 import { setCompany } from '../../modules/users/state';
 
-type MeData = {
+export type MeData = {
   user: { _id: string; firstName: string; lastName: string; email: string; companyId: string | null; roleId: string | null };
   role: { _id: string; name: string; isSystem: boolean; permissions: Record<string, boolean> } | null;
   permissions: Record<string, boolean> | null;

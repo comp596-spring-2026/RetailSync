@@ -1,6 +1,6 @@
 /**
  * Component barrel: import from '@/components' or '../components'.
- * Structure: ui | brand | guards | pos | common
+ * Structure: ui | brand | common
  */
 export {
   BrandLogo,
@@ -25,8 +25,6 @@ export {
   ActionCard
 } from './common';
 export type { CrudField, CrudFieldOption, CrudColumn, DateRange } from './common';
-export { ImportPOSDataModal, MatchingWizard, PosKpiCard, PosTable, PosToolbar, TabSelectorDialog } from './pos';
-export type { MappingSuggestion } from './pos';
 export {
   AppSnackbar,
   AuthShell,
@@ -37,4 +35,3 @@ export {
   WonderLoader
 } from './ui';
 export type { LoadingEmptyStateWrapperProps } from './ui';
-export { MonthlyBar, MultiStreams, RevenueDonut, TotalSalesLine, WeekdayBar } from './charts';

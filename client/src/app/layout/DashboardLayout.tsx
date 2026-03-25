@@ -28,9 +28,7 @@ import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { authApi } from '../api';
-import { clearCompany } from '../../modules/users/state';
-import { logout } from '../../modules/auth/state';
+import { logoutThunk } from '../../modules/auth/state';
 import { hasPermission } from '../../utils/permissions';
 import { LogoHorizontal } from '../../components';
 import { useMemo, useState } from 'react';
@@ -58,25 +56,23 @@ export const DashboardLayout = () => {
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const isDevelopment = import.meta.env.DEV;
   const userDisplayName = user ? `${user.firstName} ${user.lastName}` : 'User';
-  const canViewAccountingStatements =
-    hasPermission(permissions, 'accounting', 'view') || hasPermission(permissions, 'bankStatements', 'view');
+  const canViewAccountingStatements = hasPermission(permissions, 'bankStatements', 'view');
   const canViewAccountingLedger = hasPermission(permissions, 'ledger', 'view');
-  const canViewAccountingQuickbooks = hasPermission(permissions, 'quickbooks', 'view');
+  const canViewAccountingObservability = hasPermission(permissions, 'accounting', 'view');
+  const canViewQuickbooksHome = hasPermission(permissions, 'quickbooks', 'view');
+  const canViewQuickbooksOperations = hasPermission(permissions, 'ledger', 'view');
+  const canViewAccountingQuickbooks = canViewQuickbooksHome || canViewQuickbooksOperations;
   const accountingEntryPath = canViewAccountingStatements
     ? '/dashboard/accounting/statements'
     : canViewAccountingLedger
       ? '/dashboard/accounting/ledger'
-      : '/dashboard/accounting/quickbooks';
-  const canViewAccounting = canViewAccountingStatements || canViewAccountingLedger || canViewAccountingQuickbooks;
+      : '/dashboard/accounting/observability';
+  const quickbooksEntryPath = canViewQuickbooksHome ? '/dashboard/quickbooks' : '/dashboard/quickbooks/operations';
+  const canViewAccounting = canViewAccountingStatements || canViewAccountingLedger || canViewAccountingObservability;
 
   const onLogout = async () => {
-    try {
-      await authApi.logout();
-    } finally {
-      dispatch(logout());
-      dispatch(clearCompany());
-      navigate('/dashboard', { replace: true });
-    }
+    await dispatch(logoutThunk()).unwrap();
+    navigate('/dashboard', { replace: true });
   };
 
   const onOpenProfileMenu = (event: React.MouseEvent<HTMLElement>) => {
@@ -121,6 +117,14 @@ export const DashboardLayout = () => {
           path: accountingEntryPath,
           matchPrefix: '/dashboard/accounting',
           icon: <AccountBalanceIcon fontSize="small" />
+        }]
+      : []),
+    ...(canViewAccountingQuickbooks
+      ? [{
+          label: 'QuickBooks',
+          path: quickbooksEntryPath,
+          matchPrefix: '/dashboard/quickbooks',
+          icon: <SyncAltIcon fontSize="small" />
         }]
       : []),
     { label: 'Settings', path: '/dashboard/settings', icon: <SettingsOutlinedIcon fontSize="small" /> }

@@ -1,9 +1,10 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { settingsApi } from '../api';
-import type { RootState } from '../../../app/store';
+import type { AppDispatch, RootState } from '../../../app/store';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import type { GoogleSheetsCanonicalSettings } from '../types/googleSheets';
 import type { IntegrationSettingsCanonical } from '../types/integrationSettings';
+import type { GoogleSheetsSyncOverview, QuickBooksOAuthStatus, SyncProgressState } from '../types';
 import type { QuickBooksCanonicalSettings, QuickBooksSyncStatus } from '../types/quickbooks';
 
 export type GoogleSheetsSettings = {
@@ -414,6 +415,9 @@ type SettingsState = {
   error: string | null;
   oauthStatus: 'ok' | 'error' | null;
   isBusy: boolean;
+  syncOverview: GoogleSheetsSyncOverview | null;
+  quickbooksOAuthStatus: QuickBooksOAuthStatus | null;
+  syncProgress: SyncProgressState;
 };
 
 const initialState: SettingsState = {
@@ -421,7 +425,10 @@ const initialState: SettingsState = {
   loading: false,
   error: null,
   oauthStatus: null,
-  isBusy: false
+  isBusy: false,
+  syncOverview: null,
+  quickbooksOAuthStatus: null,
+  syncProgress: null
 };
 
 export const fetchSettings = createAsyncThunk<IntegrationSettingsCanonical>(
@@ -451,6 +458,30 @@ export const setGoogleModeThunk = createAsyncThunk<void, 'oauth' | 'service_acco
     await settingsApi.setGoogleMode(mode);
     dispatch(showSnackbar({ message: 'Google mode updated', severity: 'success' }));
     await dispatch(fetchSettings());
+  }
+);
+
+export const fetchGoogleSheetsSyncOverview = createAsyncThunk<GoogleSheetsSyncOverview | null>(
+  'settings/fetchGoogleSheetsSyncOverview',
+  async () => {
+    try {
+      const res = await settingsApi.getGoogleSheetsSyncOverview();
+      return (res.data as { data?: GoogleSheetsSyncOverview })?.data ?? null;
+    } catch {
+      return null;
+    }
+  }
+);
+
+export const fetchQuickbooksOAuthStatus = createAsyncThunk<QuickBooksOAuthStatus | null>(
+  'settings/fetchQuickbooksOAuthStatus',
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await settingsApi.getQuickbooksOAuthStatus();
+      return response.data.data;
+    } catch {
+      return rejectWithValue(null);
+    }
   }
 );
 
@@ -496,6 +527,130 @@ export const disconnectGoogleThunk = createAsyncThunk<void>(
   }
 );
 
+export const saveGoogleSheetsSyncScheduleThunk = createAsyncThunk<
+  void,
+  { enabled: boolean; hour: number; minute: number; timezone: string },
+  { dispatch: AppDispatch }
+>('settings/saveGoogleSheetsSyncSchedule', async (payload, { dispatch }) => {
+  await settingsApi.saveGoogleSheetsSyncSchedule(payload);
+  dispatch(showSnackbar({ message: 'Sync settings updated', severity: 'success' }));
+  await dispatch(fetchSettings());
+});
+
+export const deleteGoogleSheetsSourceThunk = createAsyncThunk<
+  void,
+  {
+    mode: 'oauth' | 'service_account';
+    profileName: 'POS DATA SHEET';
+    deleteType: 'soft' | 'hard';
+    confirmText: string;
+  },
+  { dispatch: AppDispatch }
+>('settings/deleteGoogleSheetsSource', async (payload, { dispatch }) => {
+  await settingsApi.deleteGoogleSheetsSourceBinding(payload);
+  dispatch(
+    showSnackbar({
+      message:
+        payload.deleteType === 'hard'
+          ? 'Hard reset completed. Google Sheets configuration and imported rows were removed.'
+          : 'Soft reset completed. Configuration removed and existing data kept.',
+      severity: 'success',
+    }),
+  );
+  await dispatch(fetchSettings());
+  await dispatch(fetchGoogleSheetsSyncOverview());
+});
+
+export const connectQuickbooksThunk = createAsyncThunk<string, string | undefined>(
+  'settings/connectQuickbooks',
+  async (returnTo) => {
+    const response = await settingsApi.connectQuickbooks(returnTo);
+    const url = (response.data as { data?: { url?: string } })?.data?.url;
+    if (!url) throw new Error('Missing QuickBooks OAuth URL');
+    return url;
+  }
+);
+
+export const disconnectQuickbooksThunk = createAsyncThunk<void, void, { dispatch: AppDispatch }>(
+  'settings/disconnectQuickbooks',
+  async (_, { dispatch }) => {
+    await settingsApi.disconnectQuickbooks();
+    dispatch(showSnackbar({ message: 'QuickBooks disconnected', severity: 'success' }));
+    await dispatch(fetchSettings());
+  }
+);
+
+export const refreshQuickbooksReferencesThunk = createAsyncThunk<void, void, { dispatch: AppDispatch }>(
+  'settings/refreshQuickbooksReferences',
+  async (_, { dispatch }) => {
+    const response = await settingsApi.refreshQuickbooksReferenceData();
+    const queueMode = (response.data as { data?: { queue?: { mode?: string } } })?.data?.queue?.mode;
+    dispatch(
+      showSnackbar({
+        message:
+          queueMode === 'inline'
+            ? 'QuickBooks reference data refreshed.'
+            : 'QuickBooks reference refresh queued.',
+        severity: 'success',
+      }),
+    );
+    await dispatch(fetchSettings());
+    await dispatch(fetchQuickbooksOAuthStatus());
+  }
+);
+
+export const postApprovedQuickbooksThunk = createAsyncThunk<void, void, { dispatch: AppDispatch }>(
+  'settings/postApprovedQuickbooks',
+  async (_, { dispatch }) => {
+    const response = await settingsApi.postApprovedToQuickbooks();
+    const queueMode = (response.data as { data?: { queue?: { mode?: string } } })?.data?.queue?.mode;
+    dispatch(
+      showSnackbar({
+        message:
+          queueMode === 'inline'
+            ? 'Approved ledger entries posted to QuickBooks.'
+            : 'Post-approved sync queued.',
+        severity: 'success',
+      }),
+    );
+    await dispatch(fetchSettings());
+    await dispatch(fetchQuickbooksOAuthStatus());
+  }
+);
+
+export const commitGoogleSheetsImportThunk = createAsyncThunk<
+  { imported: number; upserted: number; modified: number },
+  {
+    connectorKey?: string;
+    integrationType?: 'oauth' | 'shared';
+    sourceId?: string;
+    profileId?: string;
+    mapping?: Record<string, string>;
+    transforms?: Record<string, unknown>;
+    options?: Record<string, unknown>;
+  },
+  { dispatch: AppDispatch }
+>('settings/commitGoogleSheetsImport', async (payload, { dispatch }) => {
+  const response = await settingsApi.commitGoogleSheetsImport(payload);
+  const result = (response.data as {
+    data?: { result?: { imported?: number; upserted?: number; modified?: number } };
+  })?.data?.result;
+  const summary = {
+    imported: Number(result?.imported ?? 0),
+    upserted: Number(result?.upserted ?? 0),
+    modified: Number(result?.modified ?? 0),
+  };
+  dispatch(
+    showSnackbar({
+      message: `Sync completed: ${summary.imported} rows (upserted ${summary.upserted}, updated ${summary.modified})`,
+      severity: 'success',
+    }),
+  );
+  await dispatch(fetchSettings());
+  await dispatch(fetchGoogleSheetsSyncOverview());
+  return summary;
+});
+
 const settingsSlice = createSlice({
   name: 'settings',
   initialState,
@@ -505,6 +660,9 @@ const settingsSlice = createSlice({
     },
     setSettingsError(state, action: PayloadAction<string | null>) {
       state.error = action.payload;
+    },
+    setGoogleSheetsSyncProgress(state, action: PayloadAction<SyncProgressState>) {
+      state.syncProgress = action.payload;
     },
     clearSettingsError(state) {
       state.error = null;
@@ -530,6 +688,15 @@ const settingsSlice = createSlice({
       .addCase(fetchOAuthStatus.rejected, (state) => {
         state.oauthStatus = 'error';
       })
+      .addCase(fetchGoogleSheetsSyncOverview.fulfilled, (state, action) => {
+        state.syncOverview = action.payload;
+      })
+      .addCase(fetchQuickbooksOAuthStatus.fulfilled, (state, action) => {
+        state.quickbooksOAuthStatus = action.payload ?? null;
+      })
+      .addCase(fetchQuickbooksOAuthStatus.rejected, (state) => {
+        state.quickbooksOAuthStatus = null;
+      })
       .addCase(setGoogleModeThunk.pending, (state) => { state.isBusy = true; })
       .addCase(setGoogleModeThunk.fulfilled, (state) => { state.isBusy = false; })
       .addCase(setGoogleModeThunk.rejected, (state) => { state.isBusy = false; })
@@ -544,11 +711,32 @@ const settingsSlice = createSlice({
       .addCase(resetGoogleSheetsThunk.rejected, (state) => { state.isBusy = false; })
       .addCase(disconnectGoogleThunk.pending, (state) => { state.isBusy = true; })
       .addCase(disconnectGoogleThunk.fulfilled, (state) => { state.isBusy = false; })
-      .addCase(disconnectGoogleThunk.rejected, (state) => { state.isBusy = false; });
+      .addCase(disconnectGoogleThunk.rejected, (state) => { state.isBusy = false; })
+      .addCase(saveGoogleSheetsSyncScheduleThunk.pending, (state) => { state.isBusy = true; })
+      .addCase(saveGoogleSheetsSyncScheduleThunk.fulfilled, (state) => { state.isBusy = false; })
+      .addCase(saveGoogleSheetsSyncScheduleThunk.rejected, (state) => { state.isBusy = false; })
+      .addCase(deleteGoogleSheetsSourceThunk.pending, (state) => { state.isBusy = true; })
+      .addCase(deleteGoogleSheetsSourceThunk.fulfilled, (state) => { state.isBusy = false; })
+      .addCase(deleteGoogleSheetsSourceThunk.rejected, (state) => { state.isBusy = false; })
+      .addCase(connectQuickbooksThunk.pending, (state) => { state.isBusy = true; })
+      .addCase(connectQuickbooksThunk.fulfilled, (state) => { state.isBusy = false; })
+      .addCase(connectQuickbooksThunk.rejected, (state) => { state.isBusy = false; })
+      .addCase(disconnectQuickbooksThunk.pending, (state) => { state.isBusy = true; })
+      .addCase(disconnectQuickbooksThunk.fulfilled, (state) => { state.isBusy = false; })
+      .addCase(disconnectQuickbooksThunk.rejected, (state) => { state.isBusy = false; })
+      .addCase(refreshQuickbooksReferencesThunk.pending, (state) => { state.isBusy = true; })
+      .addCase(refreshQuickbooksReferencesThunk.fulfilled, (state) => { state.isBusy = false; })
+      .addCase(refreshQuickbooksReferencesThunk.rejected, (state) => { state.isBusy = false; })
+      .addCase(postApprovedQuickbooksThunk.pending, (state) => { state.isBusy = true; })
+      .addCase(postApprovedQuickbooksThunk.fulfilled, (state) => { state.isBusy = false; })
+      .addCase(postApprovedQuickbooksThunk.rejected, (state) => { state.isBusy = false; })
+      .addCase(commitGoogleSheetsImportThunk.pending, (state) => { state.isBusy = true; })
+      .addCase(commitGoogleSheetsImportThunk.fulfilled, (state) => { state.isBusy = false; })
+      .addCase(commitGoogleSheetsImportThunk.rejected, (state) => { state.isBusy = false; });
   }
 });
 
-export const { setOAuthStatus, setSettingsError, clearSettingsError } = settingsSlice.actions;
+export const { setOAuthStatus, setSettingsError, setGoogleSheetsSyncProgress, clearSettingsError } = settingsSlice.actions;
 
 const settingsState = (state: RootState) => (state as unknown as { settings?: SettingsState }).settings;
 
@@ -566,5 +754,8 @@ export const selectSettingsLoading = (state: RootState) => settingsState(state)?
 export const selectSettingsError = (state: RootState) => settingsState(state)?.error ?? null;
 export const selectOAuthStatus = (state: RootState) => settingsState(state)?.oauthStatus ?? null;
 export const selectSettingsIsBusy = (state: RootState) => settingsState(state)?.isBusy ?? false;
+export const selectGoogleSheetsSyncOverview = (state: RootState) => settingsState(state)?.syncOverview ?? null;
+export const selectQuickbooksOAuthStatus = (state: RootState) => settingsState(state)?.quickbooksOAuthStatus ?? null;
+export const selectGoogleSheetsSyncProgress = (state: RootState) => settingsState(state)?.syncProgress ?? null;
 
 export default settingsSlice.reducer;

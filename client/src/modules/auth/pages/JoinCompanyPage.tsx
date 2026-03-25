@@ -6,11 +6,10 @@ import { companyJoinSchema } from '@retailsync/shared';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { companyApi } from '../../users/api';
 import { useAppDispatch } from '../../../app/store/hooks';
-import { fetchMeAndSync } from '../../../app/auth/fetchMeAndSync';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import { AuthShell } from '../../../components';
+import { joinCompanyThunk } from '../../users/state';
 
 type JoinForm = z.infer<typeof companyJoinSchema>;
 
@@ -25,9 +24,7 @@ export const JoinCompanyPage = () => {
 
   const onSubmit = async (values: JoinForm) => {
     try {
-      await companyApi.join(values);
-      await fetchMeAndSync(dispatch);
-      dispatch(showSnackbar({ message: 'Joined company', severity: 'success' }));
+      await dispatch(joinCompanyThunk(values)).unwrap();
       navigate('/dashboard', { replace: true });
     } catch (error) {
       dispatch(showSnackbar({ message: 'Join request failed', severity: 'error' }));

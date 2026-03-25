@@ -13,7 +13,7 @@ import {
   createQuickBooksTransferTransaction,
   listQuickBooksAccounts,
   listQuickBooksEntities
-} from './quickbooksService';
+} from '../integrations/quickbooks';
 
 type SyncStatus = 'idle' | 'running' | 'success' | 'error';
 type SyncJobType = 'quickbooks.refresh_reference_data' | 'quickbooks.post_approved';

@@ -10,11 +10,11 @@ import AddBoxIcon from '@mui/icons-material/AddBox';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import SaveIcon from '@mui/icons-material/Save';
 import { useState } from 'react';
-import { itemsApi } from '../../api';
 import { PermissionGate } from '../../../../app/guards';
 import { useAppDispatch, useAppSelector } from '../../../../app/store/hooks';
 import { showSnackbar } from '../../../../app/store/uiSlice';
 import { hasPermission } from '../../../../utils/permissions';
+import { createItemThunk } from '../../state';
 
 type Props = {
   onCreated: () => Promise<void> | void;
@@ -40,16 +40,17 @@ export const ItemsFormSection = ({ onCreated }: Props) => {
       return;
     }
 
-    await itemsApi.create({
-      upc: form.upc,
-      modifier: form.modifier,
-      description: form.description,
-      department: form.department,
-      price: Number(form.price),
-      sku: form.sku
-    });
+    await dispatch(
+      createItemThunk({
+        upc: form.upc,
+        modifier: form.modifier,
+        description: form.description,
+        department: form.department,
+        price: Number(form.price),
+        sku: form.sku
+      })
+    ).unwrap();
     setForm({ upc: '', modifier: '', description: '', department: '', price: '', sku: '' });
-    dispatch(showSnackbar({ message: 'Item created', severity: 'success' }));
     await onCreated();
   };
 

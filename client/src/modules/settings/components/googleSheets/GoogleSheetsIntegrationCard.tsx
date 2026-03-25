@@ -34,6 +34,7 @@ import SettingsIcon from "@mui/icons-material/Settings";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { settingsApi } from "../../api";
 import type { GoogleSheetMode } from '../../api';
+import type { GoogleSheetsSyncOverview } from '../../types';
 import { GoogleSheetsSetupInline } from "./GoogleSheetsSetupInline";
 import { MappingModal } from "./MappingModal";
 import {
@@ -111,16 +112,6 @@ export type GoogleSheetsSettings = {
       createdAt?: string | null;
       createdBy?: string | null;
     } | null;
-  }>;
-};
-
-export type GoogleSheetsSyncOverview = {
-  totalEntries: number;
-  lastUpdatedAt: string | null;
-  byProfile: Array<{
-    profileName: string;
-    entries: number;
-    lastUpdatedAt: string | null;
   }>;
 };
 

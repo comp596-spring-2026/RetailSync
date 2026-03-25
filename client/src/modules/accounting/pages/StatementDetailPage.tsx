@@ -75,9 +75,7 @@ export const StatementDetailPage = () => {
   const navigate = useNavigate();
   const { statementId } = useParams<{ statementId: string }>();
   const permissions = useAppSelector((state) => state.auth.permissions);
-  const canView =
-    hasPermission(permissions, 'accounting', 'view') ||
-    hasPermission(permissions, 'bankStatements', 'view');
+  const canView = hasPermission(permissions, 'bankStatements', 'view');
   const canEdit = hasPermission(permissions, 'bankStatements', 'edit');
 
   const [statement, setStatement] = useState<StatementDetail | null>(null);

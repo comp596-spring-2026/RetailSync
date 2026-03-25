@@ -7,11 +7,23 @@ import authReducer from '../../modules/auth/state';
 import companyReducer from '../../modules/users/state';
 import rbacReducer from '../../modules/rbac/state';
 import uiReducer from '../../app/store/uiSlice';
-import { setAccessToken, setAuthContext } from '../../modules/auth/state';
+import { markAuthRehydrated, setAccessToken, setAuthContext } from '../../modules/auth/state';
 import { OnboardingGuard } from './OnboardingGuard';
 
-const createStore = (overrides: { accessToken?: string | null; companyId?: string | null } = {}) => {
-  const { accessToken = 'token', companyId = null } = overrides;
+const createStore = (
+  overrides: {
+    accessToken?: string | null;
+    companyId?: string | null;
+    rehydrated?: boolean;
+    contextReady?: boolean;
+  } = {}
+) => {
+  const {
+    accessToken = 'token',
+    companyId = null,
+    rehydrated = true,
+    contextReady = true
+  } = overrides;
   const store = configureStore({
     reducer: {
       auth: authReducer,
@@ -20,10 +32,13 @@ const createStore = (overrides: { accessToken?: string | null; companyId?: strin
       ui: uiReducer
     }
   });
+  if (rehydrated) {
+    store.dispatch(markAuthRehydrated());
+  }
   if (accessToken) {
     store.dispatch(setAccessToken(accessToken));
   }
-  if (companyId !== undefined && companyId !== null) {
+  if (contextReady && companyId !== undefined && companyId !== null) {
     store.dispatch(
       setAuthContext({
         user: { _id: 'u1', firstName: 'A', lastName: 'B', email: 'a@b.com', companyId, roleId: null },
@@ -31,7 +46,7 @@ const createStore = (overrides: { accessToken?: string | null; companyId?: strin
         permissions: null
       })
     );
-  } else if (accessToken && companyId === null) {
+  } else if (contextReady && accessToken && companyId === null) {
     store.dispatch(
       setAuthContext({
         user: { _id: 'u1', firstName: 'A', lastName: 'B', email: 'a@b.com', companyId: null, roleId: null },
@@ -77,6 +92,25 @@ describe('OnboardingGuard', () => {
       </Provider>
     );
     expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    expect(screen.queryByText('Onboarding content')).not.toBeInTheDocument();
+  });
+
+  it('shows a restore loader while auth context is still being synchronized', () => {
+    const store = createStore({ accessToken: 'token', companyId: null, contextReady: false });
+    render(
+      <Provider store={store}>
+        <MemoryRouter initialEntries={['/onboarding']}>
+          <Routes>
+            <Route path="/onboarding" element={<OnboardingGuard />}>
+              <Route index element={<div>Onboarding content</div>} />
+            </Route>
+            <Route path="/login" element={<div>Login page</div>} />
+            <Route path="/dashboard" element={<div>Dashboard</div>} />
+          </Routes>
+        </MemoryRouter>
+      </Provider>
+    );
+    expect(screen.getByText('Restoring access...')).toBeInTheDocument();
     expect(screen.queryByText('Onboarding content')).not.toBeInTheDocument();
   });
 

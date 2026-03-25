@@ -9,6 +9,7 @@
     "start": "node --import tsx src/index.ts",
     "seed:pos": "tsx src/scripts/seedPosSample.ts",
     "db:cleanup:google-sheets": "tsx src/scripts/cleanupGoogleSheetsDb.ts",
+    "backfill:role-permissions": "tsx src/scripts/backfillLegacyRolePermissions.ts",
     "storage:cors:accounting": "tsx src/scripts/setAccountingBucketCors.ts",
     "migrate:accounting": "tsx src/scripts/migrateAccounting.ts",
     "test": "pnpm run test:unit",
@@ -47,7 +48,7 @@
     "mongodb-memory-server": "^10.4.3",
     "supertest": "^7.1.0",
     "ts-node-dev": "^2.0.0",
-    "tsx": "^4.19.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   }

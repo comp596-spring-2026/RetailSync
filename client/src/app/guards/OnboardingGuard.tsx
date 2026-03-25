@@ -1,11 +1,16 @@
 import { Navigate, Outlet } from 'react-router-dom';
+import { WonderLoader } from '../../components';
 import { useAppSelector } from '../store/hooks';
 
 export const OnboardingGuard = () => {
   const user = useAppSelector((state) => state.auth.user);
-  const token = useAppSelector((state) => state.auth.accessToken);
+  const { accessToken, isContextReady, isRehydrated } = useAppSelector((state) => state.auth);
 
-  if (!token) {
+  if (!isRehydrated || (accessToken && !isContextReady)) {
+    return <WonderLoader fullscreen label="Restoring access..." />;
+  }
+
+  if (!accessToken) {
     return <Navigate to="/login" replace />;
   }
 

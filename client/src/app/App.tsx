@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { useAppSelector } from "./store/hooks";
 import { OnboardingGuard, ProtectedRoute } from "./guards";
 import { DashboardLayout } from "./layout/DashboardLayout";
 import {
@@ -34,12 +35,44 @@ import { AccessHubPage, UsersPage } from "../modules/users/pages";
 import { ModuleShellPage } from "../layout/ModuleShellPage";
 import {
   LedgerPage,
+  QuickBooksHomePage,
+  QuickBooksOperationsPage,
+  QuickBooksReportsPage,
   ObservabilityPage,
-  QuickBooksSyncPage,
   StatementDetailPage,
   StatementsPage,
   TaxDashboardPage
 } from "../modules/accounting/pages";
+import { hasPermission } from "../utils/permissions";
+
+const AccountingIndexRedirect = () => {
+  const permissions = useAppSelector((state) => state.auth.permissions);
+
+  if (hasPermission(permissions, 'bankStatements', 'view')) {
+    return <Navigate to="statements" replace />;
+  }
+  if (hasPermission(permissions, 'ledger', 'view')) {
+    return <Navigate to="ledger" replace />;
+  }
+  if (hasPermission(permissions, 'accounting', 'view')) {
+    return <Navigate to="observability" replace />;
+  }
+
+  return <Navigate to="/403" replace />;
+};
+
+const QuickBooksIndexRedirect = () => {
+  const permissions = useAppSelector((state) => state.auth.permissions);
+
+  if (hasPermission(permissions, 'quickbooks', 'view')) {
+    return <QuickBooksHomePage />;
+  }
+  if (hasPermission(permissions, 'ledger', 'view')) {
+    return <Navigate to="operations" replace />;
+  }
+
+  return <Navigate to="/403" replace />;
+};
 
 const App = () => {
   return (
@@ -94,13 +127,19 @@ const App = () => {
             element={<ModuleShellPage module="rolesSettings" />}
           />
           <Route path="accounting">
-            <Route index element={<Navigate to="statements" replace />} />
+            <Route index element={<AccountingIndexRedirect />} />
             <Route path="statements" element={<StatementsPage />} />
             <Route path="statements/:statementId" element={<StatementDetailPage />} />
             <Route path="ledger" element={<LedgerPage />} />
-            <Route path="quickbooks" element={<QuickBooksSyncPage />} />
-            <Route path="tax" element={<TaxDashboardPage />} />
+            <Route path="quickbooks" element={<Navigate to="/dashboard/quickbooks" replace />} />
+            <Route path="tax" element={<Navigate to="/dashboard/quickbooks/tax" replace />} />
             <Route path="observability" element={<ObservabilityPage />} />
+          </Route>
+          <Route path="quickbooks">
+            <Route index element={<QuickBooksIndexRedirect />} />
+            <Route path="reports" element={<QuickBooksReportsPage />} />
+            <Route path="operations" element={<QuickBooksOperationsPage />} />
+            <Route path="tax" element={<TaxDashboardPage />} />
           </Route>
           <Route path="settings" element={<SettingsPage />} />
         </Route>

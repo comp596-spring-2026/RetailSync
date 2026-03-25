@@ -1,9 +1,11 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { describe, expect, it, vi } from 'vitest';
+import { moduleKeys, type PermissionsMap } from '@retailsync/shared';
 import authReducer from '../../modules/auth/state';
 import companyReducer from '../../modules/users/state';
 import rbacReducer from '../../modules/rbac/state';
 import uiReducer from '../../app/store/uiSlice';
+import { setAuthContext } from '../../modules/auth/state';
 import { fetchMeAndSync } from './fetchMeAndSync';
 
 const mockMe = vi.fn();
@@ -15,6 +17,27 @@ vi.mock('../api', () => ({
 }));
 
 describe('fetchMeAndSync', () => {
+  const createStalePermissions = () => ({
+    items: { view: true, create: false, edit: false, delete: false, actions: [] }
+  }) as PermissionsMap;
+
+  const createCurrentPermissions = () => {
+    const permissions = {} as PermissionsMap;
+    for (const moduleKey of moduleKeys) {
+      permissions[moduleKey] = {
+        view: moduleKey !== 'rolesSettings',
+        create: false,
+        edit: false,
+        delete: false,
+        actions: []
+      };
+    }
+    if (permissions.quickbooks) {
+      permissions.quickbooks.actions = ['connect', 'sync'];
+    }
+    return permissions;
+  };
+
   it('calls authApi.me(), dispatches setAuthContext and setCompany, and returns me data', async () => {
     const meData = {
       user: {
@@ -98,5 +121,71 @@ describe('fetchMeAndSync', () => {
 
     expect(result.company).toBeNull();
     expect(store.getState().company.company).toBeNull();
+  });
+
+  it('replaces stale persisted permissions with the current /auth/me payload during bootstrap', async () => {
+    const currentPermissions = createCurrentPermissions();
+    const store = configureStore({
+      reducer: {
+        auth: authReducer,
+        company: companyReducer,
+        rbac: rbacReducer,
+        ui: uiReducer
+      }
+    });
+
+    store.dispatch(
+      setAuthContext({
+        user: {
+          _id: 'u-stale',
+          firstName: 'Stale',
+          lastName: 'User',
+          email: 'stale@example.com',
+          companyId: 'c1',
+          roleId: 'r1'
+        },
+        role: null,
+        permissions: createStalePermissions()
+      })
+    );
+
+    mockMe.mockResolvedValue({
+      data: {
+        data: {
+          user: {
+            _id: 'u-stale',
+            firstName: 'Fresh',
+            lastName: 'User',
+            email: 'fresh@example.com',
+            companyId: 'c1',
+            roleId: 'r1'
+          },
+          role: {
+            _id: 'r1',
+            name: 'Member',
+            isSystem: true,
+            permissions: currentPermissions
+          },
+          permissions: currentPermissions,
+          company: {
+            _id: 'c1',
+            name: 'Acme',
+            code: 'ACM',
+            businessType: 'Retail',
+            address: '1 Main St',
+            phone: '555',
+            email: 'acme@example.com',
+            timezone: 'America/New_York',
+            currency: 'USD'
+          }
+        }
+      }
+    });
+
+    await fetchMeAndSync(store.dispatch);
+
+    expect(store.getState().auth.permissions).toEqual(currentPermissions);
+    expect(store.getState().auth.permissions?.quickbooks?.actions).toEqual(['connect', 'sync']);
+    expect(store.getState().auth.permissions?.accounting?.view).toBe(true);
   });
 });

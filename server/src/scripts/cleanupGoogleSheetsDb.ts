@@ -1,7 +1,7 @@
 import mongoose, { Types } from 'mongoose';
 import { connectDb } from '../db/connect';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
-import { cleanupGoogleSheetsConfig } from '../utils/googleSheetsDbCleanup';
+import { cleanupGoogleSheetsConfig } from '../integrations/google/cleanup';
 
 type ScriptOptions = {
   apply: boolean;

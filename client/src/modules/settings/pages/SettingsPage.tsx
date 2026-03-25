@@ -23,40 +23,22 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ErrorIcon from "@mui/icons-material/Error";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import AutorenewIcon from "@mui/icons-material/Autorenew";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AxiosError } from "axios";
 import { NoAccess, PageHeader } from "../../../components";
-import {
-  GoogleSheetsIntegrationCard,
-  type GoogleSheetsSyncOverview,
-} from "../components/googleSheets/GoogleSheetsIntegrationCard";
-import {
-  QuickBooksIntegrationCard,
-  type QuickBooksOAuthStatus,
-} from "../components";
+import { GoogleSheetsIntegrationCard, QuickBooksIntegrationCard } from "../components";
 import {
   getDebugOutcome,
 } from "../components/googleSheets/debugOutcomeGuide";
-import { settingsApi, type GoogleSheetMode } from '../api';
-import { posApi } from '../../pos/api';
-import { accountingApi } from "../../accounting/api";
+import { settingsApi } from '../api';
 import { useAppDispatch, useAppSelector } from "../../../app/store/hooks";
 import { showSnackbar } from "../../../app/store/uiSlice";
 import { hasPermission } from "../../../utils/permissions";
 import { getAppErrorMessage } from "../../../constants/errorCodes";
+import { useSettingsPageViewModel } from "../hooks";
 import {
-  fetchSettings,
-  fetchOAuthStatus,
-  setGoogleModeThunk,
-  configureSharedSheetThunk,
-  verifySharedSheetThunk,
   resetGoogleSheetsThunk,
-  selectSettings,
-  selectSettingsLoading,
-  selectSettingsError,
-  selectOAuthStatus,
-  selectSettingsIsBusy,
 } from "../state";
 
 const OAUTH_WIZARD_RESUME_KEY = "retailsync.googleSheets.oauthResumeWizard";
@@ -95,74 +77,40 @@ export const SettingsPage = () => {
   const canViewQuickbooks = hasPermission(permissions, "quickbooks", "view");
   const canSyncQuickbooks = hasPermission(permissions, "quickbooks", "actions:sync");
 
-  const settings = useAppSelector(selectSettings);
-  const loading = useAppSelector(selectSettingsLoading);
-  const error = useAppSelector(selectSettingsError);
-  const oauthStatus = useAppSelector(selectOAuthStatus);
-  const isBusyRedux = useAppSelector(selectSettingsIsBusy);
-  const [isBusyLocal, setIsBusyLocal] = useState(false);
-  const isBusy = isBusyRedux || isBusyLocal;
-
-  const [sharedSpreadsheetId, setSharedSpreadsheetId] = useState("");
-  const [sharedSheetName, setSharedSheetName] = useState("Sheet1");
-  const [sharedHeaderRow, setSharedHeaderRow] = useState(1);
   const [integrationsExpanded, setIntegrationsExpanded] = useState(true);
   const [expandGoogleConfigureSection, setExpandGoogleConfigureSection] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugTitle, setDebugTitle] = useState("Google Sheets Debug");
   const [debugSteps, setDebugSteps] = useState<DebugStep[]>([]);
   const [debugRunning, setDebugRunning] = useState(false);
-  const [googleSheetsSyncOverview, setGoogleSheetsSyncOverview] = useState<GoogleSheetsSyncOverview | null>(null);
-  const [googleSheetsSyncProgress, setGoogleSheetsSyncProgress] = useState<{ percent: number; stage: string } | null>(null);
-  const [quickbooksOauthStatus, setQuickbooksOauthStatus] = useState<QuickBooksOAuthStatus | null>(null);
-
-  const loadGoogleSheetsSyncOverview = useCallback(async () => {
-    try {
-      const res = await settingsApi.getGoogleSheetsSyncOverview();
-      setGoogleSheetsSyncOverview((res.data as { data?: GoogleSheetsSyncOverview })?.data ?? null);
-    } catch {
-      setGoogleSheetsSyncOverview(null);
-    }
-  }, []);
-
-  const loadQuickbooksOAuthStatus = useCallback(async () => {
-    if (!canViewQuickbooks) {
-      setQuickbooksOauthStatus(null);
-      return;
-    }
-    try {
-      const response = await accountingApi.getQuickbooksOAuthStatus();
-      setQuickbooksOauthStatus(response.data.data);
-    } catch {
-      setQuickbooksOauthStatus(null);
-    }
-  }, [canViewQuickbooks]);
-
-  const reloadQuickbooksSurface = useCallback(async () => {
-    const nextSettings = await dispatch(fetchSettings()).unwrap();
-    if (nextSettings.quickbooks.connected && canViewQuickbooks) {
-      await loadQuickbooksOAuthStatus();
-      return;
-    }
-    setQuickbooksOauthStatus(null);
-  }, [dispatch, canViewQuickbooks, loadQuickbooksOAuthStatus]);
-
-  useEffect(() => {
-    void dispatch(fetchSettings());
-  }, [dispatch]);
-
-  useEffect(() => {
-    if (!settings) return;
-    if (settings.googleSheets.sharedConfig) {
-      setSharedSpreadsheetId(
-        settings.googleSheets.sharedConfig.spreadsheetId ?? "",
-      );
-      setSharedSheetName(
-        settings.googleSheets.sharedConfig.sheetName || "Sheet1",
-      );
-      setSharedHeaderRow(settings.googleSheets.sharedConfig.headerRow || 1);
-    }
-  }, [settings]);
+  const {
+    settings,
+    loading,
+    error,
+    oauthStatus,
+    isBusy,
+    syncOverview: googleSheetsSyncOverview,
+    syncProgress: googleSheetsSyncProgress,
+    quickbooksOauthStatus,
+    onModeChange,
+    onSyncNow,
+    onSaveSyncSchedule,
+    onDeleteSheetSource,
+    onSaveSharedConfig,
+    onVerifySharedConfig,
+    onCheckOAuthStatus,
+    onToggleUpdateDbWithSheet,
+    onConnectQuickbooks,
+    onDisconnectQuickbooks,
+    onRefreshQuickbooksReferences,
+    onPostApprovedQuickbooks,
+    onRefreshQuickbooksStatus,
+    refreshSettings,
+  } = useSettingsPageViewModel({
+    canEdit,
+    canViewQuickbooks,
+    canSyncQuickbooks,
+  });
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -189,7 +137,7 @@ export const SettingsPage = () => {
           severity: "success",
         }),
       );
-      void dispatch(fetchSettings()).finally(() => {
+      void refreshSettings().finally(() => {
         navigate("/dashboard/settings", { replace: true });
       });
       return;
@@ -201,7 +149,7 @@ export const SettingsPage = () => {
           severity: "error",
         }),
       );
-      void dispatch(fetchSettings()).finally(() => {
+      void refreshSettings().finally(() => {
         navigate("/dashboard/settings", { replace: true });
       });
       return;
@@ -227,7 +175,7 @@ export const SettingsPage = () => {
         }),
       );
       console.info("[GoogleSheets OAuth] callback connected; resuming wizard at step 2.");
-      void dispatch(fetchSettings()).finally(() => {
+      void refreshSettings().finally(() => {
         navigate("/dashboard/settings", { replace: true });
       });
       return;
@@ -237,7 +185,7 @@ export const SettingsPage = () => {
         reason: reason ?? "unknown",
         query: location.search,
       });
-      void dispatch(fetchSettings()).then((action) => {
+      void refreshSettings().then((action) => {
         const payload = (action as { payload?: { googleSheets?: { oauth?: { connectionStatus?: string } } } }).payload;
         const connected = payload?.googleSheets?.oauth?.connectionStatus === "connected";
         if (connected) {
@@ -280,426 +228,10 @@ export const SettingsPage = () => {
     }
   }, [location.search, dispatch, navigate]);
 
-  useEffect(() => {
-    if (settings?.googleSheets?.connected) {
-      void dispatch(fetchOAuthStatus());
-    }
-  }, [dispatch, settings?.googleSheets?.connected]);
-
-  useEffect(() => {
-    if (!settings) return;
-    void loadGoogleSheetsSyncOverview();
-  }, [settings, loadGoogleSheetsSyncOverview]);
-
-  useEffect(() => {
-    if (!settings?.quickbooks.connected || !canViewQuickbooks) {
-      setQuickbooksOauthStatus(null);
-      return;
-    }
-    void loadQuickbooksOAuthStatus();
-  }, [
-    settings?.quickbooks.connected,
-    settings?.quickbooks.updatedAt,
-    canViewQuickbooks,
-    loadQuickbooksOAuthStatus,
-  ]);
-
   if (!canView) {
     return <NoAccess />;
   }
-  const defaultSharedProfile =
-    settings?.googleSheets.sharedSheets?.find((sheet) => sheet.isDefault) ??
-    settings?.googleSheets.sharedSheets?.[0];
   const quickbooks = settings?.quickbooks ?? null;
-
-  const onModeChange = async (mode: GoogleSheetMode) => {
-    if (!canEdit) return;
-    try {
-      await dispatch(setGoogleModeThunk(mode)).unwrap();
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to update mode"),
-          severity: "error",
-        }),
-      );
-    }
-  };
-
-  const onSyncNow = async () => {
-    if (!canEdit || !settings) return;
-    let progressTimer: ReturnType<typeof setInterval> | null = null;
-    try {
-      setIsBusyLocal(true);
-      setGoogleSheetsSyncProgress({ percent: 12, stage: "Starting sync..." });
-      progressTimer = setInterval(() => {
-        setGoogleSheetsSyncProgress((current) => {
-          if (!current || current.percent >= 90) return current;
-          return { ...current, percent: Math.min(90, current.percent + 8) };
-        });
-      }, 350);
-      const parseRangeTab = (range?: string) => {
-        if (!range) return "Sheet1";
-        const tab = range.split("!")[0]?.trim();
-        return tab ? tab.replace(/^'/, "").replace(/'$/, "") : "Sheet1";
-      };
-
-      let payload: { mapping: Record<string, string>; transforms?: Record<string, unknown>; options?: Record<string, unknown> } | null = null;
-      if (settings.googleSheets.mode === "oauth") {
-        const oauthSource =
-          settings.googleSheets.sources.find((source) => source.name.trim().toUpperCase() === "POS DATA SHEET") ??
-          settings.googleSheets.sources.find((source) => source.active) ??
-          settings.googleSheets.sources[0];
-        if (oauthSource?.spreadsheetId) {
-          payload = {
-            mapping: oauthSource.mapping ?? {},
-            transforms: oauthSource.transformations ?? {},
-            options: {
-              mode: "oauth",
-              profileName: oauthSource.name,
-              sourceId: oauthSource.sourceId,
-              spreadsheetId: oauthSource.spreadsheetId,
-              tab: parseRangeTab(oauthSource.range),
-              headerRow: 1,
-            },
-          };
-        }
-      } else {
-        const sharedProfile =
-          settings.googleSheets.sharedSheets?.find((sheet) => sheet.name.trim().toUpperCase() === "POS DATA SHEET") ??
-          settings.googleSheets.sharedSheets?.find((sheet) => sheet.isDefault) ??
-          settings.googleSheets.sharedSheets?.[0];
-        if (sharedProfile?.spreadsheetId) {
-          payload = {
-            mapping:
-              sharedProfile.columnsMap ??
-              sharedProfile.lastMapping?.columnsMap ??
-              {},
-            transforms: (sharedProfile.lastMapping?.transformations as Record<string, unknown> | undefined) ?? {},
-            options: {
-              mode: "service_account",
-              profileId: sharedProfile.profileId,
-              profileName: sharedProfile.name,
-              tab: sharedProfile.sheetName || "Sheet1",
-              headerRow: Number(sharedProfile.headerRow ?? 1),
-            },
-          };
-        }
-      }
-
-      if (!payload || Object.keys(payload.mapping ?? {}).length === 0) {
-        dispatch(
-          showSnackbar({
-            message: "No saved mapping found for the selected sheet. Configure mapping first.",
-            severity: "error",
-          }),
-        );
-        return;
-      }
-
-      const res = await posApi.commitImport(payload);
-      const summary = res.data?.data?.result ?? {};
-      const imported = Number(summary.imported ?? 0);
-      const upserted = Number(summary.upserted ?? 0);
-      const modified = Number(summary.modified ?? 0);
-      setGoogleSheetsSyncProgress({
-        percent: 100,
-        stage: `Sync complete. Processed ${imported} rows.`,
-      });
-      dispatch(
-        showSnackbar({
-          message: `Sync completed: ${imported} rows (upserted ${upserted}, updated ${modified})`,
-          severity: "success",
-        }),
-      );
-      await dispatch(fetchSettings());
-      await loadGoogleSheetsSyncOverview();
-      window.setTimeout(() => setGoogleSheetsSyncProgress(null), 1800);
-    } catch (err) {
-      setGoogleSheetsSyncProgress(null);
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Sync failed"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      if (progressTimer) clearInterval(progressTimer);
-      setIsBusyLocal(false);
-    }
-  };
-
-  const onSaveSyncSchedule = async (payload: { enabled: boolean; hour: number; minute: number; timezone: string }) => {
-    if (!canEdit) return;
-    try {
-      setIsBusyLocal(true);
-      await settingsApi.saveGoogleSheetsSyncSchedule(payload);
-      dispatch(
-        showSnackbar({
-          message: "Sync settings updated",
-          severity: "success",
-        }),
-      );
-      await dispatch(fetchSettings());
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to update sync settings"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
-    }
-  };
-
-  const onDeleteSheetSource = async (payload: {
-    mode: "oauth" | "service_account";
-    profileName: "POS DATA SHEET";
-    deleteType: "soft" | "hard";
-    confirmText: string;
-  }) => {
-    if (!canEdit) return;
-    try {
-      setIsBusyLocal(true);
-      await settingsApi.deleteGoogleSheetsSourceBinding(payload);
-      dispatch(
-        showSnackbar({
-          message:
-            payload.deleteType === "hard"
-              ? "Hard reset completed. Google Sheets configuration and imported rows were removed."
-              : "Soft reset completed. Configuration removed and existing data kept.",
-          severity: "success",
-        }),
-      );
-      await dispatch(fetchSettings());
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to delete source"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
-    }
-  };
-
-  const onSaveSharedConfig = async () => {
-    if (!canEdit) return;
-    if (!sharedSpreadsheetId.trim()) {
-      dispatch(
-        showSnackbar({
-          message: "Spreadsheet ID is required",
-          severity: "error",
-        }),
-      );
-      return;
-    }
-    try {
-      await dispatch(
-        configureSharedSheetThunk({
-          profileId: defaultSharedProfile?.profileId,
-          profileName: defaultSharedProfile?.name ?? "POS DATA SHEET",
-          spreadsheetId: sharedSpreadsheetId.trim(),
-          sheetName: sharedSheetName.trim() || "Sheet1",
-          headerRow: sharedHeaderRow,
-          enabled: true,
-        }),
-      ).unwrap();
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to save shared sheet config"),
-          severity: "error",
-        }),
-      );
-    }
-  };
-
-  const onVerifySharedConfig = async () => {
-    if (!canEdit) return;
-    try {
-      await dispatch(verifySharedSheetThunk({ profileId: defaultSharedProfile?.profileId })).unwrap();
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Shared sheet verify failed"),
-          severity: "error",
-        }),
-      );
-    }
-  };
-
-  const onCheckOAuthStatus = () => {
-    void dispatch(fetchOAuthStatus());
-  };
-
-  const onToggleUpdateDbWithSheet = async (enabled: boolean) => {
-    if (!canEdit) return;
-    if (!sharedSpreadsheetId.trim()) {
-      dispatch(
-        showSnackbar({
-          message: "Save a spreadsheet first, then enable Update DB with sheet.",
-          severity: "warning",
-        }),
-      );
-      return;
-    }
-    try {
-      await dispatch(
-        configureSharedSheetThunk({
-          profileId: defaultSharedProfile?.profileId,
-          profileName: defaultSharedProfile?.name ?? "POS DATA SHEET",
-          spreadsheetId: sharedSpreadsheetId.trim(),
-          sheetName: sharedSheetName.trim() || "Sheet1",
-          headerRow: sharedHeaderRow,
-          enabled,
-        }),
-      ).unwrap();
-      dispatch(
-        showSnackbar({
-          message: enabled
-            ? "Update DB with sheet enabled. Scheduled sync will run for this sheet."
-            : "Update DB with sheet disabled.",
-          severity: "success",
-        }),
-      );
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to update setting"),
-          severity: "error",
-        }),
-      );
-    }
-  };
-
-  const onConnectQuickbooks = async () => {
-    if (!canEdit) return;
-    try {
-      setIsBusyLocal(true);
-      const response = await settingsApi.connectQuickbooks("/dashboard/settings");
-      const url = (response.data as { data?: { url?: string } })?.data?.url;
-      if (!url) {
-        throw new Error("Missing QuickBooks OAuth URL");
-      }
-      if (typeof window !== "undefined") {
-        window.location.href = url;
-      }
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "QuickBooks connect failed"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
-    }
-  };
-
-  const onDisconnectQuickbooks = async () => {
-    if (!canEdit) return;
-    try {
-      setIsBusyLocal(true);
-      await settingsApi.disconnectQuickbooks();
-      dispatch(
-        showSnackbar({
-          message: "QuickBooks disconnected",
-          severity: "success",
-        }),
-      );
-      await reloadQuickbooksSurface();
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to disconnect QuickBooks"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
-    }
-  };
-
-  const onRefreshQuickbooksReferences = async () => {
-    if (!canSyncQuickbooks) return;
-    try {
-      setIsBusyLocal(true);
-      const response = await accountingApi.refreshQuickbooksReferenceData();
-      const queueMode = (response.data as { data?: { queue?: { mode?: string } } })?.data?.queue?.mode;
-      dispatch(
-        showSnackbar({
-          message:
-            queueMode === "inline"
-              ? "QuickBooks reference data refreshed."
-              : "QuickBooks reference refresh queued.",
-          severity: "success",
-        }),
-      );
-      await reloadQuickbooksSurface();
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to refresh QuickBooks references"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
-    }
-  };
-
-  const onPostApprovedQuickbooks = async () => {
-    if (!canSyncQuickbooks) return;
-    try {
-      setIsBusyLocal(true);
-      const response = await accountingApi.postApprovedToQuickbooks();
-      const queueMode = (response.data as { data?: { queue?: { mode?: string } } })?.data?.queue?.mode;
-      dispatch(
-        showSnackbar({
-          message:
-            queueMode === "inline"
-              ? "Approved ledger entries posted to QuickBooks."
-              : "Post-approved sync queued.",
-          severity: "success",
-        }),
-      );
-      await reloadQuickbooksSurface();
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to queue post-approved sync"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
-    }
-  };
-
-  const onRefreshQuickbooksStatus = async () => {
-    try {
-      setIsBusyLocal(true);
-      await reloadQuickbooksSurface();
-      dispatch(
-        showSnackbar({
-          message: "QuickBooks status refreshed.",
-          severity: "success",
-        }),
-      );
-    } catch (err) {
-      dispatch(
-        showSnackbar({
-          message: getErrorMessage(err, "Failed to refresh QuickBooks status"),
-          severity: "error",
-        }),
-      );
-    } finally {
-      setIsBusyLocal(false);
-    }
-  };
 
   const appendStepLog = (index: number, message: string, status?: DebugStep["status"]) => {
     setDebugSteps((prev) =>
@@ -802,7 +334,7 @@ export const SettingsPage = () => {
 
       const previewStepIndex = mode === "oauth" ? 3 : 3;
       appendStepLog(previewStepIndex, "Reading preview rows...", "running");
-      const previewRes = await posApi.previewSheet({
+      const previewRes = await settingsApi.previewSheet({
         source,
         tab: sheetName,
         spreadsheetId,
@@ -901,7 +433,7 @@ export const SettingsPage = () => {
                 onVerifyShared={onVerifySharedConfig}
                 onSaveShared={onSaveSharedConfig}
                 onSetActiveMode={onModeChange}
-                onSettingsRefetch={async () => { await dispatch(fetchSettings()); }}
+                onSettingsRefetch={async () => { await refreshSettings(); }}
                 onSyncNow={onSyncNow}
                 onSaveSyncSchedule={onSaveSyncSchedule}
                 onDeleteSource={onDeleteSheetSource}
@@ -926,8 +458,8 @@ export const SettingsPage = () => {
                 detailAction={
                   canViewQuickbooks
                     ? {
-                        label: "Open QuickBooks Sync",
-                        to: "/dashboard/accounting/quickbooks",
+                        label: "Open QuickBooks",
+                        to: "/dashboard/quickbooks",
                       }
                     : undefined
                 }

@@ -5,7 +5,7 @@ export const hasPermission = (
   moduleKey: ModuleKey,
   action: 'view' | 'create' | 'edit' | 'delete' | `actions:${string}`
 ) => {
-  if (!permissions) return true;
+  if (!permissions) return false;
 
   const modulePermissions = permissions[moduleKey];
   if (!modulePermissions) return false;
@@ -17,4 +17,3 @@ export const hasPermission = (
   const customAction = action.replace('actions:', '');
   return modulePermissions.actions.includes('*') || modulePermissions.actions.includes(customAction);
 };
-

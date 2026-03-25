@@ -27,13 +27,13 @@ vi.mock('../models/JobLock', () => ({
   }
 }));
 
-vi.mock('../controllers/posController', () => ({
+vi.mock('../services/pos/importService', () => ({
   readSharedSheetRows: (...args: unknown[]) => readSharedSheetRowsMock(...args),
   parseRowsWithHeaderRow: (...args: unknown[]) => parseRowsWithHeaderRowMock(...args),
   importEvaluatedRowsForCompany: (...args: unknown[]) => importEvaluatedRowsForCompanyMock(...args)
 }));
 
-vi.mock('../controllers/googleSheetsController', () => ({
+vi.mock('../services/googleSheets/managementService', () => ({
   markConnectorImported: (...args: unknown[]) => markConnectorImportedMock(...args)
 }));
 

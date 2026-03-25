@@ -12,10 +12,13 @@ export type { Item } from './itemsSlice';
 
 export {
   createLocationThunk,
+  deleteLocationThunk,
   default as locationsReducer,
   fetchLocations,
   selectLocations,
   selectLocationsError,
-  selectLocationsLoading
+  selectLocationsLoading,
+  selectLocationsMutating,
+  updateLocationThunk
 } from './locationsSlice';
 export type { LocationItem } from './locationsSlice';

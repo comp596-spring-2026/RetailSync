@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { UserModel } from '../models/User';
 import { CompanyModel } from '../models/Company';
 import { RoleModel } from '../models/Role';
+import { normalizeRolePermissions } from '../services/rolePermissionsService';
 import { RefreshTokenModel } from '../models/RefreshToken';
 import { fail, ok } from '../utils/apiResponse';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
@@ -127,6 +128,11 @@ export const me = async (req: Request, res: Response) => {
     user,
     company,
     role,
-    permissions: role?.permissions ?? null
+    permissions: role
+      ? normalizeRolePermissions(role.permissions, {
+          roleName: String(role.name ?? ''),
+          isSystem: Boolean(role.isSystem)
+        })
+      : null
   });
 };

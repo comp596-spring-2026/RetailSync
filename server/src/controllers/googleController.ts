@@ -2,44 +2,28 @@ import { randomBytes } from "node:crypto";
 import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
-import { IntegrationSecretModel } from "../models/IntegrationSecret";
 import { IntegrationSettingsModel } from "../models/IntegrationSettings";
-import { decryptJson, encryptJson } from "../utils/encryption";
 import { fail, ok } from "../utils/apiResponse";
-import { google } from "googleapis";
 import {
   ensureGoogleSheetsShape,
   getOrCreateSettings,
-} from "../utils/googleSheetsSettings";
+} from "../integrations/google/settings";
+import {
+  buildGoogleSheetsAuthorizationUrl,
+  createGoogleOAuthClient,
+  exchangeGoogleAuthorizationCode,
+  loadGoogleOAuthSecret,
+  resolveGoogleConnectedEmail,
+  saveGoogleOAuthSecret,
+  updateGoogleOAuthSecret,
+} from "../integrations/google/oauth";
 const sheetsOauthStateCookie = "googleSheetsOAuthState";
-const SHEETS_SCOPES = [
-  "openid",
-  "email",
-  "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive.metadata.readonly",
-] as const;
 
 type GoogleSheetsStatePayload = {
   nonce: string;
   userId: string;
   companyId: string;
   purpose: "google_sheets_connect";
-};
-
-const getOAuthClient = () => {
-  if (
-    !env.googleOAuthClientId ||
-    !env.googleOAuthClientSecret ||
-    !env.googleIntegrationRedirectUri
-  ) {
-    return null;
-  }
-
-  return new google.auth.OAuth2(
-    env.googleOAuthClientId,
-    env.googleOAuthClientSecret,
-    env.googleIntegrationRedirectUri,
-  );
 };
 
 const buildGoogleOauthUrl = (req: Request) => {
@@ -50,33 +34,27 @@ const buildGoogleOauthUrl = (req: Request) => {
     return { error: "ENCRYPTION_KEY is missing on the server." as const };
   }
 
-  const oauthClient = getOAuthClient();
-  if (!oauthClient) {
-    return {
-      error:
-        "Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_INTEGRATION_REDIRECT_URI." as const,
-    };
-  }
-
   const statePayload: GoogleSheetsStatePayload = {
     nonce: randomBytes(12).toString("hex"),
     userId: req.user.id,
     companyId: req.user.companyId,
     purpose: "google_sheets_connect",
   };
-  const signedState = jwt.sign(statePayload, env.accessSecret, {
-    algorithm: "HS256",
-    expiresIn: "10m",
-  });
-  const url = oauthClient.generateAuthUrl({
-    access_type: "offline",
-    // Force account chooser so users can switch Google accounts during reconnect.
-    prompt: "consent select_account",
-    scope: [...SHEETS_SCOPES],
-    state: signedState,
-  });
 
-  return { url, nonce: statePayload.nonce };
+  try {
+    const url = buildGoogleSheetsAuthorizationUrl(
+      jwt.sign(statePayload, env.accessSecret, {
+        algorithm: "HS256",
+        expiresIn: "10m",
+      }),
+    );
+    return { url, nonce: statePayload.nonce };
+  } catch {
+    return {
+      error:
+        "Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_INTEGRATION_REDIRECT_URI." as const,
+    };
+  }
 };
 
 export const startGoogleSheetsConnect = async (req: Request, res: Response) => {
@@ -179,8 +157,9 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
     secure: env.nodeEnv === "production",
   });
 
-  const oauthClient = getOAuthClient();
-  if (!oauthClient) {
+  try {
+    createGoogleOAuthClient();
+  } catch {
     return redirectWithStatus(res, "error", "google_oauth_not_configured");
   }
 
@@ -203,8 +182,9 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
   }
 
   try {
-    const tokenRes = await oauthClient.getToken(code);
-    const tokens = tokenRes.tokens;
+    const exchanged = await exchangeGoogleAuthorizationCode(code);
+    const tokens = exchanged.tokens;
+    const oauthClient = exchanged.oauthClient;
 
     if (!tokens.access_token) {
       return redirectWithStatus(res, "error", "access_token_missing");
@@ -213,21 +193,13 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
     // Never overwrite refreshToken with undefined: keep existing if Google didn't return one
     let refreshTokenToStore: string | null = tokens.refresh_token ?? null;
     if (refreshTokenToStore == null) {
-      const existing = await IntegrationSecretModel.findOne({
-        companyId: parsedState.companyId,
-        provider: "google_oauth",
-      }).select("+encryptedPayload");
-      if (existing?.encryptedPayload) {
-        try {
-          const { decryptJson } = await import("../utils/encryption");
-          const prev = decryptJson<{ refreshToken?: string | null }>(
-            existing.encryptedPayload,
-            env.encryptionKey,
-          );
-          if (prev.refreshToken) refreshTokenToStore = prev.refreshToken;
-        } catch {
-          // ignore decrypt errors
+      try {
+        const existing = await loadGoogleOAuthSecret(parsedState.companyId);
+        if (existing?.refreshToken) {
+          refreshTokenToStore = existing.refreshToken;
         }
+      } catch {
+        // ignore decrypt errors
       }
     }
 
@@ -237,43 +209,19 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
       refresh_token: refreshTokenToStore ?? undefined,
       expiry_date: tokens.expiry_date ?? undefined,
     });
-    let connectedEmail: string | null = null;
-    try {
-      if (typeof tokens.id_token === "string" && env.googleOAuthClientId) {
-        const ticket = await oauthClient.verifyIdToken({
-          idToken: tokens.id_token,
-          audience: env.googleOAuthClientId,
-        });
-        connectedEmail =
-          (ticket.getPayload()?.email as string | undefined) ?? null;
-      } else {
-        const oauth2 = google.oauth2({ version: "v2", auth: oauthClient });
-        const userInfo = await oauth2.userinfo.get();
-        connectedEmail = (userInfo.data.email as string) ?? null;
-      }
-    } catch {
-      // non-fatal
-    }
+    const connectedEmail = await resolveGoogleConnectedEmail({
+      oauthClient,
+      idToken: typeof tokens.id_token === "string" ? tokens.id_token : null,
+    });
 
-    await IntegrationSecretModel.findOneAndUpdate(
-      { companyId: parsedState.companyId, provider: "google_oauth" },
-      {
-        $set: {
-          encryptedPayload: encryptJson(
-            {
-              accessToken: tokens.access_token,
-              refreshToken: refreshTokenToStore,
-              expiryDate: tokens.expiry_date ?? null,
-              scope: tokens.scope ?? null,
-              tokenType: tokens.token_type ?? null,
-              connectedEmail,
-            },
-            env.encryptionKey,
-          ),
-        },
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
+    await saveGoogleOAuthSecret(parsedState.companyId, {
+      accessToken: tokens.access_token,
+      refreshToken: refreshTokenToStore,
+      expiryDate: tokens.expiry_date ?? null,
+      scope: tokens.scope ?? null,
+      tokenType: tokens.token_type ?? null,
+      connectedEmail,
+    });
 
     const settings = await getOrCreateSettings(
       parsedState.companyId,
@@ -356,13 +304,8 @@ export const getGoogleSheetsOAuthStatus = async (
   const oauth = (settings?.googleSheets as any)?.oauth ?? {};
   const connected = oauth.connectionStatus === "connected";
 
-  const secret = await IntegrationSecretModel.findOne({
-    companyId,
-    provider: "google_oauth",
-  })
-    .select("+encryptedPayload")
-    .lean();
-  if (!connected || !secret?.encryptedPayload) {
+  const secret = await loadGoogleOAuthSecret(companyId);
+  if (!connected || !secret) {
     return ok(res, {
       ok: false,
       reason: "not_connected",
@@ -376,11 +319,7 @@ export const getGoogleSheetsOAuthStatus = async (
   let scopes: string[] | null = null;
   let expiresInSec: number | null = null;
   try {
-    const payload = decryptJson<{
-      connectedEmail?: string | null;
-      scope?: string | null;
-      expiryDate?: number | null;
-    }>(secret.encryptedPayload, env.encryptionKey);
+    const payload = secret;
     cachedEmail =
       typeof payload.connectedEmail === "string" &&
       payload.connectedEmail.trim().length > 0
@@ -428,13 +367,7 @@ export const getGoogleSheetsOAuthStatus = async (
       if (!resolvedEmail) {
         try {
           const oauthClient = await getOAuthClientForCompany(companyId);
-          const oauth2 = google.oauth2({ version: "v2", auth: oauthClient });
-          const userInfo = await oauth2.userinfo.get();
-          resolvedEmail =
-            typeof userInfo.data.email === "string" &&
-            userInfo.data.email.trim().length > 0
-              ? userInfo.data.email.trim()
-              : null;
+          resolvedEmail = await resolveGoogleConnectedEmail({ oauthClient });
         } catch {
           // Non-fatal: status remains OK without resolved email.
         }
@@ -442,19 +375,10 @@ export const getGoogleSheetsOAuthStatus = async (
 
       if (resolvedEmail) {
         try {
-          const payload = decryptJson<Record<string, unknown>>(
-            secret.encryptedPayload,
-            env.encryptionKey,
-          );
-          const nextPayload = { ...payload, connectedEmail: resolvedEmail };
-          await IntegrationSecretModel.updateOne(
-            { companyId, provider: "google_oauth" },
-            {
-              $set: {
-                encryptedPayload: encryptJson(nextPayload, env.encryptionKey),
-              },
-            },
-          );
+          await updateGoogleOAuthSecret(companyId, (payload) => ({
+            ...(payload ?? secret),
+            connectedEmail: resolvedEmail,
+          }));
         } catch {
           // Non-fatal: status can still return resolvedEmail.
         }

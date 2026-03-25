@@ -18,67 +18,46 @@ import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import MailOutlineIcon from '@mui/icons-material/MailOutline';
 import BadgeIcon from '@mui/icons-material/Badge';
 import { useEffect, useState } from 'react';
-import { userApi } from '../api';
-import { rbacApi } from '../../rbac/api';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import { LoadingEmptyStateWrapper, NoAccess, PageHeader } from '../../../components';
 import { hasPermission } from '../../../utils/permissions';
-
-type UserItem = {
-  _id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  roleId: { _id: string; name: string } | null;
-};
-
-type RoleItem = {
-  _id: string;
-  name: string;
-};
-
-type InviteItem = {
-  _id: string;
-  email: string;
-  code: string;
-  acceptedAt: string | null;
-  roleId: { _id: string; name: string } | null;
-};
+import {
+  assignRoleThunk,
+  createInviteThunk,
+  fetchUsersPageData,
+  selectInviteCode,
+  selectInvites,
+  selectUsers,
+  selectUsersLoading,
+  selectUsersMutating
+} from '../state';
+import { selectRoles } from '../../rbac/state';
 
 export const UsersPage = () => {
   const dispatch = useAppDispatch();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'users', 'view');
-
-  const [users, setUsers] = useState<UserItem[]>([]);
-  const [roles, setRoles] = useState<RoleItem[]>([]);
-  const [invites, setInvites] = useState<InviteItem[]>([]);
+  const users = useAppSelector(selectUsers);
+  const roles = useAppSelector(selectRoles);
+  const invites = useAppSelector(selectInvites);
+  const inviteCode = useAppSelector(selectInviteCode);
+  const loading = useAppSelector(selectUsersLoading);
+  const mutating = useAppSelector(selectUsersMutating);
   const [email, setEmail] = useState('');
   const [roleId, setRoleId] = useState('');
-  const [inviteCode, setInviteCode] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const [usersRes, rolesRes, invitesRes] = await Promise.all([userApi.listUsers(), rbacApi.listRoles(), userApi.listInvites()]);
-      setUsers(usersRes.data.data);
-      setRoles(rolesRes.data.data);
-      setInvites(invitesRes.data.data);
-      if (!roleId && rolesRes.data.data[0]) {
-        setRoleId(rolesRes.data.data[0]._id);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
     if (canView) {
-      void loadData();
+      void dispatch(fetchUsersPageData());
     }
-  }, [canView]);
+  }, [canView, dispatch]);
+
+  useEffect(() => {
+    if (!roleId && roles[0]) {
+      setRoleId(roles[0]._id);
+    }
+  }, [roleId, roles]);
 
   const sendInvite = async () => {
     if (!email || !roleId) {
@@ -86,17 +65,12 @@ export const UsersPage = () => {
       return;
     }
 
-    const res = await userApi.createInvite({ email, roleId, expiresInDays: 7 });
-    setInviteCode(res.data.data.inviteCode);
-    dispatch(showSnackbar({ message: 'Invite created', severity: 'success' }));
+    await dispatch(createInviteThunk({ email, roleId, expiresInDays: 7 })).unwrap();
     setEmail('');
-    await loadData();
   };
 
   const assignRole = async (userId: string, nextRoleId: string) => {
-    await userApi.assignRole(userId, nextRoleId);
-    dispatch(showSnackbar({ message: 'Role updated', severity: 'success' }));
-    await loadData();
+    await dispatch(assignRoleThunk({ userId, roleId: nextRoleId })).unwrap();
   };
 
   if (!canView) {
@@ -121,7 +95,7 @@ export const UsersPage = () => {
               </MenuItem>
             ))}
           </Select>
-          <Button variant="contained" startIcon={<MailOutlineIcon />} onClick={sendInvite}>
+          <Button variant="contained" startIcon={<MailOutlineIcon />} onClick={() => void sendInvite()} disabled={mutating}>
             Send Invite
           </Button>
         </Stack>
@@ -156,7 +130,8 @@ export const UsersPage = () => {
                   <Select
                     size="small"
                     value={user.roleId?._id ?? ''}
-                    onChange={(e) => assignRole(user._id, e.target.value)}
+                    onChange={(e) => void assignRole(user._id, e.target.value)}
+                    disabled={mutating}
                     sx={{ minWidth: 180 }}
                   >
                     {roles.map((role) => (

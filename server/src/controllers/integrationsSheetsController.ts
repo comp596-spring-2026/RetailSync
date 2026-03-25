@@ -14,7 +14,7 @@ import {
   pickDefaultSharedSheet,
   SHARED_SHEET_PROFILE_OPTIONS,
   upsertSharedSheet
-} from '../utils/sharedSheets';
+} from '../integrations/google/sharedSheets';
 import { normalizeUtcOffset } from '../utils/utcOffset';
 
 const SERVICE_ACCOUNT_EMAIL =

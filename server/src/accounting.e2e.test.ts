@@ -16,7 +16,7 @@ import { ChartOfAccountModel } from './models/ChartOfAccount';
 import { StatementCheckModel } from './models/StatementCheck';
 import { StatementTransactionModel } from './models/StatementTransaction';
 import { RunModel } from './models/Run';
-import { getOrCreateSettings } from './utils/googleSheetsSettings';
+import { getOrCreateSettings } from './integrations/google/settings';
 
 const {
   enqueueAccountingJobMock,

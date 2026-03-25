@@ -1,5 +1,5 @@
-import { Schema } from 'mongoose';
-import { getRequestContext } from '../../config/requestContext';
+import { Schema } from "mongoose";
+import { getRequestContext } from "../../config/requestContext";
 
 type TenantPluginOptions = {
   field?: string;
@@ -9,14 +9,22 @@ type TenantFilter = Record<string, unknown>;
 
 const toIdString = (value: unknown) => {
   if (value === null || value === undefined) return null;
-  if (typeof value === 'string') return value;
-  if (typeof value === 'object' && value && 'toString' in value && typeof value.toString === 'function') {
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "object" &&
+    "toString" in value &&
+    typeof value.toString === "function"
+  ) {
     return value.toString();
   }
   return String(value);
 };
 
-const ensureTenantOnFilter = (filter: TenantFilter, tenantId: string, field: string) => {
+const ensureTenantOnFilter = (
+  filter: TenantFilter,
+  tenantId: string,
+  field: string,
+) => {
   const existing = filter[field];
   if (existing === undefined) {
     filter[field] = tenantId;
@@ -25,27 +33,29 @@ const ensureTenantOnFilter = (filter: TenantFilter, tenantId: string, field: str
 
   const existingId = toIdString(existing);
   if (existingId !== tenantId) {
-    throw new Error('Tenant mismatch in query filter');
+    throw new Error("Tenant mismatch in query filter");
   }
 };
 
 export const tenantPlugin = (schema: Schema, options?: TenantPluginOptions) => {
-  const tenantField = options?.field ?? 'companyId';
+  const tenantField = options?.field ?? "companyId";
 
   const guardedQueryMethods = [
-    'find',
-    'findOne',
-    'countDocuments',
-    'findOneAndUpdate',
-    'findOneAndDelete',
-    'updateOne',
-    'updateMany',
-    'deleteOne',
-    'deleteMany'
+    "find",
+    "findOne",
+    "countDocuments",
+    "findOneAndUpdate",
+    "findOneAndDelete",
+    "updateOne",
+    "updateMany",
+    "deleteOne",
+    "deleteMany",
   ] as const;
-
   for (const method of guardedQueryMethods) {
     schema.pre(method as any, function tenantScopeGuard(this: any) {
+      const opts = this.getOptions?.() || {}; // ✅ NEW
+      if (opts.bypassTenant === true) return; // ✅ NEW (escape hatch)
+
       const filter = (this.getFilter?.() ?? {}) as TenantFilter;
       const context = getRequestContext();
       const tenantId = context?.tenantId;
@@ -61,17 +71,20 @@ export const tenantPlugin = (schema: Schema, options?: TenantPluginOptions) => {
       this.setQuery(filter);
     });
   }
+  schema.pre("aggregate", function tenantAggregateGuard(this: any) {
+    const opts = this.options || {}; // ✅ NEW
+    if (opts.bypassTenant === true) return; // ✅ NEW
 
-  schema.pre('aggregate', function tenantAggregateGuard(this: any) {
     const pipeline = this.pipeline();
     const context = getRequestContext();
     const tenantId = context?.tenantId;
+
     const firstStage = pipeline[0] as Record<string, unknown> | undefined;
     const firstMatch = firstStage?.$match as TenantFilter | undefined;
 
     if (!tenantId) {
       if (!firstMatch || firstMatch[tenantField] === undefined) {
-        throw new Error('Tenant context missing for aggregate');
+        throw new Error("Tenant context missing for aggregate");
       }
       return;
     }
@@ -79,7 +92,7 @@ export const tenantPlugin = (schema: Schema, options?: TenantPluginOptions) => {
     if (firstMatch && firstMatch[tenantField] !== undefined) {
       const matchId = toIdString(firstMatch[tenantField]);
       if (matchId !== tenantId) {
-        throw new Error('Tenant mismatch in aggregate pipeline');
+        throw new Error("Tenant mismatch in aggregate pipeline");
       }
       return;
     }

@@ -4,10 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 const tabItems = [
   { value: '/dashboard/accounting/statements', label: 'Statements' },
-  { value: '/dashboard/accounting/ledger', label: 'Ledger' },
-  { value: '/dashboard/accounting/quickbooks', label: 'QuickBooks Sync' },
-  { value: '/dashboard/accounting/tax', label: 'Tax' },
-  { value: '/dashboard/accounting/observability', label: 'Observability' }
+  { value: '/dashboard/accounting/ledger', label: 'Ledger' }
 ];
 
 export const AccountingTabs = () => {

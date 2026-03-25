@@ -1,6 +1,7 @@
 import { ModuleKey } from '@retailsync/shared';
 import { NextFunction, Request, Response } from 'express';
 import { RoleModel } from '../models/Role';
+import { normalizeRolePermissions } from '../services/rolePermissionsService';
 import { fail } from '../utils/apiResponse';
 
 type CrudAction = 'view' | 'create' | 'edit' | 'delete';
@@ -24,13 +25,12 @@ export const requirePermission = (moduleKey: ModuleKey, action: CrudAction | str
       return fail(res, 'Role not found', 403);
     }
 
-    const permissionsMap =
-      (role.permissions as unknown as Record<
-        string,
-        { view: boolean; create: boolean; edit: boolean; delete: boolean; actions: string[] }
-      >) ?? {};
-    const permission = permissionsMap[moduleKey];
-    if (!permission || !isAllowed(permission, action)) {
+    const permissionsMap = normalizeRolePermissions(role.permissions, {
+      roleName: String(role.name ?? ''),
+      isSystem: Boolean(role.isSystem)
+    });
+    const permission = permissionsMap[moduleKey]!;
+    if (!isAllowed(permission, action)) {
       return fail(res, 'Forbidden', 403);
     }
 
