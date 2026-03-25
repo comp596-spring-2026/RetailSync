@@ -34,8 +34,10 @@ import { AccessHubPage, UsersPage } from "../modules/users/pages";
 import { ModuleShellPage } from "../layout/ModuleShellPage";
 import {
   LedgerPage,
+  QuickBooksHomePage,
+  QuickBooksOperationsPage,
+  QuickBooksReportsPage,
   ObservabilityPage,
-  QuickBooksSyncPage,
   StatementDetailPage,
   StatementsPage,
   TaxDashboardPage
@@ -98,9 +100,15 @@ const App = () => {
             <Route path="statements" element={<StatementsPage />} />
             <Route path="statements/:statementId" element={<StatementDetailPage />} />
             <Route path="ledger" element={<LedgerPage />} />
-            <Route path="quickbooks" element={<QuickBooksSyncPage />} />
-            <Route path="tax" element={<TaxDashboardPage />} />
+            <Route path="quickbooks" element={<Navigate to="/dashboard/quickbooks" replace />} />
+            <Route path="tax" element={<Navigate to="/dashboard/quickbooks/tax" replace />} />
             <Route path="observability" element={<ObservabilityPage />} />
+          </Route>
+          <Route path="quickbooks">
+            <Route index element={<QuickBooksHomePage />} />
+            <Route path="reports" element={<QuickBooksReportsPage />} />
+            <Route path="operations" element={<QuickBooksOperationsPage />} />
+            <Route path="tax" element={<TaxDashboardPage />} />
           </Route>
           <Route path="settings" element={<SettingsPage />} />
         </Route>

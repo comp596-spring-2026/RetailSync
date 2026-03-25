@@ -169,7 +169,7 @@ export class AccountingApi {
     return api.put('/integrations/quickbooks/settings', payload);
   }
 
-  getQuickbooksConnectUrl(returnTo = '/dashboard/accounting/quickbooks') {
+  getQuickbooksConnectUrl(returnTo = '/dashboard/quickbooks') {
     return api.get<{
       data: {
         url: string;

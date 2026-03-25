@@ -19,9 +19,16 @@ import SaveIcon from '@mui/icons-material/Save';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { ModuleKey, PermissionsMap, moduleKeys } from '@retailsync/shared';
 import { useEffect, useMemo, useState } from 'react';
-import { rbacApi } from '../api';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
-import { setRoles } from '../state';
+import {
+  deleteRoleThunk,
+  fetchRoles,
+  saveRoleThunk,
+  selectRbacLoading,
+  selectRbacModules,
+  selectRbacMutating,
+  selectRoles
+} from '../state';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import { LoadingEmptyStateWrapper, NoAccess, PageHeader } from '../../../components';
 import { hasPermission } from '../../../utils/permissions';
@@ -38,35 +45,31 @@ export const RolesPage = () => {
   const dispatch = useAppDispatch();
   const permissionsAuth = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissionsAuth, 'rolesSettings', 'view');
-  const roles = useAppSelector((state) => state.rbac.roles);
+  const roles = useAppSelector(selectRoles);
+  const reduxModules = useAppSelector(selectRbacModules);
+  const loading = useAppSelector(selectRbacLoading);
+  const mutating = useAppSelector(selectRbacMutating);
   const [selectedRoleId, setSelectedRoleId] = useState<string>('new');
   const [name, setName] = useState('');
   const [permissions, setPermissions] = useState<LocalPermission>(emptyPermissions());
-  const [loading, setLoading] = useState(true);
 
   const selectedRole = useMemo(() => roles.find((r) => r._id === selectedRoleId) ?? null, [roles, selectedRoleId]);
 
-  const loadRoles = async () => {
-    setLoading(true);
-    try {
-      const [modulesRes, rolesRes] = await Promise.all([rbacApi.modules(), rbacApi.listRoles()]);
-      dispatch(setRoles(rolesRes.data.data));
-      const modules = modulesRes.data.data.modules as ModuleKey[];
-      const built = modules.reduce((acc, module) => {
-        acc[module] = { view: true, create: false, edit: false, delete: false, actions: [] };
-        return acc;
-      }, {} as LocalPermission);
-      setPermissions(built);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
     if (canView) {
-      void loadRoles();
+      void dispatch(fetchRoles());
     }
-  }, [canView]);
+  }, [canView, dispatch]);
+
+  useEffect(() => {
+    const sourceModules = reduxModules.length > 0 ? reduxModules : moduleKeys;
+    setPermissions((prev) =>
+      sourceModules.reduce((acc, module) => {
+        acc[module] = prev[module] ?? { view: true, create: false, edit: false, delete: false, actions: [] };
+        return acc;
+      }, {} as LocalPermission)
+    );
+  }, [reduxModules]);
 
   useEffect(() => {
     if (selectedRole) {
@@ -108,22 +111,16 @@ export const RolesPage = () => {
     }
 
     if (selectedRole) {
-      await rbacApi.updateRole(selectedRole._id, { name, permissions });
-      dispatch(showSnackbar({ message: 'Role updated', severity: 'success' }));
+      await dispatch(saveRoleThunk({ id: selectedRole._id, name, permissions })).unwrap();
     } else {
-      await rbacApi.createRole({ name, permissions });
-      dispatch(showSnackbar({ message: 'Role created', severity: 'success' }));
+      await dispatch(saveRoleThunk({ name, permissions })).unwrap();
     }
-
-    await loadRoles();
   };
 
   const removeRole = async () => {
     if (!selectedRole) return;
-    await rbacApi.deleteRole(selectedRole._id);
-    dispatch(showSnackbar({ message: 'Role deleted', severity: 'success' }));
+    await dispatch(deleteRoleThunk(selectedRole._id)).unwrap();
     setSelectedRoleId('new');
-    await loadRoles();
   };
 
   if (!canView) {
@@ -148,7 +145,7 @@ export const RolesPage = () => {
           ))}
         </Select>
         <TextField size="small" label="Role Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Button variant="contained" startIcon={<SaveIcon />} onClick={saveRole}>
+        <Button variant="contained" startIcon={<SaveIcon />} onClick={() => void saveRole()} disabled={mutating}>
           Save
         </Button>
         {selectedRole && (
@@ -156,8 +153,8 @@ export const RolesPage = () => {
             variant="outlined"
             color="error"
             startIcon={<DeleteOutlineIcon />}
-            onClick={removeRole}
-            disabled={selectedRole.isSystem}
+            onClick={() => void removeRole()}
+            disabled={selectedRole.isSystem || mutating}
           >
             Delete
           </Button>
@@ -178,7 +175,7 @@ export const RolesPage = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {moduleKeys.map((module) => (
+            {(reduxModules.length > 0 ? reduxModules : moduleKeys).map((module) => (
               <TableRow key={module}>
                 <TableCell>{module}</TableCell>
                 <TableCell>

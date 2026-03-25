@@ -11,6 +11,8 @@ import uiReducer from '../../../app/store/uiSlice';
 import { TaxDashboardPage } from './TaxDashboardPage';
 
 const {
+  getQuickbooksSettingsMock,
+  getQuickbooksOAuthStatusMock,
   getQuickbooksTaxOverviewMock,
   getQuickbooksTaxReportMock,
   getQuickbooksTaxChartOfAccountsMock,
@@ -19,6 +21,8 @@ const {
   recoverQuickbooksPaymentMock,
   createQuickbooksJournalAdjustmentMock
 } = vi.hoisted(() => ({
+  getQuickbooksSettingsMock: vi.fn(),
+  getQuickbooksOAuthStatusMock: vi.fn(),
   getQuickbooksTaxOverviewMock: vi.fn(),
   getQuickbooksTaxReportMock: vi.fn(),
   getQuickbooksTaxChartOfAccountsMock: vi.fn(),
@@ -30,6 +34,8 @@ const {
 
 vi.mock('../api', () => ({
   accountingApi: {
+    getQuickbooksSettings: (...args: unknown[]) => getQuickbooksSettingsMock(...args),
+    getQuickbooksOAuthStatus: (...args: unknown[]) => getQuickbooksOAuthStatusMock(...args),
     getQuickbooksTaxOverview: (...args: unknown[]) => getQuickbooksTaxOverviewMock(...args),
     getQuickbooksTaxReport: (...args: unknown[]) => getQuickbooksTaxReportMock(...args),
     getQuickbooksTaxChartOfAccounts: (...args: unknown[]) =>
@@ -98,6 +104,38 @@ describe('TaxDashboardPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    getQuickbooksSettingsMock.mockResolvedValue({
+      data: {
+        data: {
+          connected: true,
+          environment: 'sandbox',
+          realmId: 'realm-1',
+          companyName: 'RetailSync QB',
+          lastPullStatus: 'idle',
+          lastPullAt: null,
+          lastPullCount: 0,
+          lastPullError: null,
+          lastPushStatus: 'idle',
+          lastPushAt: null,
+          lastPushCount: 0,
+          lastPushError: null,
+          updatedAt: '2026-03-10T00:00:00.000Z'
+        }
+      }
+    });
+    getQuickbooksOAuthStatusMock.mockResolvedValue({
+      data: {
+        data: {
+          ok: true,
+          reason: null,
+          environment: 'sandbox',
+          realmId: 'realm-1',
+          companyName: 'RetailSync QB',
+          expiresInSec: 3600
+        }
+      }
+    });
 
     getQuickbooksTaxOverviewMock.mockResolvedValue({
       data: {
@@ -198,11 +236,11 @@ describe('TaxDashboardPage', () => {
       </Provider>
     );
 
-    expect(screen.getByText('Tax Dashboard')).toBeInTheDocument();
+    expect(screen.getByText('QuickBooks Tax')).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(getQuickbooksTaxOverviewMock).toHaveBeenCalled();
-      expect(screen.getAllByText('$1,200.00').length).toBeGreaterThan(0);
+      expect(getQuickbooksTaxPaymentsMock).toHaveBeenCalled();
+      expect(screen.getByRole('heading', { name: 'Recover Payment' })).toBeInTheDocument();
     });
   });
 });

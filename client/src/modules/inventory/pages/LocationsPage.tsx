@@ -19,19 +19,21 @@ import WarehouseIcon from '@mui/icons-material/Warehouse';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useEffect, useState } from 'react';
-import { locationsApi } from '../api';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import { PermissionGate } from '../../../app/guards';
 import { LoadingEmptyStateWrapper, NoAccess, PageHeader } from '../../../components';
-import { showSnackbar } from '../../../app/store/uiSlice';
 import { hasPermission } from '../../../utils/permissions';
-
-type LocationItem = {
-  _id: string;
-  code: string;
-  type: 'shelf' | 'fridge' | 'freezer' | 'backroom';
-  label: string;
-};
+import {
+  createLocationThunk,
+  deleteLocationThunk,
+  fetchLocations,
+  selectLocations,
+  selectLocationsError,
+  selectLocationsLoading,
+  selectLocationsMutating,
+  updateLocationThunk,
+  type LocationItem
+} from '../state';
 
 export const LocationsPage = () => {
   const dispatch = useAppDispatch();
@@ -42,40 +44,25 @@ export const LocationsPage = () => {
   const canEdit = hasPermission(permissions, 'locations', 'edit');
   const canDelete = hasPermission(permissions, 'locations', 'delete');
 
-  const [items, setItems] = useState<LocationItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const items = useAppSelector(selectLocations);
+  const error = useAppSelector(selectLocationsError);
+  const loading = useAppSelector(selectLocationsLoading);
+  const mutating = useAppSelector(selectLocationsMutating);
   const [form, setForm] = useState<{ code: string; type: LocationItem['type']; label: string }>({
     code: '',
     type: 'shelf',
     label: ''
   });
 
-  const load = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await locationsApi.list();
-      setItems(res.data.data);
-    } catch (err) {
-      setError('Failed to load locations');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
     if (canView) {
-      void load();
+      void dispatch(fetchLocations());
     }
-  }, [canView]);
+  }, [canView, dispatch]);
 
   const createLocation = async () => {
-    await locationsApi.create(form);
+    await dispatch(createLocationThunk(form)).unwrap();
     setForm({ code: '', type: 'shelf', label: '' });
-    dispatch(showSnackbar({ message: 'Location created', severity: 'success' }));
-    await load();
   };
 
   if (!canView) {
@@ -112,7 +99,7 @@ export const LocationsPage = () => {
           </Select>
           <TextField label="Label" value={form.label} onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))} />
           <PermissionGate module="locations" action="create" mode="disable">
-            <Button variant="contained" startIcon={<SaveIcon />} disabled={!canCreate} onClick={() => void createLocation()}>
+            <Button variant="contained" startIcon={<SaveIcon />} disabled={!canCreate || mutating} onClick={() => void createLocation()}>
               Save
             </Button>
           </PermissionGate>
@@ -153,8 +140,10 @@ export const LocationsPage = () => {
                       <Button
                         size="small"
                         variant="outlined"
-                        disabled={!canEdit}
-                        onClick={() => void locationsApi.update(row._id, { label: `${row.label} (Updated)` }).then(() => load())}
+                        disabled={!canEdit || mutating}
+                        onClick={() =>
+                          void dispatch(updateLocationThunk({ id: row._id, payload: { label: `${row.label} (Updated)` } }))
+                        }
                       >
                         Quick Edit
                       </Button>
@@ -165,8 +154,8 @@ export const LocationsPage = () => {
                         variant="outlined"
                         color="error"
                         startIcon={<DeleteOutlineIcon />}
-                        disabled={!canDelete}
-                        onClick={() => void locationsApi.remove(row._id).then(() => load())}
+                        disabled={!canDelete || mutating}
+                        onClick={() => void dispatch(deleteLocationThunk(row._id))}
                       >
                         Delete
                       </Button>

@@ -926,8 +926,8 @@ export const SettingsPage = () => {
                 detailAction={
                   canViewQuickbooks
                     ? {
-                        label: "Open QuickBooks Sync",
-                        to: "/dashboard/accounting/quickbooks",
+                        label: "Open QuickBooks",
+                        to: "/dashboard/quickbooks",
                       }
                     : undefined
                 }

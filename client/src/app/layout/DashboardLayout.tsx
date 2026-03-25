@@ -64,10 +64,8 @@ export const DashboardLayout = () => {
   const canViewAccountingQuickbooks = hasPermission(permissions, 'quickbooks', 'view');
   const accountingEntryPath = canViewAccountingStatements
     ? '/dashboard/accounting/statements'
-    : canViewAccountingLedger
-      ? '/dashboard/accounting/ledger'
-      : '/dashboard/accounting/quickbooks';
-  const canViewAccounting = canViewAccountingStatements || canViewAccountingLedger || canViewAccountingQuickbooks;
+    : '/dashboard/accounting/ledger';
+  const canViewAccounting = canViewAccountingStatements || canViewAccountingLedger;
 
   const onLogout = async () => {
     try {
@@ -121,6 +119,14 @@ export const DashboardLayout = () => {
           path: accountingEntryPath,
           matchPrefix: '/dashboard/accounting',
           icon: <AccountBalanceIcon fontSize="small" />
+        }]
+      : []),
+    ...(canViewAccountingQuickbooks
+      ? [{
+          label: 'QuickBooks',
+          path: '/dashboard/quickbooks',
+          matchPrefix: '/dashboard/quickbooks',
+          icon: <SyncAltIcon fontSize="small" />
         }]
       : []),
     { label: 'Settings', path: '/dashboard/settings', icon: <SettingsOutlinedIcon fontSize="small" /> }

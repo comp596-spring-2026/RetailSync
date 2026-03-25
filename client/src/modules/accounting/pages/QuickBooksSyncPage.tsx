@@ -1,9 +1,14 @@
+import InsightsIcon from '@mui/icons-material/Insights';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import SyncIcon from '@mui/icons-material/Sync';
 import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
 import type { QuickBooksSettings } from '@retailsync/shared';
-import { useCallback, useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
 import { NoAccess, PageHeader } from '../../../components';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import { showSnackbar } from '../../../app/store/uiSlice';
@@ -12,9 +17,31 @@ import { hasPermission } from '../../../utils/permissions';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { QuickBooksIntegrationCard, type QuickBooksOAuthStatus } from '../../settings/components';
 import { accountingApi } from '../api';
-import { AccountingTabs } from '../components';
+import { QuickBooksTabs } from '../components';
+import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
 
-export const QuickBooksSyncPage = () => {
+const shortcutItems = [
+  {
+    title: 'Reports',
+    description: 'Balance Sheet, Profit & Loss, Trial Balance, ledger views, and reporting filters.',
+    to: '/dashboard/quickbooks/reports',
+    icon: <InsightsIcon />
+  },
+  {
+    title: 'Operations',
+    description: 'Review posted and failed QuickBooks-linked ledger rows in one operational queue.',
+    to: '/dashboard/quickbooks/operations',
+    icon: <SyncIcon />
+  },
+  {
+    title: 'Tax',
+    description: 'Recover payments and create journal adjustments against the connected QuickBooks company.',
+    to: '/dashboard/quickbooks/tax',
+    icon: <ReceiptLongIcon />
+  }
+];
+
+export const QuickBooksHomePage = () => {
   const dispatch = useAppDispatch();
   const location = useLocation();
   const navigate = useNavigate();
@@ -23,36 +50,15 @@ export const QuickBooksSyncPage = () => {
   const canConnect = hasPermission(permissions, 'quickbooks', 'actions:connect');
   const canSync = hasPermission(permissions, 'quickbooks', 'actions:sync');
 
-  const [settings, setSettings] = useState<QuickBooksSettings | null>(null);
-  const [oauthStatus, setOauthStatus] = useState<QuickBooksOAuthStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { settings, oauthStatus, loading, error, load, isConnected } = useQuickBooksWorkspace(canView);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    if (!canView) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [settingsResponse, statusResponse] = await Promise.all([
-        accountingApi.getQuickbooksSettings(),
-        accountingApi.getQuickbooksOAuthStatus(),
-      ]);
-      setSettings(settingsResponse.data.data);
-      setOauthStatus(statusResponse.data.data);
-    } catch (apiError) {
-      setError(extractApiErrorMessage(apiError, 'Failed to load QuickBooks settings'));
-    } finally {
-      setLoading(false);
-    }
-  }, [canView]);
+  const [pageError, setPageError] = useState<string | null>(null);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (error) {
+      setPageError(error);
+    }
+  }, [error]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -62,11 +68,11 @@ export const QuickBooksSyncPage = () => {
       dispatch(
         showSnackbar({
           message: 'QuickBooks connected successfully.',
-          severity: 'success',
-        }),
+          severity: 'success'
+        })
       );
       void load().finally(() => {
-        navigate('/dashboard/accounting/quickbooks', { replace: true });
+        navigate('/dashboard/quickbooks', { replace: true });
       });
       return;
     }
@@ -74,27 +80,25 @@ export const QuickBooksSyncPage = () => {
       dispatch(
         showSnackbar({
           message: getAppErrorMessage(reason, 'QuickBooks connection failed.'),
-          severity: 'error',
-        }),
+          severity: 'error'
+        })
       );
       void load().finally(() => {
-        navigate('/dashboard/accounting/quickbooks', { replace: true });
+        navigate('/dashboard/quickbooks', { replace: true });
       });
     }
-  }, [location.search, dispatch, navigate, load]);
+  }, [dispatch, load, location.search, navigate]);
 
   const onConnect = async () => {
     try {
       setBusy(true);
-      const response = await accountingApi.getQuickbooksConnectUrl(
-        '/dashboard/accounting/quickbooks',
-      );
+      const response = await accountingApi.getQuickbooksConnectUrl('/dashboard/quickbooks');
       const url = response.data.data.url;
       if (typeof window !== 'undefined') {
         window.location.href = url;
       }
     } catch (apiError) {
-      setError(extractApiErrorMessage(apiError, 'Failed to start QuickBooks connection'));
+      setPageError(extractApiErrorMessage(apiError, 'Failed to start QuickBooks connection'));
     } finally {
       setBusy(false);
     }
@@ -108,11 +112,11 @@ export const QuickBooksSyncPage = () => {
       dispatch(
         showSnackbar({
           message: 'QuickBooks disconnected.',
-          severity: 'success',
-        }),
+          severity: 'success'
+        })
       );
     } catch (apiError) {
-      setError(extractApiErrorMessage(apiError, 'Failed to disconnect QuickBooks'));
+      setPageError(extractApiErrorMessage(apiError, 'Failed to disconnect QuickBooks'));
     } finally {
       setBusy(false);
     }
@@ -129,12 +133,12 @@ export const QuickBooksSyncPage = () => {
             queue.mode === 'inline'
               ? 'QuickBooks reference data refreshed.'
               : 'QuickBooks reference refresh queued.',
-          severity: 'success',
-        }),
+          severity: 'success'
+        })
       );
       await load();
     } catch (apiError) {
-      setError(extractApiErrorMessage(apiError, 'Failed to refresh QuickBooks references'));
+      setPageError(extractApiErrorMessage(apiError, 'Failed to refresh QuickBooks references'));
     } finally {
       setBusy(false);
     }
@@ -151,12 +155,12 @@ export const QuickBooksSyncPage = () => {
             queue.mode === 'inline'
               ? 'Approved ledger entries posted to QuickBooks.'
               : 'Post-approved sync queued.',
-          severity: 'success',
-        }),
+          severity: 'success'
+        })
       );
       await load();
     } catch (apiError) {
-      setError(extractApiErrorMessage(apiError, 'Failed to queue post-approved sync'));
+      setPageError(extractApiErrorMessage(apiError, 'Failed to queue post-approved sync'));
     } finally {
       setBusy(false);
     }
@@ -169,15 +173,20 @@ export const QuickBooksSyncPage = () => {
   return (
     <Stack spacing={2}>
       <PageHeader
-        title="QuickBooks Sync"
-        subtitle="Connect, refresh reference data, and post approved ledger entries."
+        title="QuickBooks"
+        subtitle="Connection, token health, reference sync, and approved posting live here."
         icon={<SyncIcon />}
       />
-      <AccountingTabs />
-      {error && <Alert severity="error">{error}</Alert>}
+      <QuickBooksTabs />
+      {pageError ? <Alert severity="error">{pageError}</Alert> : null}
+      {!loading && !isConnected ? (
+        <Alert severity="info">
+          Connect QuickBooks to access reports, operations, and tax tools.
+        </Alert>
+      ) : null}
       <QuickBooksIntegrationCard
-        settings={settings}
-        oauthStatus={oauthStatus}
+        settings={settings as QuickBooksSettings | null}
+        oauthStatus={oauthStatus as QuickBooksOAuthStatus | null}
         canManageConnection={canConnect}
         canSync={canSync}
         canRefreshStatus={canView}
@@ -191,8 +200,55 @@ export const QuickBooksSyncPage = () => {
         onRefreshStatus={load}
         initialExpanded
       />
+
+      <Paper sx={{ p: 2 }}>
+        <Typography variant="h6" sx={{ mb: 1 }}>
+          QuickBooks Workspace
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Once connected, use these areas to explore reports, review operational posting outcomes, and run tax repair tools.
+        </Typography>
+        <Stack spacing={1.5}>
+          {shortcutItems.map((item) => {
+            const disabled = !isConnected;
+            return (
+              <Paper
+                key={item.to}
+                variant="outlined"
+                sx={{
+                  p: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 2
+                }}
+              >
+                <Stack direction="row" spacing={1.5} alignItems="center">
+                  {item.icon}
+                  <Stack spacing={0.25}>
+                    <Typography variant="subtitle2">{item.title}</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {item.description}
+                    </Typography>
+                  </Stack>
+                </Stack>
+                <Button
+                  component={RouterLink}
+                  to={item.to}
+                  variant="outlined"
+                  disabled={disabled}
+                >
+                  Open
+                </Button>
+              </Paper>
+            );
+          })}
+        </Stack>
+      </Paper>
     </Stack>
   );
 };
 
-export default QuickBooksSyncPage;
+export const QuickBooksSyncPage = QuickBooksHomePage;
+
+export default QuickBooksHomePage;

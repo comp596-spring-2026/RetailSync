@@ -1,5 +1,7 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { PermissionsMap } from '@retailsync/shared';
+import { authApi } from '../api';
+import { clearCompany } from '../../users/state';
 
 export type AuthUser = {
   _id: string;
@@ -24,6 +26,7 @@ type AuthState = {
   permissions: PermissionsMap | null;
   status: 'idle' | 'loading' | 'authenticated';
   error: string | null;
+  loggingOut: boolean;
 };
 
 const initialState: AuthState = {
@@ -32,8 +35,21 @@ const initialState: AuthState = {
   role: null,
   permissions: null,
   status: 'idle',
-  error: null
+  error: null,
+  loggingOut: false
 };
+
+export const logoutThunk = createAsyncThunk<void>(
+  'auth/logout',
+  async (_, { dispatch }) => {
+    try {
+      await authApi.logout();
+    } finally {
+      dispatch(logout());
+      dispatch(clearCompany());
+    }
+  }
+);
 
 const authSlice = createSlice({
   name: 'auth',
@@ -66,6 +82,18 @@ const authSlice = createSlice({
       state.status = 'idle';
       state.error = null;
     }
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(logoutThunk.pending, (state) => {
+        state.loggingOut = true;
+      })
+      .addCase(logoutThunk.fulfilled, (state) => {
+        state.loggingOut = false;
+      })
+      .addCase(logoutThunk.rejected, (state) => {
+        state.loggingOut = false;
+      });
   }
 });
 
