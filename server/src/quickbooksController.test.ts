@@ -27,7 +27,7 @@ const {
   toQuickBooksSecretPayloadMock: vi.fn()
 }));
 
-vi.mock('./utils/googleSheetsSettings', () => ({
+vi.mock('./integrations/google/settings', () => ({
   getOrCreateSettings: (...args: unknown[]) => getOrCreateSettingsMock(...args)
 }));
 
@@ -38,7 +38,7 @@ vi.mock('./models/IntegrationSecret', () => ({
   }
 }));
 
-vi.mock('./services/quickbooksService', () => ({
+vi.mock('./integrations/quickbooks', () => ({
   buildQuickBooksAuthorizationUrl: (...args: unknown[]) =>
     buildQuickBooksAuthorizationUrlMock(...args),
   ensureFreshQuickBooksSecret: (...args: unknown[]) =>

@@ -1,26 +1,20 @@
 import { google } from 'googleapis';
 import { env } from '../../config/env';
-import { IntegrationSecretModel } from '../../models/IntegrationSecret';
-import { decryptJson, encryptJson } from '../../utils/encryption';
 import {
   LOCAL_SERVICE_ACCOUNT_FILE,
   resolveServiceAccountCredentials,
 } from './serviceAccountCredentials';
+import {
+  createGoogleOAuthClient,
+  GoogleOAuthSecret,
+  loadGoogleOAuthSecret,
+  saveGoogleOAuthSecret
+} from './oauth';
 
 const SHEETS_SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 const DRIVE_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 
 export type GoogleSheetsAuthMode = 'service_account' | 'oauth';
-
-/** Canonical shape for google_oauth encryptedPayload. refreshToken never overwritten with undefined. */
-export type GoogleOAuthSecret = {
-  accessToken: string;
-  refreshToken: string | null;
-  expiryDate?: number | null;
-  scope?: string | null;
-  tokenType?: string | null;
-  connectedEmail?: string | null;
-};
 
 const createServiceAccountAuth = (scopes: string[]) => {
   const credentials = resolveServiceAccountCredentials();
@@ -60,25 +54,12 @@ const TOKEN_REFRESH_BUFFER_MS = 60 * 1000;
  * and attaches a listener to persist tokens on future refreshes.
  */
 export async function getOAuthClientForCompany(companyId: string) {
-  if (!env.googleOAuthClientId || !env.googleOAuthClientSecret || !env.googleIntegrationRedirectUri) {
-    throw new Error('Google OAuth is not configured on server');
-  }
-
-  const secretDoc = await IntegrationSecretModel.findOne({
-    companyId,
-    provider: 'google_oauth'
-  }).select('+encryptedPayload');
-
-  if (!secretDoc?.encryptedPayload) {
+  const payload = await loadGoogleOAuthSecret(companyId);
+  if (!payload) {
     throw new Error('Google OAuth tokens not found. Configure an OAuth source for this sheet first.');
   }
 
-  const payload = decryptJson<GoogleOAuthSecret>(secretDoc.encryptedPayload, env.encryptionKey);
-  const oauthClient = new google.auth.OAuth2(
-    env.googleOAuthClientId,
-    env.googleOAuthClientSecret,
-    env.googleIntegrationRedirectUri
-  );
+  const oauthClient = createGoogleOAuthClient();
 
   oauthClient.setCredentials({
     access_token: payload.accessToken,
@@ -98,10 +79,7 @@ export async function getOAuthClientForCompany(companyId: string) {
       tokenType: payload.tokenType ?? null,
       connectedEmail: payload.connectedEmail ?? null
     };
-    await IntegrationSecretModel.updateOne(
-      { companyId, provider: 'google_oauth' },
-      { $set: { encryptedPayload: encryptJson(nextPayload, env.encryptionKey) } }
-    );
+    await saveGoogleOAuthSecret(companyId, nextPayload);
   };
 
   oauthClient.on('tokens', (tokens) => {

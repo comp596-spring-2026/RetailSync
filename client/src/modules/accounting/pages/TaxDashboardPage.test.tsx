@@ -243,4 +243,35 @@ describe('TaxDashboardPage', () => {
       expect(screen.getByRole('heading', { name: 'Recover Payment' })).toBeInTheDocument();
     });
   });
+
+  it('keeps tax tools accessible when connection exists but oauth health is degraded', async () => {
+    getQuickbooksOAuthStatusMock.mockResolvedValue({
+      data: {
+        data: {
+          ok: false,
+          reason: 'quickbooks_refresh_token_missing',
+          environment: 'sandbox',
+          realmId: 'realm-1',
+          companyName: 'RetailSync QB',
+          expiresInSec: null
+        }
+      }
+    });
+
+    render(
+      <Provider store={createStore(true)}>
+        <MemoryRouter>
+          <TaxDashboardPage />
+        </MemoryRouter>
+      </Provider>
+    );
+
+    await waitFor(() => {
+      expect(getQuickbooksTaxPaymentsMock).toHaveBeenCalled();
+      expect(screen.getByRole('heading', { name: 'Recover Payment' })).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText('QuickBooks connection needs attention: quickbooks refresh token missing.')
+    ).toBeInTheDocument();
+  });
 });

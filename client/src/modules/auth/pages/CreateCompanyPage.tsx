@@ -6,12 +6,11 @@ import { companyCreateSchema } from '@retailsync/shared';
 import { Controller, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { companyApi } from '../../users/api';
 import { useAppDispatch } from '../../../app/store/hooks';
-import { fetchMeAndSync } from '../../../app/auth/fetchMeAndSync';
 import { AuthShell } from '../../../components';
 import { currencyOptions, SelectOption, timezoneOptions } from '../../../constants/companyOptions';
 import { useAsyncAction } from '../../../hooks/useAsyncAction';
+import { createCompanyThunk } from '../../users/state';
 
 type CompanyForm = z.infer<typeof companyCreateSchema>;
 
@@ -37,8 +36,7 @@ export const CreateCompanyPage = () => {
   const onSubmit = async (values: CompanyForm) => {
     await runAction(
       async () => {
-        await companyApi.create(values);
-        await fetchMeAndSync(dispatch);
+        await dispatch(createCompanyThunk(values)).unwrap();
         navigate('/dashboard', { replace: true });
       },
       { successMessage: 'Company created', errorMessage: 'Company creation failed' }

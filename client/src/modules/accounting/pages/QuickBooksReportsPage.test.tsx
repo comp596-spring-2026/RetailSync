@@ -147,4 +147,58 @@ describe('QuickBooksReportsPage', () => {
       expect(screen.getByText('QuickBooks Home Redirect')).toBeInTheDocument();
     });
   });
+
+  it('keeps reports accessible when connection exists but oauth health is degraded', async () => {
+    getQuickbooksSettingsMock.mockResolvedValue({
+      data: {
+        data: {
+          connected: true,
+          environment: 'sandbox',
+          realmId: 'realm-1',
+          companyName: 'RetailSync QB',
+          lastPullStatus: 'idle',
+          lastPullAt: null,
+          lastPullCount: 0,
+          lastPullError: null,
+          lastPushStatus: 'idle',
+          lastPushAt: null,
+          lastPushCount: 0,
+          lastPushError: null,
+          updatedAt: '2026-03-10T00:00:00.000Z'
+        }
+      }
+    });
+    getQuickbooksOAuthStatusMock.mockResolvedValue({
+      data: {
+        data: {
+          ok: false,
+          reason: 'quickbooks_refresh_token_missing',
+          environment: 'sandbox',
+          realmId: 'realm-1',
+          companyName: 'RetailSync QB',
+          expiresInSec: null
+        }
+      }
+    });
+
+    render(
+      <Provider store={createStore()}>
+        <MemoryRouter initialEntries={['/dashboard/quickbooks/reports']}>
+          <Routes>
+            <Route path="/dashboard/quickbooks" element={<div>QuickBooks Home Redirect</div>} />
+            <Route path="/dashboard/quickbooks/reports" element={<QuickBooksReportsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </Provider>
+    );
+
+    await waitFor(() => {
+      expect(getQuickbooksTaxOverviewMock).toHaveBeenCalled();
+    });
+    expect(screen.queryByText('QuickBooks Home Redirect')).not.toBeInTheDocument();
+    expect(screen.getByText('QuickBooks Reports')).toBeInTheDocument();
+    expect(
+      screen.getByText('QuickBooks connection needs attention: quickbooks refresh token missing.')
+    ).toBeInTheDocument();
+  });
 });

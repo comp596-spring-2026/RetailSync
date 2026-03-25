@@ -1,7 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { store } from '../store';
 import { clearCompany } from '../../modules/users/state';
-import { logout, setAccessToken } from '../../modules/auth/state';
+import { logout, setAccessToken, syncAuthContextThunk } from '../../modules/auth/state';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
@@ -34,6 +34,11 @@ api.interceptors.response.use(
 
         const newAccessToken = (refreshRes.data as { data: { accessToken: string } }).data.accessToken;
         store.dispatch(setAccessToken(newAccessToken));
+        try {
+          await store.dispatch(syncAuthContextThunk({ reason: 'token_refresh' })).unwrap();
+        } catch {
+          // Best effort only. The refreshed request may still succeed while context catches up later.
+        }
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
       } catch {

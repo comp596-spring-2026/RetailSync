@@ -7,10 +7,18 @@ import authReducer from '../../modules/auth/state';
 import companyReducer from '../../modules/users/state';
 import rbacReducer from '../../modules/rbac/state';
 import uiReducer from '../../app/store/uiSlice';
-import { setAccessToken } from '../../modules/auth/state';
+import { markAuthRehydrated, setAccessToken, setAuthContext } from '../../modules/auth/state';
 import { ProtectedRoute } from './ProtectedRoute';
 
-const createStore = (accessToken: string | null) => {
+const createStore = ({
+  accessToken,
+  rehydrated = true,
+  contextReady = true
+}: {
+  accessToken: string | null;
+  rehydrated?: boolean;
+  contextReady?: boolean;
+}) => {
   const store = configureStore({
     reducer: {
       auth: authReducer,
@@ -19,15 +27,34 @@ const createStore = (accessToken: string | null) => {
       ui: uiReducer
     }
   });
+  if (rehydrated) {
+    store.dispatch(markAuthRehydrated());
+  }
   if (accessToken) {
     store.dispatch(setAccessToken(accessToken));
+    if (contextReady) {
+      store.dispatch(
+        setAuthContext({
+          user: {
+            _id: 'u1',
+            firstName: 'Test',
+            lastName: 'User',
+            email: 'test@example.com',
+            companyId: 'c1',
+            roleId: 'r1'
+          },
+          role: null,
+          permissions: null
+        })
+      );
+    }
   }
   return store;
 };
 
 describe('ProtectedRoute', () => {
   it('redirects to /login when there is no access token', () => {
-    const store = createStore(null);
+    const store = createStore({ accessToken: null });
     render(
       <Provider store={store}>
         <MemoryRouter initialEntries={['/']}>
@@ -44,8 +71,26 @@ describe('ProtectedRoute', () => {
     expect(screen.queryByText('Protected content')).not.toBeInTheDocument();
   });
 
-  it('renders outlet when access token is present', () => {
-    const store = createStore('fake-token');
+  it('shows a restore loader while persisted auth is being re-synced', () => {
+    const store = createStore({ accessToken: 'fake-token', contextReady: false });
+    render(
+      <Provider store={store}>
+        <MemoryRouter initialEntries={['/']}>
+          <Routes>
+            <Route path="/" element={<ProtectedRoute />}>
+              <Route index element={<div>Protected content</div>} />
+            </Route>
+            <Route path="/login" element={<div>Login</div>} />
+          </Routes>
+        </MemoryRouter>
+      </Provider>
+    );
+    expect(screen.getByText('Restoring access...')).toBeInTheDocument();
+    expect(screen.queryByText('Protected content')).not.toBeInTheDocument();
+  });
+
+  it('renders outlet when access token is present and context is ready', () => {
+    const store = createStore({ accessToken: 'fake-token' });
     render(
       <Provider store={store}>
         <MemoryRouter initialEntries={['/']}>

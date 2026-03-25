@@ -34,15 +34,14 @@ import {
 } from '@mui/material';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { settingsApi } from '../../api';
-import { posApi } from '../../../pos/api';
 import { track } from '../../../../lib/eventing/track';
-import { MatchingWizard } from '../../../pos/components';
+import { MatchingWizard } from './matchingWizard/MatchingWizard';
 import {
   getCompatibility,
   normalizeDerivedConfig,
   normalizeMapping,
   toMappingByTarget,
-} from '../../../pos/components/matchingWizard/mappingLogic';
+} from './matchingWizard/mappingLogic';
 import type { GoogleSheetsSettings } from './GoogleSheetsIntegrationCard';
 import { SourceSwitch, type SourceType } from './SourceSwitch';
 import {
@@ -772,7 +771,7 @@ export const GoogleSheetsSetupInline = ({
     }
 
     const source = stagedSource === 'oauth' ? 'oauth' : 'service';
-    const preview = await posApi.previewSheet({
+    const preview = await settingsApi.previewSheet({
       source,
       spreadsheetId,
       tab: tabName,
@@ -1006,7 +1005,7 @@ export const GoogleSheetsSetupInline = ({
             profileId: stagedSource === 'shared' ? stagedSavedConfig.profileId : undefined,
           };
 
-      const response = await posApi.commitImport(payload);
+      const response = await settingsApi.commitGoogleSheetsImport(payload);
       const imported = Number(response.data?.data?.result?.imported ?? 0);
       setSyncState({ percent: 100, stage: `Sync complete. Processed ${imported} rows.` });
       window.setTimeout(() => setSyncState(null), 1800);
@@ -1043,7 +1042,7 @@ export const GoogleSheetsSetupInline = ({
     setError(null);
 
     try {
-      const validationResponse = await posApi.validateMapping({
+      const validationResponse = await settingsApi.validateGoogleSheetsMapping({
         mapping,
         transforms: transformsPayload,
         validateSample: true,

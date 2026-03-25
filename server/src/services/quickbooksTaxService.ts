@@ -5,7 +5,7 @@ import {
   listQuickBooksAccounts,
   requestQuickBooksApi,
   runQuickBooksReadQuery
-} from './quickbooksService';
+} from '../integrations/quickbooks';
 
 export type QuickBooksTaxBasis = 'cash' | 'accrual';
 export type QuickBooksTaxReportKey =

@@ -1,6 +1,7 @@
 import { moduleActionCatalog, moduleKeys, roleCreateSchema } from '@retailsync/shared';
 import { Request, Response } from 'express';
 import { RoleModel } from '../models/Role';
+import { normalizeRolePermissions } from '../services/rolePermissionsService';
 import { fail, ok } from '../utils/apiResponse';
 
 export const listRoles = async (req: Request, res: Response) => {
@@ -9,7 +10,16 @@ export const listRoles = async (req: Request, res: Response) => {
   }
 
   const roles = await RoleModel.find({ companyId: req.companyId }).sort({ isSystem: -1, name: 1 });
-  return ok(res, roles);
+  return ok(
+    res,
+    roles.map((role) => ({
+      ...role.toObject(),
+      permissions: normalizeRolePermissions(role.permissions, {
+        roleName: String(role.name ?? ''),
+        isSystem: Boolean(role.isSystem)
+      })
+    }))
+  );
 };
 
 export const createRole = async (req: Request, res: Response) => {
@@ -30,7 +40,10 @@ export const createRole = async (req: Request, res: Response) => {
   const role = await RoleModel.create({
     companyId: req.companyId,
     name: parsed.data.name,
-    permissions: parsed.data.permissions,
+    permissions: normalizeRolePermissions(parsed.data.permissions, {
+      roleName: parsed.data.name,
+      isSystem: false
+    }),
     isSystem: false
   });
 
@@ -47,20 +60,19 @@ export const updateRole = async (req: Request, res: Response) => {
     return fail(res, 'Validation failed', 422, parsed.error.flatten());
   }
 
-  const role = await RoleModel.findOneAndUpdate(
-    { _id: req.params.id, companyId: req.companyId },
-    {
-      $set: {
-        name: parsed.data.name,
-        permissions: parsed.data.permissions
-      }
-    },
-    { new: true }
-  );
-
+  const role = await RoleModel.findOne({ _id: req.params.id, companyId: req.companyId });
   if (!role) {
     return fail(res, 'Role not found', 404);
   }
+
+  const existingRoleName = String(role.name ?? '');
+  role.name = parsed.data.name;
+  role.permissions = normalizeRolePermissions(parsed.data.permissions, {
+    roleName: existingRoleName,
+    isSystem: Boolean(role.isSystem),
+    basePermissions: role.permissions
+  }) as any;
+  await role.save();
 
   return ok(res, role);
 };

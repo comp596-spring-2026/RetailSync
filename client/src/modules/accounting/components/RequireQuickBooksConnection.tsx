@@ -6,6 +6,7 @@ type Props = {
   loading: boolean;
   isConnected: boolean;
   error?: string | null;
+  warning?: string | null;
   children: React.ReactNode;
 };
 
@@ -13,6 +14,7 @@ export const RequireQuickBooksConnection = ({
   loading,
   isConnected,
   error,
+  warning,
   children
 }: Props) => {
   if (loading) {
@@ -27,5 +29,10 @@ export const RequireQuickBooksConnection = ({
     return <Navigate to="/dashboard/quickbooks" replace state={{ quickbooksRequired: true, quickbooksError: error ?? null }} />;
   }
 
-  return <>{children}</>;
+  return (
+    <Stack spacing={2}>
+      {warning ? <Alert severity="warning">{warning}</Alert> : null}
+      {children}
+    </Stack>
+  );
 };

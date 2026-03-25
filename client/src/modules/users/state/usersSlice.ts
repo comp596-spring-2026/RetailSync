@@ -1,7 +1,7 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import { userApi } from '../api';
 import { fetchRoles } from '../../rbac/state';
-import type { RootState } from '../../../app/store';
+import type { AppDispatch, RootState } from '../../../app/store';
 import { showSnackbar } from '../../../app/store/uiSlice';
 
 export type UserItem = {
@@ -41,7 +41,7 @@ const initialState: UsersState = {
 export const fetchUsersPageData = createAsyncThunk<
   { users: UserItem[]; invites: InviteItem[] },
   void,
-  { state: RootState }
+  { state: RootState; dispatch: AppDispatch }
 >('users/fetchPageData', async (_, { dispatch }) => {
   const [usersRes, invitesRes] = await Promise.all([userApi.listUsers(), userApi.listInvites(), dispatch(fetchRoles())]);
   return {
@@ -52,7 +52,8 @@ export const fetchUsersPageData = createAsyncThunk<
 
 export const createInviteThunk = createAsyncThunk<
   string,
-  { email: string; roleId: string; expiresInDays?: number }
+  { email: string; roleId: string; expiresInDays?: number },
+  { dispatch: AppDispatch }
 >('users/createInvite', async (payload, { dispatch }) => {
   const res = await userApi.createInvite(payload);
   dispatch(showSnackbar({ message: 'Invite created', severity: 'success' }));
@@ -62,7 +63,8 @@ export const createInviteThunk = createAsyncThunk<
 
 export const assignRoleThunk = createAsyncThunk<
   void,
-  { userId: string; roleId: string }
+  { userId: string; roleId: string },
+  { dispatch: AppDispatch }
 >('users/assignRole', async (payload, { dispatch }) => {
   await userApi.assignRole(payload.userId, payload.roleId);
   dispatch(showSnackbar({ message: 'Role updated', severity: 'success' }));

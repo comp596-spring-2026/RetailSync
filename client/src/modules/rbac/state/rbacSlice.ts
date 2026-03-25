@@ -1,7 +1,7 @@
 import { ModuleKey, PermissionsMap, moduleKeys } from '@retailsync/shared';
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { rbacApi } from '../api';
-import type { RootState } from '../../../app/store';
+import type { AppDispatch, RootState } from '../../../app/store';
 import { showSnackbar } from '../../../app/store/uiSlice';
 
 export type RoleItem = {
@@ -21,7 +21,7 @@ type RbacState = {
 };
 
 const initialState: RbacState = {
-  modules: moduleKeys,
+  modules: [...moduleKeys],
   roles: [],
   selectedRole: null,
   loading: false,
@@ -34,7 +34,7 @@ export const fetchRoles = createAsyncThunk<{ modules: ModuleKey[]; roles: RoleIt
   async () => {
     const [modulesRes, rolesRes] = await Promise.all([rbacApi.modules(), rbacApi.listRoles()]);
     return {
-      modules: (modulesRes.data.data.modules as ModuleKey[]) ?? moduleKeys,
+      modules: ((modulesRes.data.data.modules as ModuleKey[] | undefined) ?? [...moduleKeys]).slice(),
       roles: rolesRes.data.data as RoleItem[]
     };
   }
@@ -42,7 +42,8 @@ export const fetchRoles = createAsyncThunk<{ modules: ModuleKey[]; roles: RoleIt
 
 export const saveRoleThunk = createAsyncThunk<
   void,
-  { id?: string; name: string; permissions: PermissionsMap }
+  { id?: string; name: string; permissions: PermissionsMap },
+  { dispatch: AppDispatch }
 >('rbac/saveRole', async (payload, { dispatch }) => {
   if (payload.id) {
     await rbacApi.updateRole(payload.id, { name: payload.name, permissions: payload.permissions });
@@ -54,7 +55,7 @@ export const saveRoleThunk = createAsyncThunk<
   await dispatch(fetchRoles());
 });
 
-export const deleteRoleThunk = createAsyncThunk<void, string>(
+export const deleteRoleThunk = createAsyncThunk<void, string, { dispatch: AppDispatch }>(
   'rbac/deleteRole',
   async (id, { dispatch }) => {
     await rbacApi.deleteRole(id);

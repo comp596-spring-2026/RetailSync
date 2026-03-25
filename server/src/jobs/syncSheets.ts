@@ -1,14 +1,14 @@
 import { Types } from 'mongoose';
-import { markConnectorImported } from '../controllers/googleSheetsController';
+import { markConnectorImported } from '../services/googleSheets/managementService';
 import {
   importEvaluatedRowsForCompany,
   parseRowsWithHeaderRow,
   readSharedSheetRows
-} from '../controllers/posController';
+} from '../services/pos/importService';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { JobLockModel } from '../models/JobLock';
-import { computeCompatibilityForConnector } from '../utils/sheetsCompatibility';
-import { DEFAULT_CONNECTOR_KEY } from '../utils/sheetsConnectors';
+import { computeCompatibilityForConnector } from '../integrations/google/compatibility';
+import { DEFAULT_CONNECTOR_KEY } from '../integrations/google/connectors';
 import { parseUtcOffsetToMinutes } from '../utils/utcOffset';
 import {
   evaluateConfiguredPosRow,

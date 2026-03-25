@@ -6,11 +6,10 @@ import {
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { useState } from 'react';
-import { itemsApi } from '../../api';
 import { PermissionGate } from '../../../../app/guards';
 import { useAppDispatch, useAppSelector } from '../../../../app/store/hooks';
-import { showSnackbar } from '../../../../app/store/uiSlice';
 import { hasPermission } from '../../../../utils/permissions';
+import { importItems } from '../../state';
 
 type Props = {
   onImported: () => Promise<void> | void;
@@ -25,9 +24,8 @@ export const ItemsImportSection = ({ onImported }: Props) => {
 
   const upload = async () => {
     if (!file) return;
-    await itemsApi.importCsv(file);
+    await dispatch(importItems(file)).unwrap();
     setFile(null);
-    dispatch(showSnackbar({ message: 'Items CSV imported', severity: 'success' }));
     await onImported();
   };
 

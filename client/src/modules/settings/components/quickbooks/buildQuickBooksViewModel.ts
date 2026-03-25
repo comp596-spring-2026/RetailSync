@@ -1,13 +1,5 @@
 import type { QuickBooksSettings } from '@retailsync/shared';
-
-export type QuickBooksOAuthStatus = {
-  ok: boolean;
-  reason: string | null;
-  environment?: 'sandbox' | 'production';
-  realmId: string | null;
-  companyName: string | null;
-  expiresInSec: number | null;
-};
+import type { QuickBooksOAuthStatus } from '../../types';
 
 type StatusTone = 'default' | 'info' | 'success' | 'warning' | 'error';
 type ConnectionState = 'loading' | 'not_configured' | 'needs_attention' | 'connected';

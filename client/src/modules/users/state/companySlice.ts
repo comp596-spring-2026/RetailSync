@@ -1,6 +1,7 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { fetchMeAndSync } from '../../../app/auth/fetchMeAndSync';
 import { showSnackbar } from '../../../app/store/uiSlice';
+import type { AppDispatch } from '../../../app/store';
 import { companyApi, type CreateCompanyPayload, type JoinCompanyPayload } from '../api';
 
 type Company = {
@@ -25,7 +26,7 @@ const initialState: CompanyState = {
   saving: false
 };
 
-export const createCompanyThunk = createAsyncThunk<void, CreateCompanyPayload>(
+export const createCompanyThunk = createAsyncThunk<void, CreateCompanyPayload, { dispatch: AppDispatch }>(
   'company/create',
   async (payload, { dispatch }) => {
     await companyApi.create(payload);
@@ -34,7 +35,7 @@ export const createCompanyThunk = createAsyncThunk<void, CreateCompanyPayload>(
   }
 );
 
-export const joinCompanyThunk = createAsyncThunk<void, JoinCompanyPayload>(
+export const joinCompanyThunk = createAsyncThunk<void, JoinCompanyPayload, { dispatch: AppDispatch }>(
   'company/join',
   async (payload, { dispatch }) => {
     await companyApi.join(payload);

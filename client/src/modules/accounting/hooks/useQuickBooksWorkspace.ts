@@ -29,14 +29,19 @@ export const useQuickBooksWorkspace = (enabled: boolean) => {
 
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      const [settingsResponse, statusResponse] = await Promise.all([
-        accountingApi.getQuickbooksSettings(),
-        accountingApi.getQuickbooksOAuthStatus()
-      ]);
+      const settingsResponse = await accountingApi.getQuickbooksSettings();
+      let oauthStatus: QuickBooksOAuthStatus | null = null;
+
+      try {
+        const statusResponse = await accountingApi.getQuickbooksOAuthStatus();
+        oauthStatus = statusResponse.data.data;
+      } catch {
+        oauthStatus = null;
+      }
 
       setState({
         settings: settingsResponse.data.data,
-        oauthStatus: statusResponse.data.data,
+        oauthStatus,
         loading: false,
         error: null
       });
@@ -55,14 +60,21 @@ export const useQuickBooksWorkspace = (enabled: boolean) => {
   }, [load]);
 
   const isConnected = useMemo(() => {
-    if (!state.settings?.connected) return false;
-    if (state.oauthStatus == null) return true;
-    return state.oauthStatus.ok !== false;
+    return Boolean(state.settings?.connected);
+  }, [state.settings?.connected]);
+
+  const warning = useMemo(() => {
+    if (!state.settings?.connected) return null;
+    if (!state.oauthStatus || state.oauthStatus.ok !== false) return null;
+    return state.oauthStatus.reason
+      ? `QuickBooks connection needs attention: ${state.oauthStatus.reason.replace(/_/g, ' ')}.`
+      : 'QuickBooks OAuth health needs attention, but the company remains connected.';
   }, [state.oauthStatus, state.settings?.connected]);
 
   return {
     ...state,
     load,
-    isConnected
+    isConnected,
+    warning
   };
 };

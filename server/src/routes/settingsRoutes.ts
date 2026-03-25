@@ -6,7 +6,6 @@ import {
   commitGoogleSheetsChange,
   createOAuthSource,
   createSharedProfile,
-  getSettings,
   listOAuthSources,
   listSharedProfiles,
   stageGoogleSheetsChange,
@@ -15,15 +14,20 @@ import {
 } from '../controllers/googleSheetsController';
 import {
   connectQuickbooks,
+  setQuickbooksSettings,
+  disconnectQuickbooks
+} from '../controllers/settings/quickbooksSettingsController';
+import {
   disconnectGoogle,
-  disconnectQuickbooks,
-  getGoogleSheetsSyncOverview,
   resetGoogleSheetsIntegration,
   setGoogleMode,
-  setQuickbooksSettings,
   testGoogleSheetAccess,
   upsertGoogleSource
-} from '../controllers/settingsController';
+} from '../controllers/settings/googleSheetsSettingsController';
+import {
+  getGoogleSheetsSyncOverview,
+  getSettings
+} from '../controllers/settings/settingsReadController';
 import { verifySharedSheetsConfig } from '../controllers/integrationsSheetsController';
 
 const router = Router();

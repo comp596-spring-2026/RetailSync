@@ -1,33 +1,33 @@
-import { PosDailySummaryInput, posDailyQuerySchema, posDailySummarySchema } from '@retailsync/shared';
-import { parse } from 'csv-parse/sync';
+import { PosDailySummaryInput, posDailyQuerySchema } from '@retailsync/shared';
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
-import XLSX from 'xlsx';
 import { z } from 'zod';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
-import { ImportJobModel } from '../models/ImportJob';
 import { POSDailySummaryModel } from '../models/POSDailySummary';
-import { getSheetsClientForCompany } from '../integrations/google/sheets.client';
-import { markConnectorImported } from './googleSheetsController';
+import {
+  commitPosImportFromSheets,
+  importRowsForCompany,
+  parseCsvFileRows,
+  parseInlineRows,
+  parseXlsxRows,
+  readRowsForResolvedConfig,
+  resolveConfigFromRequest
+} from '../services/pos/importService';
 import { fail, ok } from '../utils/apiResponse';
 import { suggestMappings } from '../utils/matching';
-import { buildRange, normalizeRows } from '../utils/sheetsRange';
-import { DEFAULT_CONNECTOR_KEY } from '../utils/sheetsConnectors';
+import { DEFAULT_CONNECTOR_KEY } from '../integrations/google/connectors';
 import {
   computeCompatibilityForConnector,
   validateColumnMapOneToOne
-} from '../utils/sheetsCompatibility';
+} from '../integrations/google/compatibility';
 import {
-  buildFullSheetRange,
   readSheetSampleOAuth,
   readSheetSampleShared,
   SheetsHttpError
-} from '../utils/sheetsClient';
+} from '../integrations/google/sheetsReader';
 import {
-  resolveActiveSheetsConfig,
-  resolveSheetsConfigByRef,
   SheetsConfigError
-} from '../utils/sheetsSourceResolver';
+} from '../integrations/google/sourceResolver';
 import {
   evaluateConfiguredPosRow,
   validateDerivedConfiguration
@@ -419,38 +419,6 @@ const mapRow = (row: CsvRow) => {
   };
 };
 
-const parseRowsWithHeader = (rows: string[][]) => {
-  if (rows.length < 2) return [] as CsvRow[];
-  const [header, ...body] = rows;
-  const normalizedHeader = header.map((cell) => String(cell ?? '').trim());
-  return body
-    .filter((row) => row.some((cell) => String(cell ?? '').trim().length > 0))
-    .map((row) => {
-      const obj: CsvRow = {};
-      normalizedHeader.forEach((column, index) => {
-        obj[column] = String(row[index] ?? '');
-      });
-      return obj;
-    });
-};
-
-export const parseRowsWithHeaderRow = (rows: string[][], headerRow: number) => {
-  if (rows.length < headerRow + 1) return [] as CsvRow[];
-  const headerIndex = Math.max(0, headerRow - 1);
-  const header = rows[headerIndex];
-  const body = rows.slice(headerIndex + 1);
-  const normalizedHeader = header.map((cell) => String(cell ?? '').trim());
-  return body
-    .filter((row) => row.some((cell) => String(cell ?? '').trim().length > 0))
-    .map((row) => {
-      const obj: CsvRow = {};
-      normalizedHeader.forEach((column, index) => {
-        obj[column] = String(row[index] ?? '');
-      });
-      return obj;
-    });
-};
-
 const toSheetsErrorStatus = (error: unknown) => {
   if (error instanceof SheetsConfigError) return error.statusCode;
   if (error instanceof SheetsHttpError) return error.statusCode;
@@ -485,266 +453,6 @@ const toSheetsErrorMessage = (error: unknown) => {
   return message;
 };
 
-const parseCsvFileRows = (buffer: Buffer) => {
-  const csv = buffer.toString('utf-8');
-  return parse(csv, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true
-  }) as CsvRow[];
-};
-
-const parseXlsxRows = (buffer: Buffer) => {
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
-  const firstSheetName = workbook.SheetNames[0];
-  if (!firstSheetName) return [] as CsvRow[];
-  const firstSheet = workbook.Sheets[firstSheetName];
-  return XLSX.utils.sheet_to_json(firstSheet, {
-    defval: '',
-    raw: false
-  }) as CsvRow[];
-};
-
-const resolveLegacyIntegrationType = (source?: string): 'oauth' | 'shared' | undefined => {
-  if (!source) return undefined;
-  if (source === 'oauth') return 'oauth';
-  if (source === 'service') return 'shared';
-  return undefined;
-};
-
-const resolveConfigFromRequest = async (
-  companyId: string,
-  params: {
-    integrationType?: 'oauth' | 'shared';
-    sourceId?: string;
-    profileId?: string;
-    connectorKey?: string;
-    source?: string;
-  }
-) => {
-  const integrationType = params.integrationType ?? resolveLegacyIntegrationType(params.source);
-  const connectorKey = String(params.connectorKey ?? '').trim() || DEFAULT_CONNECTOR_KEY;
-
-  if (!integrationType) {
-    return resolveActiveSheetsConfig(companyId, connectorKey);
-  }
-
-  return resolveSheetsConfigByRef(companyId, {
-    integrationType,
-    sourceId: params.sourceId,
-    profileId: params.profileId,
-    connectorKey
-  });
-};
-
-const readRowsForResolvedConfig = async (
-  companyId: string,
-  resolved: Awaited<ReturnType<typeof resolveActiveSheetsConfig>>,
-  opts?: { limitRows?: number; sheetNameOverride?: string }
-) => {
-  const authMode = resolved.integrationType === 'oauth' ? 'oauth' : 'service_account';
-  const sheets = await getSheetsClientForCompany(authMode, companyId);
-  const sheetName = String(opts?.sheetNameOverride ?? resolved.sheetName).trim() || resolved.sheetName;
-  const limitRows = opts?.limitRows;
-  const range =
-    typeof limitRows === 'number'
-      ? buildRange(sheetName, resolved.headerRow, Math.min(Math.max(limitRows, 1), 200))
-      : buildFullSheetRange(sheetName, resolved.headerRow);
-
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: resolved.spreadsheetId,
-    range
-  });
-  const rawRows = normalizeRows(response.data.values as unknown[][] | undefined);
-  return {
-    rawRows,
-    rowCount: rawRows.length,
-    sheetName
-  };
-};
-
-export const readSharedSheetRows = async (
-  companyId: string,
-  opts?: { tab?: string; maxRows?: number; profileId?: string; connectorKey?: string }
-) => {
-  const resolved = await resolveSheetsConfigByRef(companyId, {
-    integrationType: 'shared',
-    profileId: opts?.profileId,
-    connectorKey: opts?.connectorKey
-  });
-  const { rawRows, rowCount, sheetName } = await readRowsForResolvedConfig(companyId, resolved, {
-    limitRows: opts?.maxRows,
-    sheetNameOverride: opts?.tab
-  });
-
-  return {
-    source: {
-      integrationType: 'shared' as const,
-      connectorKey: resolved.connectorKey,
-      profileId: resolved.ref.profileId ?? null,
-      profileName: resolved.ref.profileName ?? null,
-      spreadsheetId: resolved.spreadsheetId,
-      sheetName,
-      headerRow: resolved.headerRow,
-      mapping: resolved.mapping,
-      transformations: resolved.transformations
-    },
-    rawRows,
-    rowCount
-  };
-};
-
-export const importRowsForCompany = async (
-  companyId: string,
-  rawRows: CsvRow[],
-  importSource: 'file' | 'google_sheets' | 'manual' = 'manual',
-  opts?: {
-    importBindingKey?: string | null;
-    derivedFields?: string[];
-    sourceRef?: {
-      mode?: string | null;
-      profileName?: string | null;
-      spreadsheetId?: string | null;
-      sheetName?: string | null;
-      sourceId?: string | null;
-      importJobId?: string | null;
-      reason?: string | null;
-    };
-  }
-) => {
-  const parsedRows = rawRows.map(mapRow).filter((row): row is NonNullable<ReturnType<typeof mapRow>> => !!row);
-  const validatedRows = parsedRows.map((row, index) => {
-    const parsed = posDailySummarySchema.safeParse(row);
-    if (!parsed.success) {
-      return { index, error: parsed.error.flatten() };
-    }
-    return { index, data: parsed.data };
-  });
-
-  const validationError = validatedRows.find((row) => 'error' in row);
-  if (validationError && 'error' in validationError) {
-    return {
-      ok: false as const,
-      error: {
-        rowIndex: validationError.index,
-        issues: validationError.error
-      }
-    };
-  }
-
-  const normalizedRows = validatedRows.map((row) => (row as { index: number; data: PosDailySummaryInput }).data);
-  return upsertPosRowsForCompany(companyId, normalizedRows, importSource, opts);
-};
-
-const upsertPosRowsForCompany = async (
-  companyId: string,
-  normalizedRows: PosDailySummaryInput[],
-  importSource: 'file' | 'google_sheets' | 'manual',
-  opts?: {
-    importBindingKey?: string | null;
-    derivedFields?: string[];
-    sourceRef?: {
-      mode?: string | null;
-      profileName?: string | null;
-      spreadsheetId?: string | null;
-      sheetName?: string | null;
-      sourceId?: string | null;
-      importJobId?: string | null;
-      reason?: string | null;
-    };
-  }
-) => {
-  if (normalizedRows.length === 0) {
-    return {
-      ok: false as const,
-      error: {
-        message: 'No valid POS rows found'
-      }
-    };
-  }
-
-  const ops = normalizedRows.map((row) => {
-    const date = new Date(`${row.date}T00:00:00.000Z`);
-    return {
-      updateOne: {
-        filter: { companyId, date },
-        update: {
-          $set: {
-            ...row,
-            date,
-            source: importSource,
-            importBindingKey: opts?.importBindingKey ?? null,
-            derivedFieldsApplied: Array.isArray(opts?.derivedFields) ? opts?.derivedFields : undefined,
-            sourceRef: opts?.sourceRef
-              ? {
-                  mode: opts.sourceRef.mode ?? null,
-                  profileName: opts.sourceRef.profileName ?? null,
-                  spreadsheetId: opts.sourceRef.spreadsheetId ?? null,
-                  sheetName: opts.sourceRef.sheetName ?? null,
-                  sourceId: opts.sourceRef.sourceId ?? null,
-                  importJobId: opts.sourceRef.importJobId ?? null,
-                  reason: opts.sourceRef.reason ?? null
-                }
-              : undefined
-          }
-        },
-        upsert: true
-      }
-    };
-  });
-
-  const writeResult = await POSDailySummaryModel.bulkWrite(ops as any);
-
-  return {
-    ok: true as const,
-    data: {
-      imported: normalizedRows.length,
-      upserted: writeResult.upsertedCount,
-      modified: writeResult.modifiedCount
-    }
-  };
-};
-
-export const importEvaluatedRowsForCompany = async (
-  companyId: string,
-  rows: PosDailySummaryInput[],
-  importSource: 'file' | 'google_sheets' | 'manual' = 'manual',
-  opts?: {
-    importBindingKey?: string | null;
-    derivedFields?: string[];
-    sourceRef?: {
-      mode?: string | null;
-      profileName?: string | null;
-      spreadsheetId?: string | null;
-      sheetName?: string | null;
-      sourceId?: string | null;
-      importJobId?: string | null;
-      reason?: string | null;
-    };
-  }
-) => {
-  const validatedRows = rows.map((row, index) => {
-    const parsed = posDailySummarySchema.safeParse(row);
-    if (!parsed.success) {
-      return { index, error: parsed.error.flatten() };
-    }
-    return { index, data: parsed.data };
-  });
-
-  const validationError = validatedRows.find((row) => 'error' in row);
-  if (validationError && 'error' in validationError) {
-    return {
-      ok: false as const,
-      error: {
-        rowIndex: validationError.index,
-        issues: validationError.error
-      }
-    };
-  }
-
-  const normalizedRows = validatedRows.map((row) => (row as { index: number; data: PosDailySummaryInput }).data);
-  return upsertPosRowsForCompany(companyId, normalizedRows, importSource, opts);
-};
 
 export const importPosCsv = async (req: Request, res: Response) => {
   if (!req.companyId) {
@@ -818,7 +526,7 @@ export const importPosRows = async (req: Request, res: Response) => {
     return fail(res, 'rows is required and must be a non-empty 2D array', 400);
   }
 
-  const parsedRows = hasHeader ? parseRowsWithHeader(rows) : [];
+  const parsedRows = parseInlineRows(rows, hasHeader);
   if (parsedRows.length === 0) {
     return fail(res, 'No data rows found. Ensure the first row contains headers.', 400);
   }
@@ -847,7 +555,9 @@ export const previewPosImportFromSharedSheet = async (req: Request, res: Respons
     const spreadsheetIdOverride = parsed.data.spreadsheetId?.trim() ?? '';
     const sheetName = String(parsed.data.sheetName ?? parsed.data.tab ?? 'Sheet1').trim() || 'Sheet1';
     const integrationType =
-      parsed.data.integrationType ?? resolveLegacyIntegrationType(parsed.data.source) ?? 'shared';
+      parsed.data.integrationType ??
+      (parsed.data.source === 'oauth' ? 'oauth' : parsed.data.source === 'service' ? 'shared' : undefined) ??
+      'shared';
 
     if (spreadsheetIdOverride) {
       const sample =
@@ -990,125 +700,20 @@ export const commitPosImportFromSharedSheet = async (req: Request, res: Response
       return fail(res, 'Unsupported connector', 400);
     }
 
-    const resolved =
-      parsedCommit.data.integrationType != null
-        ? await resolveSheetsConfigByRef(req.companyId, {
-            integrationType: parsedCommit.data.integrationType,
-            sourceId: parsedCommit.data.sourceId,
-            profileId: parsedCommit.data.profileId,
-            connectorKey: parsedCommit.data.connectorKey
-          })
-        : await resolveActiveSheetsConfig(req.companyId, parsedCommit.data.connectorKey);
-
-    const { rawRows } = await readRowsForResolvedConfig(req.companyId, resolved);
-    const columns = rawRows[Math.max(0, resolved.headerRow - 1)] ?? [];
-    const compatibility = computeCompatibilityForConnector({
-      connectorKey: resolved.connectorKey,
-      columns,
-      mapping: resolved.mapping
+    const result = await commitPosImportFromSheets({
+      companyId: req.companyId,
+      userId: req.user.id,
+      connectorKey: parsedCommit.data.connectorKey,
+      integrationType: parsedCommit.data.integrationType,
+      sourceId: parsedCommit.data.sourceId,
+      profileId: parsedCommit.data.profileId
     });
-    if (compatibility.status === 'error') {
-      return fail(res, 'Connector mapping is not compatible', 400, compatibility);
-    }
-    const derivedValidation = validateDerivedConfiguration({
-      headers: columns,
-      mapping: resolved.mapping,
-      transformations: resolved.transformations
-    });
-    if (!derivedValidation.ok) {
-      return fail(res, 'Derived mapping configuration is invalid', 400, {
-        compatibility,
-        derivedValidation
-      });
-    }
 
-    const parsedRows = parseRowsWithHeaderRow(rawRows, resolved.headerRow);
-    if (parsedRows.length === 0) {
-      return fail(res, 'No data rows found in configured sheet', 400);
-    }
-
-    const evaluatedRows: PosDailySummaryInput[] = [];
-    for (let index = 0; index < parsedRows.length; index += 1) {
-      const evaluated = evaluateConfiguredPosRow({
-        row: parsedRows[index],
-        mapping: resolved.mapping,
-        transformations: resolved.transformations
-      });
-      if (!evaluated.ok) {
-        const sheetRow = resolved.headerRow + index + 1;
-        return fail(res, `Row ${index + 1} (sheet row ${sheetRow}): ${evaluated.reason}`, 422, {
-          rowIndex: index,
-          sheetRow,
-          reason: evaluated.reason,
-          ...(evaluated.details ? { details: evaluated.details } : {})
-        });
-      }
-      evaluatedRows.push(evaluated.row);
-    }
-    const refId = resolved.integrationType === 'oauth' ? resolved.ref.sourceId : resolved.ref.profileId;
-    const importBindingKey = `sheets:${resolved.integrationType}:${String(refId ?? '')}:${resolved.connectorKey}:${resolved.spreadsheetId}:${resolved.sheetName}`;
-    const derivedFields = (
-      Object.entries(derivedValidation.derivedConfig)
-        .map(([key]) => key)
-    );
-
-    const result = await importEvaluatedRowsForCompany(req.companyId, evaluatedRows, 'google_sheets', {
-      importBindingKey,
-      derivedFields,
-      sourceRef: {
-        mode: resolved.integrationType,
-        profileName: resolved.ref.profileName ?? resolved.ref.sourceName ?? null,
-        spreadsheetId: resolved.spreadsheetId,
-        sheetName: resolved.sheetName,
-        sourceId: String(refId ?? ''),
-        reason: `Connector import (${resolved.connectorKey})`
-      }
-    });
     if (!result.ok) {
-      return fail(res, ('message' in result.error ? result.error.message : 'Validation failed'), 422, result.error);
+      return fail(res, result.message, result.statusCode, result.details);
     }
 
-    const importedAt = new Date();
-    await markConnectorImported({
-      companyId: req.companyId,
-      integrationType: resolved.integrationType,
-      sourceId: resolved.ref.sourceId,
-      profileId: resolved.ref.profileId,
-      connectorKey: resolved.connectorKey,
-      importedAt
-    });
-
-    const importJob = await ImportJobModel.create({
-      companyId: req.companyId,
-      createdBy: req.user.id,
-      source: resolved.integrationType === 'oauth' ? 'oauth' : 'service',
-      status: 'processing',
-      mapping: resolved.mapping,
-      transforms: resolved.transformations,
-      options: {
-        connectorKey: resolved.connectorKey,
-        integrationType: resolved.integrationType,
-        sourceId: resolved.ref.sourceId,
-        profileId: resolved.ref.profileId
-      }
-    });
-
-    await ImportJobModel.updateOne(
-      { _id: importJob._id },
-      { $set: { status: 'done', 'options.summary': result.data } }
-    );
-
-    return ok(res, {
-      jobId: importJob._id.toString(),
-      result: {
-        ...result.data,
-        integrationType: resolved.integrationType,
-        connectorKey: resolved.connectorKey,
-        spreadsheetId: resolved.spreadsheetId,
-        sheetName: resolved.sheetName
-      },
-      ref: resolved.ref
-    });
+    return ok(res, result.data);
   } catch (error) {
     const message = toSheetsErrorMessage(error);
     return fail(res, message, toSheetsErrorStatus(error));

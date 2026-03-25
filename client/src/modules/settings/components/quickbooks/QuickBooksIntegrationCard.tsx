@@ -18,11 +18,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { QuickBooksLogo } from '../../../../components';
 import {
   buildQuickBooksViewModel,
-  type QuickBooksOAuthStatus,
 } from './buildQuickBooksViewModel';
 import { QuickBooksActionStack } from './QuickBooksActionStack';
 import { QuickBooksConnectorRow } from './QuickBooksConnectorRow';
 import type { QuickBooksSettings } from '@retailsync/shared';
+import type { QuickBooksOAuthStatus } from '../../types';
 
 type Props = {
   settings: QuickBooksSettings | null;

@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GoogleSheetsSetupInline } from './GoogleSheetsSetupInline';
 import type { GoogleSheetsSettings } from './GoogleSheetsIntegrationCard';
 import { settingsApi } from '../../api';
-import { posApi } from '../../../pos/api';
 
 vi.mock('../../api', () => ({
   settingsApi: {
@@ -15,25 +14,20 @@ vi.mock('../../api', () => ({
     listTabsWithSpreadsheetId: vi.fn().mockResolvedValue({ data: { data: { tabs: [] } } }),
     stageGoogleSheetsChange: vi.fn().mockResolvedValue({ data: { data: { preview: { header: [], sampleRows: [], suggestions: [] } } } }),
     commitGoogleSheetsChange: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    previewSheet: vi.fn().mockResolvedValue({
+      data: { data: { header: [], sampleRows: [], suggestions: [] } },
+    }),
+    validateGoogleSheetsMapping: vi.fn().mockResolvedValue({
+      data: { data: { valid: true, rowErrors: [] } },
+    }),
+    commitGoogleSheetsImport: vi.fn().mockResolvedValue({
+      data: { data: { result: { imported: 0 } } },
+    }),
     setGoogleMode: vi.fn().mockResolvedValue({}),
     saveGoogleSource: vi.fn().mockResolvedValue({}),
     saveGoogleSheetsMapping: vi.fn().mockResolvedValue({}),
     configureSharedSheet: vi.fn().mockResolvedValue({}),
     verifySharedSheet: vi.fn().mockResolvedValue({ data: { ok: true } }),
-  },
-}));
-
-vi.mock('../../../pos/api', () => ({
-  posApi: {
-    previewSheet: vi.fn().mockResolvedValue({
-      data: { data: { header: [], sampleRows: [], suggestions: [] } },
-    }),
-    validateMapping: vi.fn().mockResolvedValue({
-      data: { data: { valid: true, rowErrors: [] } },
-    }),
-    commitImport: vi.fn().mockResolvedValue({
-      data: { data: { result: { imported: 0 } } },
-    }),
   },
 }));
 
@@ -737,7 +731,7 @@ describe('GoogleSheetsSetupInline', () => {
         },
       },
     } as never);
-    vi.mocked(posApi.previewSheet).mockResolvedValueOnce({
+    vi.mocked(settingsApi.previewSheet).mockResolvedValueOnce({
       data: {
         data: {
           columns: ['DATE', 'HIGH TAX', 'LOW TAX'],

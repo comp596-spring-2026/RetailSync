@@ -4,5 +4,5 @@ export { QuickBooksIntegrationCard } from './QuickBooksIntegrationCard';
 export {
   buildQuickBooksViewModel,
   type QuickBooksIntegrationViewModel,
-  type QuickBooksOAuthStatus,
 } from './buildQuickBooksViewModel';
+export type { QuickBooksOAuthStatus } from '../../types';

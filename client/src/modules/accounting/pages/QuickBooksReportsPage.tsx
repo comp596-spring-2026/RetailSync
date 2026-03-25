@@ -60,7 +60,7 @@ type SectionState<T> = {
 export const QuickBooksReportsPage = () => {
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const { loading: workspaceLoading, isConnected, error: workspaceError } = useQuickBooksWorkspace(canView);
+  const { loading: workspaceLoading, isConnected, error: workspaceError, warning: workspaceWarning } = useQuickBooksWorkspace(canView);
 
   const dateWindow = useMemo(defaultWindow, []);
   const [from, setFrom] = useState(dateWindow.from);
@@ -155,7 +155,12 @@ export const QuickBooksReportsPage = () => {
         icon={<InsightsIcon />}
       />
       <QuickBooksTabs />
-      <RequireQuickBooksConnection loading={workspaceLoading} isConnected={isConnected} error={workspaceError}>
+      <RequireQuickBooksConnection
+        loading={workspaceLoading}
+        isConnected={isConnected}
+        error={workspaceError}
+        warning={workspaceWarning}
+      >
         <Paper sx={{ p: 2 }}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}>
             <TextField

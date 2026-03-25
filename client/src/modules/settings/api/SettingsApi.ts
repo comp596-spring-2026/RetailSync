@@ -1,4 +1,5 @@
 import { api } from '../../../app/api/client';
+import type { GoogleSheetsSyncOverview, QuickBooksOAuthStatus } from '../types';
 
 export type GoogleSheetMode = 'service_account' | 'oauth';
 export type QuickbooksEnvironment = 'sandbox' | 'production';
@@ -61,15 +62,7 @@ export class SettingsApi {
 
   getGoogleSheetsSyncOverview() {
     return api.get<{
-      data: {
-        totalEntries: number;
-        lastUpdatedAt: string | null;
-        byProfile: Array<{
-          profileName: string;
-          entries: number;
-          lastUpdatedAt: string | null;
-        }>;
-      };
+      data: GoogleSheetsSyncOverview;
     }>('/settings/google-sheets/sync-overview');
   }
 
@@ -136,6 +129,39 @@ export class SettingsApi {
     return api.post('/integrations/sheets/sync-schedule', payload);
   }
 
+  previewSheet(payload: {
+    source?: 'service' | 'oauth' | 'file';
+    tab?: string;
+    maxRows?: number;
+    spreadsheetId?: string;
+    headerRow?: number;
+  }) {
+    return api.post('/pos/import/sheets/preview', payload);
+  }
+
+  validateGoogleSheetsMapping(payload: {
+    mapping: Record<string, string>;
+    transforms?: Record<string, unknown>;
+    validateSample?: boolean;
+    tab?: string;
+    spreadsheetId?: string;
+    headerRow?: number;
+  }) {
+    return api.post('/pos/import/sheets/match', payload);
+  }
+
+  commitGoogleSheetsImport(payload: {
+    connectorKey?: string;
+    integrationType?: 'oauth' | 'shared';
+    sourceId?: string;
+    profileId?: string;
+    mapping?: Record<string, string>;
+    transforms?: Record<string, unknown>;
+    options?: Record<string, unknown>;
+  }) {
+    return api.post('/pos/import/sheets/commit', payload);
+  }
+
   deleteGoogleSheetsSourceBinding(payload: {
     mode: 'oauth' | 'service_account';
     profileId?: string;
@@ -196,6 +222,20 @@ export class SettingsApi {
 
   disconnectQuickbooks() {
     return api.post('/settings/disconnect/quickbooks');
+  }
+
+  getQuickbooksOAuthStatus() {
+    return api.get<{
+      data: QuickBooksOAuthStatus;
+    }>('/integrations/quickbooks/oauth-status');
+  }
+
+  refreshQuickbooksReferenceData() {
+    return api.post('/integrations/quickbooks/sync/refresh-reference-data');
+  }
+
+  postApprovedToQuickbooks() {
+    return api.post('/integrations/quickbooks/sync/post-approved');
   }
 }
 

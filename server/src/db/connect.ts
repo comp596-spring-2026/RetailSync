@@ -1,5 +1,5 @@
-import mongoose from 'mongoose';
-import { env } from '../config/env';
+import mongoose from "mongoose";
+import { env } from "../config/env";
 
 export const connectDb = async () => {
   const maxAttempts = 10;
@@ -13,7 +13,7 @@ export const connectDb = async () => {
     } catch (error) {
       lastError = error;
       console.error(
-        `Mongo connection attempt ${attempt}/${maxAttempts} failed. Retrying in ${retryDelayMs}ms...`
+        `Mongo connection attempt ${attempt}/${maxAttempts} failed. Retrying in ${retryDelayMs}ms...`,
       );
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }

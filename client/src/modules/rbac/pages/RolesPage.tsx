@@ -63,12 +63,13 @@ export const RolesPage = () => {
 
   useEffect(() => {
     const sourceModules = reduxModules.length > 0 ? reduxModules : moduleKeys;
-    setPermissions((prev) =>
-      sourceModules.reduce((acc, module) => {
-        acc[module] = prev[module] ?? { view: true, create: false, edit: false, delete: false, actions: [] };
-        return acc;
-      }, {} as LocalPermission)
-    );
+    setPermissions((prev) => {
+      const next = {} as LocalPermission;
+      sourceModules.forEach((module) => {
+        next[module] = prev[module] ?? { view: true, create: false, edit: false, delete: false, actions: [] };
+      });
+      return next;
+    });
   }, [reduxModules]);
 
   useEffect(() => {

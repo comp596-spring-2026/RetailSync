@@ -54,8 +54,8 @@ const postingColor = (status: OperationsEntry['posting']['status']) => {
 
 export const QuickBooksOperationsPage = () => {
   const permissions = useAppSelector((state) => state.auth.permissions);
-  const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const { loading: workspaceLoading, isConnected, error: workspaceError } = useQuickBooksWorkspace(canView);
+  const canView = hasPermission(permissions, 'ledger', 'view');
+  const { loading: workspaceLoading, isConnected, error: workspaceError, warning: workspaceWarning } = useQuickBooksWorkspace(canView);
 
   const [entries, setEntries] = useState<OperationsEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +116,12 @@ export const QuickBooksOperationsPage = () => {
         icon={<SyncAltIcon />}
       />
       <QuickBooksTabs />
-      <RequireQuickBooksConnection loading={workspaceLoading} isConnected={isConnected} error={workspaceError}>
+      <RequireQuickBooksConnection
+        loading={workspaceLoading}
+        isConnected={isConnected}
+        error={workspaceError}
+        warning={workspaceWarning}
+      >
         <Paper sx={{ p: 2 }}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}>
             <TextField

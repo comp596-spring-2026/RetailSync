@@ -3,8 +3,10 @@ export {
   default as authReducer,
   logout,
   logoutThunk,
+  markAuthRehydrated,
   setAccessToken,
   setAuthContext,
-  setAuthError
+  setAuthError,
+  syncAuthContextThunk
 } from './authSlice';
 export type { AuthRole, AuthUser } from './authSlice';
