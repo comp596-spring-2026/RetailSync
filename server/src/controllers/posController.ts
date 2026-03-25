@@ -10,7 +10,6 @@ import {
   parseCsvFileRows,
   parseInlineRows,
   parseXlsxRows,
-  readRowsForResolvedConfig,
   resolveConfigFromRequest
 } from '../services/pos/importService';
 import { fail, ok } from '../utils/apiResponse';
