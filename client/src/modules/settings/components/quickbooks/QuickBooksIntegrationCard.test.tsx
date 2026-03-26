@@ -1,10 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { QuickBooksSettings } from '@retailsync/shared';
-import {
-  QuickBooksIntegrationCard,
-  type QuickBooksOAuthStatus,
-} from './index';
+import { QuickBooksIntegrationCard } from './index';
+import type { QuickBooksOAuthWorkspaceStatus } from '../../types/quickbooks';
 
 const baseSettings: QuickBooksSettings = {
   connected: false,
@@ -30,14 +28,29 @@ const buildSettings = (
 });
 
 const buildOauthStatus = (
-  overrides: Partial<QuickBooksOAuthStatus> = {},
-): QuickBooksOAuthStatus => ({
+  overrides: Partial<QuickBooksOAuthWorkspaceStatus> = {},
+): QuickBooksOAuthWorkspaceStatus => ({
   ok: true,
   reason: null,
+  connected: true,
+  degraded: false,
+  status: 'connected',
+  needsReconnect: false,
   environment: 'sandbox',
   realmId: 'realm-1',
   companyName: 'RetailSync QB',
   expiresInSec: 3600,
+  health: {
+    status: 'healthy',
+    checkedAt: '2026-03-16T14:06:00.000Z',
+    refreshedAt: '2026-03-16T14:05:00.000Z',
+    accessTokenExpiresAt: '2026-03-16T15:06:00.000Z',
+    accessTokenExpiresInSec: 3600,
+    refreshTokenExpiresAt: '2026-04-16T14:06:00.000Z',
+    refreshTokenExpiresInSec: 2678400,
+    lastRefreshError: null,
+    lastRefreshErrorAt: null,
+  },
   ...overrides,
 });
 
@@ -46,7 +59,7 @@ const renderCard = ({
   oauthStatus = null,
 }: {
   settings?: QuickBooksSettings | null;
-  oauthStatus?: QuickBooksOAuthStatus | null;
+  oauthStatus?: QuickBooksOAuthWorkspaceStatus | null;
 } = {}) => {
   const handlers = {
     onConnect: vi.fn(),
@@ -124,7 +137,7 @@ describe('QuickBooksIntegrationCard', () => {
     expect(handlers.onRefreshReferences).toHaveBeenCalledTimes(1);
   });
 
-  it('shows needs-attention state when token is invalid', () => {
+  it('shows degraded state while keeping normal sync actions available', () => {
     const handlers = renderCard({
       settings: buildSettings({
         connected: true,
@@ -133,12 +146,58 @@ describe('QuickBooksIntegrationCard', () => {
       }),
       oauthStatus: buildOauthStatus({
         ok: false,
-        reason: 'quickbooks_refresh_token_missing',
-        expiresInSec: null,
+        degraded: true,
+        status: 'degraded',
+        health: {
+          status: 'degraded',
+          checkedAt: '2026-03-16T14:06:00.000Z',
+          refreshedAt: '2026-03-16T14:05:00.000Z',
+          accessTokenExpiresAt: '2026-03-16T14:16:00.000Z',
+          accessTokenExpiresInSec: 600,
+          refreshTokenExpiresAt: '2026-04-16T14:06:00.000Z',
+          refreshTokenExpiresInSec: 2678400,
+          lastRefreshError: 'Recent token refresh failed',
+          lastRefreshErrorAt: '2026-03-16T14:05:00.000Z',
+        },
       }),
     });
 
-    expect(screen.getAllByText(/Needs attention/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/^Degraded$/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Recent token refresh failed/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /Refresh Reference Data/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Refresh Reference Data/i }));
+    expect(handlers.onRefreshReferences).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows reconnect-required state when oauth repair is needed', () => {
+    const handlers = renderCard({
+      settings: buildSettings({
+        connected: true,
+        companyName: 'RetailSync QB',
+        realmId: 'realm-1',
+      }),
+      oauthStatus: buildOauthStatus({
+        ok: false,
+        status: 'connected',
+        needsReconnect: true,
+        reason: 'quickbooks_refresh_token_missing',
+        expiresInSec: null,
+        health: {
+          status: 'degraded',
+          checkedAt: '2026-03-16T14:06:00.000Z',
+          refreshedAt: '2026-03-16T14:05:00.000Z',
+          accessTokenExpiresAt: null,
+          accessTokenExpiresInSec: null,
+          refreshTokenExpiresAt: null,
+          refreshTokenExpiresInSec: null,
+          lastRefreshError: 'Refresh token is missing',
+          lastRefreshErrorAt: '2026-03-16T14:05:00.000Z',
+        },
+      }),
+    });
+
+    expect(screen.getAllByText(/Reconnect required/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Refresh token is missing/i).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: /Reconnect QuickBooks/i }));

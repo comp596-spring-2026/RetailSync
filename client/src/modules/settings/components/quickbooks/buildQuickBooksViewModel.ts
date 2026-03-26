@@ -1,5 +1,9 @@
 import type { QuickBooksSettings } from '@retailsync/shared';
-import type { QuickBooksOAuthStatus } from '../../types';
+import {
+  normalizeQuickBooksOAuthStatus,
+  type QuickBooksOAuthStatusInput,
+  type QuickBooksOAuthWorkspaceStatus,
+} from '../../types/quickbooks';
 
 type StatusTone = 'default' | 'info' | 'success' | 'warning' | 'error';
 type ConnectionState = 'loading' | 'not_configured' | 'needs_attention' | 'connected';
@@ -40,12 +44,15 @@ export type QuickBooksIntegrationViewModel = {
   realmLabel: string;
   lastUpdatedLabel: string;
   connectionDetails: QuickBooksDetailRow[];
+  connectionNotice: {
+    severity: 'warning' | 'error';
+    message: string;
+  } | null;
   tokenHealth: {
     label: string;
     tone: StatusTone;
     message: string;
-    expiresLabel: string;
-    reasonLabel: string;
+    details: QuickBooksDetailRow[];
   };
   syncSummaries: QuickBooksSyncSummary[];
   primaryAction: {
@@ -57,7 +64,7 @@ export type QuickBooksIntegrationViewModel = {
 
 type BuildQuickBooksViewModelInput = {
   settings: QuickBooksSettings | null;
-  oauthStatus?: QuickBooksOAuthStatus | null;
+  oauthStatus?: QuickBooksOAuthStatusInput;
   loading?: boolean;
   canViewHealth?: boolean;
 };
@@ -129,34 +136,83 @@ const formatQuickBooksReason = (reason: string | null | undefined) => {
   }
 };
 
+const buildTokenHealthDetails = (oauthStatus: QuickBooksOAuthWorkspaceStatus): QuickBooksDetailRow[] => {
+  const accessTokenExpiresIn =
+    oauthStatus.health?.accessTokenExpiresInSec ?? oauthStatus.expiresInSec;
+
+  return [
+    {
+      label: 'Checked',
+      value: formatTimestamp(oauthStatus.health?.checkedAt, 'Not available'),
+    },
+    {
+      label: 'Access token',
+      value: formatExpiresIn(accessTokenExpiresIn),
+      tone:
+        accessTokenExpiresIn != null && accessTokenExpiresIn < 900
+          ? 'warning'
+          : 'default',
+    },
+    {
+      label: 'Refresh token',
+      value: formatExpiresIn(oauthStatus.health?.refreshTokenExpiresInSec),
+      tone:
+        oauthStatus.health?.refreshTokenExpiresInSec != null &&
+        oauthStatus.health.refreshTokenExpiresInSec < 86400
+          ? 'warning'
+          : 'default',
+    },
+    {
+      label: 'Last refresh',
+      value: formatTimestamp(oauthStatus.health?.refreshedAt, 'Not available'),
+    },
+    {
+      label: 'Notes',
+      value:
+        oauthStatus.health?.lastRefreshError ??
+        (oauthStatus.reason ? formatQuickBooksReason(oauthStatus.reason) : 'No issues detected'),
+      tone:
+        oauthStatus.health?.lastRefreshError || oauthStatus.needsReconnect
+          ? 'warning'
+          : 'default',
+    },
+  ];
+};
+
 export const buildQuickBooksViewModel = ({
   settings,
   oauthStatus = null,
   loading = false,
   canViewHealth = true,
 }: BuildQuickBooksViewModelInput): QuickBooksIntegrationViewModel => {
-  const connected = Boolean(settings?.connected);
+  const normalizedOauthStatus = normalizeQuickBooksOAuthStatus(oauthStatus, settings);
+  const connected = Boolean(normalizedOauthStatus?.connected ?? settings?.connected);
+  const degraded = Boolean(
+    connected &&
+      (normalizedOauthStatus?.degraded ||
+        normalizedOauthStatus?.status === 'degraded' ||
+        normalizedOauthStatus?.health?.status === 'degraded'),
+  );
+  const needsReconnect = Boolean(connected && normalizedOauthStatus?.needsReconnect);
   const sourceLabel = loading
     ? 'Loading…'
-    : settings?.environment === 'production'
+    : (normalizedOauthStatus?.environment ?? settings?.environment) === 'production'
       ? 'Production'
       : 'Sandbox';
-  const companyLabel = connected ? settings?.companyName?.trim() || 'Not set' : 'Not connected';
-  const realmLabel = connected ? settings?.realmId?.trim() || 'Not set' : 'Not connected';
+  const companyLabel = connected
+    ? normalizedOauthStatus?.companyName?.trim() || settings?.companyName?.trim() || 'Not set'
+    : 'Not connected';
+  const realmLabel = connected
+    ? normalizedOauthStatus?.realmId?.trim() || settings?.realmId?.trim() || 'Not set'
+    : 'Not connected';
   const lastUpdatedLabel = formatTimestamp(settings?.updatedAt, loading ? 'Loading…' : 'Not yet');
-  const tokenNeedsAttention = Boolean(
-    connected &&
-      canViewHealth &&
-      oauthStatus != null &&
-      oauthStatus.ok === false,
-  );
 
   let connectionState: ConnectionState = 'connected';
   if (loading) {
     connectionState = 'loading';
   } else if (!connected) {
     connectionState = 'not_configured';
-  } else if (tokenNeedsAttention) {
+  } else if (needsReconnect) {
     connectionState = 'needs_attention';
   }
 
@@ -166,24 +222,30 @@ export const buildQuickBooksViewModel = ({
       : connectionState === 'not_configured'
         ? 'Not configured'
         : connectionState === 'needs_attention'
-          ? 'Needs attention'
-          : 'Connected';
+          ? 'Reconnect required'
+          : degraded
+            ? 'Degraded'
+            : 'Connected';
 
   const statusTone: StatusTone =
-    connectionState === 'connected'
-      ? 'success'
-      : connectionState === 'needs_attention'
-        ? 'warning'
-        : connectionState === 'loading'
-          ? 'info'
-          : 'default';
+    connectionState === 'loading'
+      ? 'info'
+      : connectionState === 'not_configured'
+        ? 'default'
+        : connectionState === 'needs_attention'
+          ? 'error'
+          : degraded
+            ? 'warning'
+            : 'success';
 
   const infoLabel = loading
     ? 'Loading company details…'
     : connected
       ? [
-          settings?.companyName?.trim() || 'Company not set',
-          settings?.realmId?.trim() ? `Realm ID ${settings.realmId}` : 'Realm ID not set',
+          normalizedOauthStatus?.companyName?.trim() || settings?.companyName?.trim() || 'Company not set',
+          normalizedOauthStatus?.realmId?.trim() || settings?.realmId?.trim()
+            ? `Realm ID ${normalizedOauthStatus?.realmId?.trim() || settings?.realmId}`
+            : 'Realm ID not set',
         ].join(' • ')
       : 'No company connected yet';
 
@@ -193,8 +255,27 @@ export const buildQuickBooksViewModel = ({
       : connectionState === 'not_configured'
         ? `No company connected yet. ${sourceLabel} mode will be used for the next QuickBooks connection.`
         : connectionState === 'needs_attention'
-          ? `${settings?.companyName?.trim() || 'QuickBooks company'} is connected in ${sourceLabel} mode, but the OAuth token needs attention before syncing can continue.`
-          : `${settings?.companyName?.trim() || 'QuickBooks company'} is connected in ${sourceLabel} mode and ready for reference refresh and approved posting.`;
+          ? `${companyLabel} is still connected in ${sourceLabel} mode, but it must be reconnected before sync actions can continue.`
+          : degraded
+            ? `${companyLabel} is connected in ${sourceLabel} mode, but QuickBooks health is degraded and sync actions may be unreliable.`
+            : `${companyLabel} is connected in ${sourceLabel} mode and ready for reference refresh and approved posting.`;
+
+  const connectionNotice =
+    connectionState === 'needs_attention'
+        ? {
+            severity: 'error' as const,
+          message: `${formatQuickBooksReason(normalizedOauthStatus?.reason)}. Reconnect QuickBooks before posting or refreshing data.`,
+        }
+      : degraded
+        ? {
+            severity: 'warning' as const,
+            message:
+              normalizedOauthStatus?.health?.lastRefreshError ??
+              (normalizedOauthStatus?.reason
+                ? `${formatQuickBooksReason(normalizedOauthStatus.reason)}. Reads remain available, but sync actions may fail until token health recovers.`
+                : 'QuickBooks OAuth health is degraded. Reads remain available, but sync actions may fail until token health recovers.'),
+          }
+        : null;
 
   const tokenHealth = (() => {
     if (loading) {
@@ -202,8 +283,13 @@ export const buildQuickBooksViewModel = ({
         label: 'Checking',
         tone: 'info' as StatusTone,
         message: 'Loading QuickBooks OAuth token status.',
-        expiresLabel: 'Checking…',
-        reasonLabel: 'Status pending',
+        details: [
+          { label: 'Checked', value: 'Checking…' },
+          { label: 'Access token', value: 'Checking…' },
+          { label: 'Refresh token', value: 'Checking…' },
+          { label: 'Last refresh', value: 'Checking…' },
+          { label: 'Notes', value: 'Status pending' },
+        ],
       };
     }
     if (!connected) {
@@ -211,8 +297,13 @@ export const buildQuickBooksViewModel = ({
         label: 'Not connected',
         tone: 'default' as StatusTone,
         message: 'Connect QuickBooks to validate the OAuth token and enable sync actions.',
-        expiresLabel: 'Not available',
-        reasonLabel: 'No active connection',
+        details: [
+          { label: 'Checked', value: 'Not available' },
+          { label: 'Access token', value: 'Not available' },
+          { label: 'Refresh token', value: 'Not available' },
+          { label: 'Last refresh', value: 'Not available' },
+          { label: 'Notes', value: 'No active connection' },
+        ],
       };
     }
     if (!canViewHealth) {
@@ -220,35 +311,52 @@ export const buildQuickBooksViewModel = ({
         label: 'Unavailable',
         tone: 'default' as StatusTone,
         message: 'Token health is not available with your current permissions.',
-        expiresLabel: 'Restricted',
-        reasonLabel: 'Requires quickbooks:view',
+        details: [
+          { label: 'Checked', value: 'Restricted' },
+          { label: 'Access token', value: 'Restricted' },
+          { label: 'Refresh token', value: 'Restricted' },
+          { label: 'Last refresh', value: 'Restricted' },
+          { label: 'Notes', value: 'Requires quickbooks:view' },
+        ],
       };
     }
-    if (oauthStatus == null) {
+    if (normalizedOauthStatus == null) {
       return {
         label: 'Checking',
         tone: 'info' as StatusTone,
         message: 'Checking the current QuickBooks OAuth token status.',
-        expiresLabel: 'Checking…',
-        reasonLabel: 'Status pending',
+        details: [
+          { label: 'Checked', value: 'Checking…' },
+          { label: 'Access token', value: 'Checking…' },
+          { label: 'Refresh token', value: 'Checking…' },
+          { label: 'Last refresh', value: 'Checking…' },
+          { label: 'Notes', value: 'Status pending' },
+        ],
       };
     }
-    if (oauthStatus.ok) {
+    if (needsReconnect) {
       return {
-        label: 'Valid',
-        tone: 'success' as StatusTone,
-        message: 'QuickBooks OAuth token is healthy and ready for sync actions.',
-        expiresLabel: formatExpiresIn(oauthStatus.expiresInSec),
-        reasonLabel: 'No issues detected',
+        label: 'Reconnect required',
+        tone: 'error' as StatusTone,
+        message: `${formatQuickBooksReason(normalizedOauthStatus.reason)}. Reconnect QuickBooks to restore sync actions.`,
+        details: buildTokenHealthDetails(normalizedOauthStatus),
       };
     }
-    const reasonLabel = formatQuickBooksReason(oauthStatus.reason);
+    if (degraded) {
+      return {
+        label: 'Degraded',
+        tone: 'warning' as StatusTone,
+        message:
+          normalizedOauthStatus.health?.lastRefreshError ??
+          'QuickBooks remains connected, but the OAuth health is degraded and some sync actions may fail.',
+        details: buildTokenHealthDetails(normalizedOauthStatus),
+      };
+    }
     return {
-      label: 'Needs attention',
-      tone: 'warning' as StatusTone,
-      message: `${reasonLabel}. Reconnect QuickBooks to continue syncing.`,
-      expiresLabel: 'Unavailable',
-      reasonLabel,
+      label: 'Healthy',
+      tone: 'success' as StatusTone,
+      message: 'QuickBooks OAuth token is healthy and ready for sync actions.',
+      details: buildTokenHealthDetails(normalizedOauthStatus),
     };
   })();
 
@@ -305,6 +413,18 @@ export const buildQuickBooksViewModel = ({
     { label: 'Company', value: companyLabel },
     { label: 'Realm ID', value: realmLabel },
     { label: 'Environment', value: sourceLabel },
+    {
+      label: 'Workspace',
+      value:
+        connectionState === 'needs_attention'
+          ? 'Reconnect required'
+          : degraded
+            ? 'Connected with degraded health'
+            : connected
+              ? 'Connected and healthy'
+              : 'Not connected',
+      tone: statusTone,
+    },
     { label: 'Last updated', value: lastUpdatedLabel },
   ];
 
@@ -318,11 +438,14 @@ export const buildQuickBooksViewModel = ({
     infoLabel,
     rowActionLabel: 'Change settings',
     summaryText,
-    showSandboxWarning: Boolean(settings?.environment === 'sandbox' && connected),
+    showSandboxWarning: Boolean(
+      (normalizedOauthStatus?.environment ?? settings?.environment) === 'sandbox' && connected,
+    ),
     companyLabel,
     realmLabel,
     lastUpdatedLabel,
     connectionDetails,
+    connectionNotice,
     tokenHealth,
     syncSummaries,
     primaryAction,

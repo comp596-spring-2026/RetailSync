@@ -5,22 +5,41 @@ import {
 } from './auth';
 import {
   QuickBooksAccountRecord,
+  QuickBooksAccountRegisterQuery,
   QuickBooksApiEnvelope,
   QuickBooksEntityRecord,
   QuickBooksEntityType,
+  QuickBooksInvoiceCreateInput,
   QuickBooksJournalLineInput,
+  QuickBooksPaymentCreateInput,
+  QuickBooksPrivateNoteInput,
+  QuickBooksQueryParams,
+  QuickBooksReportName,
   QuickBooksReadQueryResult,
+  QuickBooksSalesItemLineInput,
+  QuickBooksSalesReceiptCreateInput,
+  QuickBooksTransactionDetailRequest,
+  QuickBooksTransactionDetailResult,
+  QuickBooksTransactionType,
+  QuickBooksTxnCreateResult,
   QuickBooksSecretPayload
 } from './types';
-
-type QuickBooksTxnCreateResult = {
-  txnId: string;
-  txnDate: string;
-};
 
 const QUICKBOOKS_SANDBOX_API_BASE = 'https://sandbox-quickbooks.api.intuit.com';
 const QUICKBOOKS_PROD_API_BASE = 'https://quickbooks.api.intuit.com';
 const QUICKBOOKS_RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const QUICKBOOKS_TRANSACTION_TYPES = new Set<QuickBooksTransactionType>([
+  'Purchase',
+  'Deposit',
+  'Transfer',
+  'JournalEntry',
+  'SalesReceipt',
+  'Payment',
+  'Check',
+  'Invoice',
+  'Bill',
+  'CreditMemo'
+]);
 
 const getQuickBooksApiBase = (environment: QuickBooksSecretPayload['environment']) =>
   environment === 'production' ? QUICKBOOKS_PROD_API_BASE : QUICKBOOKS_SANDBOX_API_BASE;
@@ -56,6 +75,16 @@ const parseQuickBooksApiBody = async (response: Response) => {
   } catch {
     return { raw, parsed: null as Record<string, unknown> | null };
   }
+};
+
+const normalizeQuickBooksQueryParams = (query?: QuickBooksQueryParams) => {
+  if (!query) return undefined;
+  const normalized: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    normalized[key] = value;
+  }
+  return normalized;
 };
 
 const performQuickBooksRequest = async ({
@@ -104,15 +133,58 @@ const parseFaultMessage = (payload: Record<string, unknown> | null) => {
   return message ? String(message) : null;
 };
 
+const toTrimmedString = (value: unknown) => {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number') {
+    return String(value).trim();
+  }
+  return '';
+};
+
+const toRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const composePrivateNote = ({ memo, privateNoteTag }: QuickBooksPrivateNoteInput) =>
+  [toTrimmedString(privateNoteTag), toTrimmedString(memo)].filter(Boolean).join(' ');
+
+const parseReturnedTxnDate = (value: unknown) => {
+  const trimmed = toTrimmedString(value);
+  if (!trimmed) {
+    return '';
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const createTimeMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})[T\s]/);
+  return createTimeMatch?.[1] ?? '';
+};
+
 type QuickBooksRequestAttemptError = {
-  kind: 'network' | 'response';
+  kind: 'network' | 'response' | 'auth';
   message: string;
   status?: number;
 };
 
+const isQuickBooksRequestAttemptError = (
+  error: unknown
+): error is QuickBooksRequestAttemptError => {
+  if (!error || typeof error !== 'object' || !('kind' in error)) {
+    return false;
+  }
+  const kind = (error as { kind?: unknown }).kind;
+  return kind === 'network' || kind === 'response' || kind === 'auth';
+};
+
+const toQuickBooksErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
 const fetchQuickBooksAttempt = async ({
   companyId,
-  secret,
+  secretRef,
   method,
   path,
   query,
@@ -120,7 +192,7 @@ const fetchQuickBooksAttempt = async ({
   attempt
 }: {
   companyId: string;
-  secret: QuickBooksSecretPayload;
+  secretRef: { current: QuickBooksSecretPayload };
   method: 'GET' | 'POST';
   path: string;
   query?: Record<string, string | number | undefined | null>;
@@ -130,9 +202,29 @@ const fetchQuickBooksAttempt = async ({
   const attemptStartedAt = Date.now();
 
   try {
-    let result = await performQuickBooksRequest({ secret, method, path, query, body });
+    let result = await performQuickBooksRequest({
+      secret: secretRef.current,
+      method,
+      path,
+      query,
+      body
+    });
     if (result.response.status === 401) {
-      const refreshedSecret = await refreshQuickBooksSecretForCompany(companyId);
+      let refreshedSecret: QuickBooksSecretPayload;
+      try {
+        refreshedSecret = await refreshQuickBooksSecretForCompany(companyId);
+      } catch (error) {
+        const refreshMessage = toQuickBooksErrorMessage(error);
+        const isRefreshNetworkFailure = refreshMessage.includes('quickbooks_api_failed:network:');
+        throw {
+          kind: isRefreshNetworkFailure ? 'network' : 'auth',
+          message: isRefreshNetworkFailure
+            ? refreshMessage
+            : `quickbooks_api_failed:401:${refreshMessage}`,
+          status: 401
+        } satisfies QuickBooksRequestAttemptError;
+      }
+      secretRef.current = refreshedSecret;
       result = await performQuickBooksRequest({
         secret: refreshedSecret,
         method,
@@ -171,12 +263,7 @@ const fetchQuickBooksAttempt = async ({
 
     return result.parsed ?? {};
   } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'kind' in error &&
-      (error.kind === 'network' || error.kind === 'response')
-    ) {
+    if (isQuickBooksRequestAttemptError(error)) {
       throw error;
     }
 
@@ -247,6 +334,7 @@ export const requestQuickBooksApi = async ({
   if (!secret) {
     throw new Error('quickbooks_not_connected');
   }
+  const secretRef = { current: secret };
 
   try {
     return await withRetries({
@@ -254,11 +342,9 @@ export const requestQuickBooksApi = async ({
       shouldRetry: (error, attempt) =>
         Boolean(
           attempt < 3 &&
-            error &&
-            typeof error === 'object' &&
-            'kind' in error &&
-            ((error.kind === 'network') ||
-              ('status' in error &&
+            isQuickBooksRequestAttemptError(error) &&
+            (error.kind === 'network' ||
+              (error.kind === 'response' &&
                 typeof error.status === 'number' &&
                 QUICKBOOKS_RETRYABLE_STATUS.has(error.status)))
         ),
@@ -268,7 +354,7 @@ export const requestQuickBooksApi = async ({
       run: async (attempt) =>
         fetchQuickBooksAttempt({
           companyId,
-          secret,
+          secretRef,
           method,
           path,
           query,
@@ -284,6 +370,37 @@ export const requestQuickBooksApi = async ({
     throw new Error(message);
   }
 };
+
+export const requestQuickBooksReport = async ({
+  companyId,
+  reportName,
+  query
+}: {
+  companyId: string;
+  reportName: QuickBooksReportName;
+  query?: QuickBooksQueryParams;
+}) => {
+  const secret = await ensureFreshQuickBooksSecret(companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  return (await requestQuickBooksApi({
+    companyId,
+    method: 'GET',
+    path: `/v3/company/${secret.realmId}/reports/${reportName}`,
+    query: {
+      ...(normalizeQuickBooksQueryParams(query) ?? {}),
+      minorversion: 75
+    }
+  })) as QuickBooksReadQueryResult;
+};
+
+const assertQuickBooksTransactionType = (
+  txnType: string
+): txnType is QuickBooksTransactionType => QUICKBOOKS_TRANSACTION_TYPES.has(txnType as QuickBooksTransactionType);
+
+const escapeQuickBooksQueryValue = (value: string) => value.replace(/'/g, "\\'");
 
 export const runQuickBooksReadQuery = async (
   companyId: string,
@@ -308,6 +425,56 @@ export const runQuickBooksReadQuery = async (
       minorversion: 75
     }
   })) as QuickBooksReadQueryResult;
+};
+
+export const fetchQuickBooksAccountRegister = async (
+  companyId: string,
+  query: QuickBooksAccountRegisterQuery = {}
+): Promise<QuickBooksReadQueryResult> => {
+  const reportQuery: QuickBooksQueryParams = {
+    ...(query.accountId ? { accountId: query.accountId } : {}),
+    ...(query.from ? { from: query.from } : {}),
+    ...(query.to ? { to: query.to } : {}),
+    ...(typeof query.page === 'number' ? { page: query.page } : {}),
+    ...(typeof query.pageSize === 'number' ? { pageSize: query.pageSize } : {}),
+    ...(query.query ?? {})
+  };
+
+  return requestQuickBooksReport({
+    companyId,
+    reportName: 'GeneralLedger',
+    query: reportQuery
+  });
+};
+
+export const fetchQuickBooksTransactionDetail = async (
+  companyId: string,
+  request: QuickBooksTransactionDetailRequest
+): Promise<QuickBooksTransactionDetailResult> => {
+  if (!assertQuickBooksTransactionType(request.txnType)) {
+    throw new Error('quickbooks_transaction_type_invalid');
+  }
+
+  const txnId = String(request.txnId ?? '').trim();
+  if (!txnId) {
+    throw new Error('quickbooks_transaction_id_missing');
+  }
+
+  const payload = (await runQuickBooksReadQuery(
+    companyId,
+    `select * from ${request.txnType} where Id = '${escapeQuickBooksQueryValue(txnId)}' startposition 1 maxresults 1`
+  )) as Record<string, unknown>;
+  const queryResponse =
+    (payload.QueryResponse as Record<string, unknown> | undefined) ?? undefined;
+  const rows = queryResponse?.[request.txnType];
+  const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) ?? null : null;
+
+  return {
+    txnType: request.txnType,
+    txnId,
+    row,
+    payload
+  };
 };
 
 export const listQuickBooksAccounts = async (companyId: string) => {
@@ -487,11 +654,16 @@ export const createQuickBooksJournalEntry = async ({
 
 const parseTransactionCreateId = (
   payload: Record<string, unknown>,
-  key: 'Purchase' | 'Deposit' | 'Transfer'
+  key: 'Purchase' | 'Deposit' | 'Transfer' | 'SalesReceipt' | 'Invoice' | 'Payment',
+  fallbackTxnDate: string
 ) => {
-  const container = payload[key] as { Id?: string; TxnDate?: string } | undefined;
-  const txnId = String(container?.Id ?? '').trim();
-  const txnDate = String(container?.TxnDate ?? '').trim();
+  const container = toRecord(payload[key]);
+  const txnId = toTrimmedString(container?.Id);
+  const metaData = toRecord(container?.MetaData);
+  const txnDate =
+    parseReturnedTxnDate(container?.TxnDate) ||
+    parseReturnedTxnDate(metaData?.CreateTime) ||
+    fallbackTxnDate;
   if (!txnId) {
     throw new Error(`quickbooks_${key.toLowerCase()}_id_missing`);
   }
@@ -509,6 +681,7 @@ const createPurchaseTransaction = async (args: {
   categoryAccountId: string;
   payeeRefId?: string;
   memo?: string;
+  privateNoteTag?: string;
   paymentType: 'Cash' | 'Check';
 }): Promise<QuickBooksTxnCreateResult> => {
   const secret = await ensureFreshQuickBooksSecret(args.companyId);
@@ -525,12 +698,12 @@ const createPurchaseTransaction = async (args: {
       TxnDate: args.txnDate,
       PaymentType: args.paymentType,
       AccountRef: { value: args.bankAccountId },
-      PrivateNote: args.memo ?? '',
+      PrivateNote: composePrivateNote(args),
       EntityRef: args.payeeRefId ? { value: args.payeeRefId } : undefined,
       Line: [
         {
           Amount: Number(Math.abs(args.amount).toFixed(2)),
-          Description: args.memo ?? '',
+          Description: toTrimmedString(args.memo),
           DetailType: 'AccountBasedExpenseLineDetail',
           AccountBasedExpenseLineDetail: {
             AccountRef: { value: args.categoryAccountId }
@@ -540,10 +713,10 @@ const createPurchaseTransaction = async (args: {
     }
   })) as Record<string, unknown>;
 
-  const parsed = parseTransactionCreateId(payload, 'Purchase');
+  const parsed = parseTransactionCreateId(payload, 'Purchase', args.txnDate);
   return {
     txnId: parsed.txnId,
-    txnDate: parsed.txnDate || args.txnDate
+    txnDate: parsed.txnDate
   };
 };
 
@@ -555,6 +728,7 @@ export const createQuickBooksExpenseTransaction = (args: {
   categoryAccountId: string;
   payeeRefId?: string;
   memo?: string;
+  privateNoteTag?: string;
 }) => createPurchaseTransaction({ ...args, paymentType: 'Cash' });
 
 export const createQuickBooksCheckTransaction = (args: {
@@ -565,6 +739,7 @@ export const createQuickBooksCheckTransaction = (args: {
   categoryAccountId: string;
   payeeRefId?: string;
   memo?: string;
+  privateNoteTag?: string;
 }) => createPurchaseTransaction({ ...args, paymentType: 'Check' });
 
 export const createQuickBooksDepositTransaction = async (args: {
@@ -574,6 +749,7 @@ export const createQuickBooksDepositTransaction = async (args: {
   bankAccountId: string;
   categoryAccountId: string;
   memo?: string;
+  privateNoteTag?: string;
 }): Promise<QuickBooksTxnCreateResult> => {
   const secret = await ensureFreshQuickBooksSecret(args.companyId);
   if (!secret) {
@@ -587,13 +763,13 @@ export const createQuickBooksDepositTransaction = async (args: {
     query: { minorversion: 75 },
     body: {
       TxnDate: args.txnDate,
-      PrivateNote: args.memo ?? '',
+      PrivateNote: composePrivateNote(args),
       DepositToAccountRef: { value: args.bankAccountId },
       Line: [
         {
           Amount: Number(Math.abs(args.amount).toFixed(2)),
           DetailType: 'DepositLineDetail',
-          Description: args.memo ?? '',
+          Description: toTrimmedString(args.memo),
           DepositLineDetail: {
             AccountRef: { value: args.categoryAccountId }
           }
@@ -602,10 +778,10 @@ export const createQuickBooksDepositTransaction = async (args: {
     }
   })) as Record<string, unknown>;
 
-  const parsed = parseTransactionCreateId(payload, 'Deposit');
+  const parsed = parseTransactionCreateId(payload, 'Deposit', args.txnDate);
   return {
     txnId: parsed.txnId,
-    txnDate: parsed.txnDate || args.txnDate
+    txnDate: parsed.txnDate
   };
 };
 
@@ -616,6 +792,7 @@ export const createQuickBooksTransferTransaction = async (args: {
   fromAccountId: string;
   toAccountId: string;
   memo?: string;
+  privateNoteTag?: string;
 }): Promise<QuickBooksTxnCreateResult> => {
   const secret = await ensureFreshQuickBooksSecret(args.companyId);
   if (!secret) {
@@ -632,13 +809,146 @@ export const createQuickBooksTransferTransaction = async (args: {
       Amount: Number(Math.abs(args.amount).toFixed(2)),
       FromAccountRef: { value: args.fromAccountId },
       ToAccountRef: { value: args.toAccountId },
-      PrivateNote: args.memo ?? ''
+      PrivateNote: composePrivateNote(args)
     }
   })) as Record<string, unknown>;
 
-  const parsed = parseTransactionCreateId(payload, 'Transfer');
+  const parsed = parseTransactionCreateId(payload, 'Transfer', args.txnDate);
   return {
     txnId: parsed.txnId,
-    txnDate: parsed.txnDate || args.txnDate
+    txnDate: parsed.txnDate
   };
+};
+
+const buildSalesItemLines = (lines: QuickBooksSalesItemLineInput[]) =>
+  lines.map((line) => ({
+    Amount: Number(Math.abs(line.amount).toFixed(2)),
+    Description: toTrimmedString(line.description),
+    DetailType: 'SalesItemLineDetail' as const,
+    SalesItemLineDetail: {
+      ItemRef: { value: line.itemRefId },
+      ...(typeof line.quantity === 'number' ? { Qty: line.quantity } : {}),
+      ...(typeof line.unitPrice === 'number' ? { UnitPrice: line.unitPrice } : {}),
+      ...(toTrimmedString(line.serviceDate)
+        ? { ServiceDate: toTrimmedString(line.serviceDate) }
+        : {}),
+      ...(toTrimmedString(line.taxCodeRefId)
+        ? { TaxCodeRef: { value: toTrimmedString(line.taxCodeRefId) } }
+        : {}),
+      ...(toTrimmedString(line.classRefId)
+        ? { ClassRef: { value: toTrimmedString(line.classRefId) } }
+        : {})
+    }
+  }));
+
+export const createQuickBooksSalesReceiptTransaction = async (
+  args: QuickBooksSalesReceiptCreateInput
+): Promise<QuickBooksTxnCreateResult> => {
+  if (!args.lines.length) {
+    throw new Error('quickbooks_sales_receipt_lines_empty');
+  }
+
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/salesreceipt`,
+    query: { minorversion: 75 },
+    body: {
+      TxnDate: args.txnDate,
+      PrivateNote: composePrivateNote(args),
+      CustomerRef: toTrimmedString(args.customerRefId)
+        ? { value: toTrimmedString(args.customerRefId) }
+        : undefined,
+      DepositToAccountRef: toTrimmedString(args.depositToAccountId)
+        ? { value: toTrimmedString(args.depositToAccountId) }
+        : undefined,
+      DocNumber: toTrimmedString(args.docNumber) || undefined,
+      Line: buildSalesItemLines(args.lines)
+    }
+  })) as Record<string, unknown>;
+
+  return parseTransactionCreateId(payload, 'SalesReceipt', args.txnDate);
+};
+
+export const createQuickBooksInvoiceTransaction = async (
+  args: QuickBooksInvoiceCreateInput
+): Promise<QuickBooksTxnCreateResult> => {
+  if (!args.lines.length) {
+    throw new Error('quickbooks_invoice_lines_empty');
+  }
+
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/invoice`,
+    query: { minorversion: 75 },
+    body: {
+      TxnDate: args.txnDate,
+      DueDate: toTrimmedString(args.dueDate) || undefined,
+      CustomerRef: { value: args.customerRefId },
+      PrivateNote: composePrivateNote(args),
+      CustomerMemo: toTrimmedString(args.customerMemo)
+        ? { value: toTrimmedString(args.customerMemo) }
+        : undefined,
+      DocNumber: toTrimmedString(args.docNumber) || undefined,
+      Line: buildSalesItemLines(args.lines)
+    }
+  })) as Record<string, unknown>;
+
+  return parseTransactionCreateId(payload, 'Invoice', args.txnDate);
+};
+
+export const createQuickBooksPaymentTransaction = async (
+  args: QuickBooksPaymentCreateInput
+): Promise<QuickBooksTxnCreateResult> => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/payment`,
+    query: { minorversion: 75 },
+    body: {
+      TxnDate: args.txnDate,
+      TotalAmt: Number(Math.abs(args.amount).toFixed(2)),
+      CustomerRef: { value: args.customerRefId },
+      DepositToAccountRef: toTrimmedString(args.depositToAccountId)
+        ? { value: toTrimmedString(args.depositToAccountId) }
+        : undefined,
+      PaymentMethodRef: toTrimmedString(args.paymentMethodRefId)
+        ? { value: toTrimmedString(args.paymentMethodRefId) }
+        : undefined,
+      PrivateNote: composePrivateNote(args),
+      DocNumber: toTrimmedString(args.docNumber) || undefined,
+      Line:
+        args.linkedTxns && args.linkedTxns.length > 0
+          ? args.linkedTxns.map((linkedTxn) => ({
+              ...(typeof linkedTxn.amount === 'number'
+                ? { Amount: Number(Math.abs(linkedTxn.amount).toFixed(2)) }
+                : {}),
+              LinkedTxn: [
+                {
+                  TxnId: linkedTxn.txnId,
+                  TxnType: linkedTxn.txnType ?? 'Invoice'
+                }
+              ]
+            }))
+          : undefined
+    }
+  })) as Record<string, unknown>;
+
+  return parseTransactionCreateId(payload, 'Payment', args.txnDate);
 };

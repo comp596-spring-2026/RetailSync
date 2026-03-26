@@ -22,11 +22,11 @@ import {
 import { QuickBooksActionStack } from './QuickBooksActionStack';
 import { QuickBooksConnectorRow } from './QuickBooksConnectorRow';
 import type { QuickBooksSettings } from '@retailsync/shared';
-import type { QuickBooksOAuthStatus } from '../../types';
+import type { QuickBooksOAuthStatusInput } from '../../types/quickbooks';
 
 type Props = {
   settings: QuickBooksSettings | null;
-  oauthStatus?: QuickBooksOAuthStatus | null;
+  oauthStatus?: QuickBooksOAuthStatusInput;
   canManageConnection: boolean;
   canSync: boolean;
   canRefreshStatus: boolean;
@@ -177,6 +177,12 @@ export const QuickBooksIntegrationCard = ({
                             </Alert>
                           ) : null}
 
+                          {viewModel.connectionNotice ? (
+                            <Alert severity={viewModel.connectionNotice.severity}>
+                              {viewModel.connectionNotice.message}
+                            </Alert>
+                          ) : null}
+
                           <Box
                             sx={{
                               display: 'grid',
@@ -235,36 +241,28 @@ export const QuickBooksIntegrationCard = ({
                                   <Typography variant="body2" color="text.secondary">
                                     {viewModel.tokenHealth.message}
                                   </Typography>
-                                  <Stack
-                                    direction="row"
-                                    justifyContent="space-between"
-                                    spacing={2}
-                                  >
-                                    <Typography variant="caption" color="text.secondary">
-                                      Expires
-                                    </Typography>
-                                    <Typography
-                                      variant="caption"
-                                      sx={{ fontWeight: 700, textAlign: 'right' }}
+                                  {viewModel.tokenHealth.details.map((detail) => (
+                                    <Stack
+                                      key={detail.label}
+                                      direction="row"
+                                      justifyContent="space-between"
+                                      spacing={2}
                                     >
-                                      {viewModel.tokenHealth.expiresLabel}
-                                    </Typography>
-                                  </Stack>
-                                  <Stack
-                                    direction="row"
-                                    justifyContent="space-between"
-                                    spacing={2}
-                                  >
-                                    <Typography variant="caption" color="text.secondary">
-                                      Notes
-                                    </Typography>
-                                    <Typography
-                                      variant="caption"
-                                      sx={{ fontWeight: 700, textAlign: 'right' }}
-                                    >
-                                      {viewModel.tokenHealth.reasonLabel}
-                                    </Typography>
-                                  </Stack>
+                                      <Typography variant="caption" color="text.secondary">
+                                        {detail.label}
+                                      </Typography>
+                                      <Typography
+                                        variant="caption"
+                                        sx={{
+                                          fontWeight: 700,
+                                          textAlign: 'right',
+                                          color: toToneColor(detail.tone ?? 'default'),
+                                        }}
+                                      >
+                                        {detail.value}
+                                      </Typography>
+                                    </Stack>
+                                  ))}
                                 </Stack>
                               </Paper>
 

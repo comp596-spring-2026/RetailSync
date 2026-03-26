@@ -21,10 +21,11 @@ export {
   monthToRange,
   dateToMonth,
   SearchableCrudTable,
+  SmartTable,
   SectionHeader,
   ActionCard
 } from './common';
-export type { CrudField, CrudFieldOption, CrudColumn, DateRange } from './common';
+export type { CrudField, CrudFieldOption, CrudColumn, DateRange, SmartTableProps } from './common';
 export {
   AppSnackbar,
   AuthShell,

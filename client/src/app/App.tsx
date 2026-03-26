@@ -35,12 +35,25 @@ import { AccessHubPage, UsersPage } from "../modules/users/pages";
 import { ModuleShellPage } from "../layout/ModuleShellPage";
 import {
   LedgerPage,
+  QuickBooksChecksPage,
+  QuickBooksChartOfAccountsPage,
+  QuickBooksCustomersPage,
+  QuickBooksAccountRegisterPage,
   QuickBooksHomePage,
+  QuickBooksDepositsPage,
   QuickBooksOperationsPage,
+  QuickBooksExpensesPage,
   QuickBooksReportsPage,
+  QuickBooksWriteCreatePage,
+  QuickBooksWriteDetailPage,
+  QuickBooksWriteEditPage,
+  QuickBooksWriteListPage,
   ObservabilityPage,
+  QuickBooksTransactionDetailPage,
   StatementDetailPage,
   StatementsPage,
+  QuickBooksTransfersPage,
+  QuickBooksVendorsPage,
   TaxDashboardPage
 } from "../modules/accounting/pages";
 import { hasPermission } from "../utils/permissions";
@@ -131,15 +144,34 @@ const App = () => {
             <Route path="statements" element={<StatementsPage />} />
             <Route path="statements/:statementId" element={<StatementDetailPage />} />
             <Route path="ledger" element={<LedgerPage />} />
+            <Route path="registers/:accountId" element={<QuickBooksAccountRegisterPage />} />
+            <Route path="transactions">
+              <Route index element={<Navigate to="deposits" replace />} />
+              <Route path="deposits" element={<QuickBooksDepositsPage />} />
+              <Route path="checks" element={<QuickBooksChecksPage />} />
+              <Route path="expenses" element={<QuickBooksExpensesPage />} />
+              <Route path="transfers" element={<QuickBooksTransfersPage />} />
+              <Route path=":type/:qbTxnId" element={<QuickBooksTransactionDetailPage />} />
+            </Route>
             <Route path="quickbooks" element={<Navigate to="/dashboard/quickbooks" replace />} />
             <Route path="tax" element={<Navigate to="/dashboard/quickbooks/tax" replace />} />
             <Route path="observability" element={<ObservabilityPage />} />
           </Route>
           <Route path="quickbooks">
             <Route index element={<QuickBooksIndexRedirect />} />
+            <Route path="chart-of-accounts" element={<QuickBooksChartOfAccountsPage />} />
+            <Route path="customers" element={<QuickBooksCustomersPage />} />
+            <Route path="vendors" element={<QuickBooksVendorsPage />} />
             <Route path="reports" element={<QuickBooksReportsPage />} />
             <Route path="operations" element={<QuickBooksOperationsPage />} />
             <Route path="tax" element={<TaxDashboardPage />} />
+            <Route path="write">
+              <Route index element={<Navigate to="sales-receipt" replace />} />
+              <Route path=":txnType" element={<QuickBooksWriteListPage />} />
+              <Route path=":txnType/new" element={<QuickBooksWriteCreatePage />} />
+              <Route path=":txnType/:qbTxnId" element={<QuickBooksWriteDetailPage />} />
+              <Route path=":txnType/:qbTxnId/edit" element={<QuickBooksWriteEditPage />} />
+            </Route>
           </Route>
           <Route path="settings" element={<SettingsPage />} />
         </Route>

@@ -1,6 +1,9 @@
 import InsightsIcon from '@mui/icons-material/Insights';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import SyncIcon from '@mui/icons-material/Sync';
+import StorefrontIcon from '@mui/icons-material/Storefront';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Paper from '@mui/material/Paper';
@@ -15,12 +18,30 @@ import { showSnackbar } from '../../../app/store/uiSlice';
 import { getAppErrorMessage } from '../../../constants/errorCodes';
 import { hasPermission } from '../../../utils/permissions';
 import { extractApiErrorMessage } from '../../../utils/apiError';
-import { QuickBooksIntegrationCard, type QuickBooksOAuthStatus } from '../../settings/components';
+import { QuickBooksIntegrationCard } from '../../settings/components';
 import { accountingApi } from '../api';
 import { QuickBooksTabs } from '../components';
 import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
 
 const shortcutItems = [
+  {
+    title: 'Chart of Accounts',
+    description: 'Browse QuickBooks accounts, balances, and classifications.',
+    to: '/dashboard/quickbooks/chart-of-accounts',
+    icon: <AccountBalanceIcon />
+  },
+  {
+    title: 'Customers',
+    description: 'Search and review customer records from the connected company.',
+    to: '/dashboard/quickbooks/customers',
+    icon: <PeopleAltIcon />
+  },
+  {
+    title: 'Vendors',
+    description: 'Review supplier records and balances without leaving the hub.',
+    to: '/dashboard/quickbooks/vendors',
+    icon: <StorefrontIcon />
+  },
   {
     title: 'Reports',
     description: 'Balance Sheet, Profit & Loss, Trial Balance, ledger views, and reporting filters.',
@@ -38,6 +59,12 @@ const shortcutItems = [
     description: 'Recover payments and create journal adjustments against the connected QuickBooks company.',
     to: '/dashboard/quickbooks/tax',
     icon: <ReceiptLongIcon />
+  },
+  {
+    title: 'Writes',
+    description: 'Create sales receipts, invoices, and payments in the connected QuickBooks company.',
+    to: '/dashboard/quickbooks/write/sales-receipt',
+    icon: <ReceiptLongIcon />
   }
 ];
 
@@ -50,7 +77,17 @@ export const QuickBooksHomePage = () => {
   const canConnect = hasPermission(permissions, 'quickbooks', 'actions:connect');
   const canSync = hasPermission(permissions, 'quickbooks', 'actions:sync');
 
-  const { settings, oauthStatus, loading, error, load, isConnected } = useQuickBooksWorkspace(canView);
+  const {
+    settings,
+    oauthStatus,
+    loading,
+    error,
+    load,
+    isConnected,
+    warning,
+    isDegraded,
+    needsReconnect,
+  } = useQuickBooksWorkspace(canView);
   const [busy, setBusy] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -179,6 +216,11 @@ export const QuickBooksHomePage = () => {
       />
       <QuickBooksTabs />
       {pageError ? <Alert severity="error">{pageError}</Alert> : null}
+      {warning ? (
+        <Alert severity={needsReconnect ? 'error' : 'warning'}>
+          {warning}
+        </Alert>
+      ) : null}
       {!loading && !isConnected ? (
         <Alert severity="info">
           Connect QuickBooks to access reports, operations, and tax tools.
@@ -186,7 +228,7 @@ export const QuickBooksHomePage = () => {
       ) : null}
       <QuickBooksIntegrationCard
         settings={settings as QuickBooksSettings | null}
-        oauthStatus={oauthStatus as QuickBooksOAuthStatus | null}
+        oauthStatus={oauthStatus}
         canManageConnection={canConnect}
         canSync={canSync}
         canRefreshStatus={canView}
@@ -230,6 +272,13 @@ export const QuickBooksHomePage = () => {
                     <Typography variant="body2" color="text.secondary">
                       {item.description}
                     </Typography>
+                    {isDegraded ? (
+                      <Typography variant="caption" color="warning.main">
+                        {needsReconnect
+                          ? 'Connection repair required before sync actions.'
+                          : 'Connection degraded. Read access remains available.'}
+                      </Typography>
+                    ) : null}
                   </Stack>
                 </Stack>
                 <Button

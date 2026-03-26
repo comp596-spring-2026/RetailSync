@@ -13,18 +13,18 @@ import { QuickBooksOperationsPage } from './QuickBooksOperationsPage';
 const {
   getQuickbooksSettingsMock,
   getQuickbooksOAuthStatusMock,
-  listLedgerEntriesMock
+  getQuickbooksHubOperationsMock
 } = vi.hoisted(() => ({
   getQuickbooksSettingsMock: vi.fn(),
   getQuickbooksOAuthStatusMock: vi.fn(),
-  listLedgerEntriesMock: vi.fn()
+  getQuickbooksHubOperationsMock: vi.fn()
 }));
 
 vi.mock('../api', () => ({
   accountingApi: {
     getQuickbooksSettings: (...args: unknown[]) => getQuickbooksSettingsMock(...args),
     getQuickbooksOAuthStatus: (...args: unknown[]) => getQuickbooksOAuthStatusMock(...args),
-    listLedgerEntries: (...args: unknown[]) => listLedgerEntriesMock(...args)
+    getQuickbooksHubOperations: (...args: unknown[]) => getQuickbooksHubOperationsMock(...args)
   }
 }));
 
@@ -124,42 +124,56 @@ describe('QuickBooksOperationsPage', () => {
         data: {
           ok: true,
           reason: null,
+          connected: true,
+          degraded: false,
+          status: 'connected',
+          needsReconnect: false,
           environment: 'sandbox',
           realmId: 'realm-1',
           companyName: 'RetailSync QB',
-          expiresInSec: 3600
+          expiresInSec: 3600,
+          health: {
+            status: 'healthy',
+            checkedAt: '2026-03-10T00:00:00.000Z',
+            refreshedAt: '2026-03-10T00:00:00.000Z',
+            accessTokenExpiresAt: '2026-03-10T01:00:00.000Z',
+            accessTokenExpiresInSec: 3600,
+            refreshTokenExpiresAt: '2026-04-10T00:00:00.000Z',
+            refreshTokenExpiresInSec: 2678400,
+            lastRefreshError: null,
+            lastRefreshErrorAt: null
+          }
         }
       }
     });
-    listLedgerEntriesMock.mockResolvedValue({
+    getQuickbooksHubOperationsMock.mockResolvedValue({
       data: {
         data: {
-          entries: [
+          items: [
             {
-              id: 'entry-1',
+              id: 'op-1',
               date: '2026-03-10',
               description: 'Fuel expense',
-              merchant: 'Fuel Stop',
+              payee: 'Fuel Stop',
               amount: 99,
-              reviewStatus: 'approved',
-              posting: {
-                status: 'posted',
-                qbTxnId: 'qb-1'
-              },
-              proposal: {
-                qbTxnType: 'Expense',
-                payeeName: 'Fuel Stop'
-              }
+              status: 'posted',
+              qbId: 'qb-1',
+              error: null,
+              type: 'Expense'
             }
-          ]
+          ],
+          page: 1,
+          pageSize: 25,
+          total: 1,
+          totalPages: 1
         }
       }
     });
   });
 
-  it('requires ledger view permission to access operations', () => {
+  it('requires quickbooks view permission to access operations', () => {
     render(
-      <Provider store={createStore({ quickbooksView: true, ledgerView: false })}>
+      <Provider store={createStore({ quickbooksView: false, ledgerView: true })}>
         <MemoryRouter>
           <QuickBooksOperationsPage />
         </MemoryRouter>
@@ -167,7 +181,7 @@ describe('QuickBooksOperationsPage', () => {
     );
 
     expect(screen.getByText('No Access')).toBeInTheDocument();
-    expect(listLedgerEntriesMock).not.toHaveBeenCalled();
+    expect(getQuickbooksHubOperationsMock).not.toHaveBeenCalled();
   });
 
   it('keeps operations accessible when connection exists but oauth health is degraded', async () => {
@@ -175,11 +189,26 @@ describe('QuickBooksOperationsPage', () => {
       data: {
         data: {
           ok: false,
-          reason: 'quickbooks_refresh_token_missing',
+          reason: null,
+          connected: true,
+          degraded: true,
+          status: 'degraded',
+          needsReconnect: false,
           environment: 'sandbox',
           realmId: 'realm-1',
           companyName: 'RetailSync QB',
-          expiresInSec: null
+          expiresInSec: null,
+          health: {
+            status: 'degraded',
+            checkedAt: '2026-03-10T00:00:00.000Z',
+            refreshedAt: '2026-03-10T00:00:00.000Z',
+            accessTokenExpiresAt: null,
+            accessTokenExpiresInSec: null,
+            refreshTokenExpiresAt: null,
+            refreshTokenExpiresInSec: null,
+            lastRefreshError: 'Recent token refresh failed',
+            lastRefreshErrorAt: '2026-03-10T00:00:00.000Z'
+          }
         }
       }
     });
@@ -193,11 +222,9 @@ describe('QuickBooksOperationsPage', () => {
     );
 
     await waitFor(() => {
-      expect(listLedgerEntriesMock).toHaveBeenCalled();
+      expect(getQuickbooksHubOperationsMock).toHaveBeenCalled();
       expect(screen.getByText('Fuel expense')).toBeInTheDocument();
     });
-    expect(
-      screen.getByText('QuickBooks connection needs attention: quickbooks refresh token missing.')
-    ).toBeInTheDocument();
+    expect(screen.getByText('QuickBooks is connected but degraded: Recent token refresh failed.')).toBeInTheDocument();
   });
 });
