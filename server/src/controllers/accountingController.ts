@@ -1,4 +1,5 @@
 import {
+  accountingAiStatusSchema,
   bankStatementDetailSchema,
   bankStatementListItemSchema,
   bankStatementStatusResponseSchema,
@@ -17,6 +18,7 @@ import { env } from '../config/env';
 import { getStorageClient } from '../integrations/google/storage.client';
 import { enqueueAccountingJob } from '../jobs/accountingQueue';
 import { BankStatement } from '../models/BankStatement';
+import { StatementTransactionModel } from '../models/StatementTransaction';
 import { StatementCheckModel } from '../models/StatementCheck';
 import {
   buildStatementPdfPath,
@@ -153,6 +155,265 @@ const computeStatementHash = async (bucketName: string, objectPath: string) => {
   return createHash('sha256').update(buffer).digest('hex');
 };
 
+const nowIso = () => new Date().toISOString();
+
+const readTextObject = async (objectPath?: string | null) => {
+  if (!env.gcsBucketName || !objectPath) return null;
+  try {
+    const [buffer] = await storage.bucket(env.gcsBucketName).file(objectPath).download();
+    return buffer.toString('utf-8');
+  } catch {
+    return null;
+  }
+};
+
+const buildGeminiArtifactPaths = (normalizedPath?: string | null) => {
+  if (!normalizedPath) return undefined;
+  return {
+    normalizedPath,
+    promptPath: normalizedPath.replace(/\/proposal\.normalized\.v1\.json$/, '/proposal.prompt.v1.txt'),
+    rawPath: normalizedPath.replace(/\/proposal\.normalized\.v1\.json$/, '/proposal.raw.v1.json')
+  };
+};
+
+const readGeminiAiStatus = async (geminiPath?: string | null) => {
+  const raw = await readTextObject(geminiPath ?? undefined);
+  if (!raw) return undefined;
+
+  try {
+    const parsed = JSON.parse(raw) as any;
+    const providerStatus = ['healthy', 'degraded', 'unavailable'].includes(String(parsed.providerStatus))
+      ? (String(parsed.providerStatus) as 'healthy' | 'degraded' | 'unavailable')
+      : 'unavailable';
+    const source = ['gemini', 'fallback', 'hybrid'].includes(String(parsed.source))
+      ? (String(parsed.source) as 'gemini' | 'fallback' | 'hybrid')
+      : 'fallback';
+    return accountingAiStatusSchema.parse({
+      provider: 'gemini',
+      providerStatus,
+      degraded: providerStatus !== 'healthy',
+      degradedReason: typeof parsed.degradedReason === 'string' ? parsed.degradedReason : undefined,
+      source,
+      confidence: Number(parsed.confidence ?? parsed.proposal?.confidence ?? parsed.fallbackProposal?.confidence ?? 0),
+      reasons: Array.isArray(parsed.reasons)
+        ? parsed.reasons.map((value: unknown) => String(value))
+        : Array.isArray(parsed.proposal?.reasons)
+          ? parsed.proposal.reasons.map((value: unknown) => String(value))
+          : [],
+      artifacts: buildGeminiArtifactPaths(geminiPath ?? undefined)
+    });
+  } catch {
+    return undefined;
+  }
+};
+
+const buildStatementProgress = (statement: any) => {
+  const totalChecks = Number(statement.progress?.totalChecks ?? 0);
+  const checksQueued = Number(statement.progress?.checksQueued ?? 0);
+  const checksProcessing = Number(statement.progress?.checksProcessing ?? 0);
+  const checksReady = Number(statement.progress?.checksReady ?? 0);
+  const checksFailed = Number(statement.progress?.checksFailed ?? 0);
+  const completedChecks = checksReady + checksFailed;
+  const remainingChecks = Math.max(totalChecks - completedChecks, 0);
+
+  return {
+    phase: statement.status,
+    totalChecks,
+    checksQueued,
+    checksProcessing,
+    checksReady,
+    checksFailed,
+    completedChecks,
+    remainingChecks
+  };
+};
+
+const buildStatementArtifacts = (statement: any) => {
+  const artifacts = statement.artifacts ?? {};
+  if (!artifacts || Object.keys(artifacts).length === 0) {
+    return undefined;
+  }
+
+  return {
+    pageImagePaths: Array.isArray(artifacts.pageImagePaths)
+      ? artifacts.pageImagePaths.map((value: unknown) => String(value))
+      : [],
+    ocrPath: artifacts.ocrPath ?? undefined,
+    ocrTextPath: artifacts.ocrTextPath ?? undefined,
+    geminiPath: artifacts.geminiPath ?? undefined,
+    detectionEvidence: artifacts.detectionEvidence ?? undefined,
+    detectedStatementMonth: artifacts.detectedStatementMonth ?? undefined,
+    detectedStatementDate: artifacts.detectedStatementDate ?? undefined,
+    autoAppliedStatementMonth: Boolean(artifacts.autoAppliedStatementMonth ?? false),
+    stageTimestamps: {
+      uploadedAt: artifacts.stageTimestamps?.uploadedAt ?? undefined,
+      extractingAt: artifacts.stageTimestamps?.extractingAt ?? undefined,
+      structuringAt: artifacts.stageTimestamps?.structuringAt ?? undefined,
+      checksQueuedAt: artifacts.stageTimestamps?.checksQueuedAt ?? undefined,
+      readyForReviewAt: artifacts.stageTimestamps?.readyForReviewAt ?? undefined,
+      failedAt: artifacts.stageTimestamps?.failedAt ?? undefined
+    }
+  };
+};
+
+const buildCheckArtifacts = (check: any) => {
+  const artifacts = check.artifacts ?? {};
+  if (!artifacts || Object.keys(artifacts).length === 0) {
+    const frontPath = check?.gcs?.frontPath ? String(check.gcs.frontPath) : '';
+    if (!frontPath) return undefined;
+    return {
+      cropImagePath: frontPath,
+      stageTimestamps: {}
+    };
+  }
+
+  return {
+    pageNumber: artifacts.pageNumber ?? undefined,
+    cropBBox: Array.isArray(artifacts.cropBBox)
+      ? artifacts.cropBBox.map((value: unknown) => Number(value))
+      : undefined,
+    cropImagePath: artifacts.cropImagePath ?? undefined,
+    ocrTextPath: artifacts.ocrTextPath ?? undefined,
+    ocrJsonPath: artifacts.ocrJsonPath ?? undefined,
+    geminiPath: artifacts.geminiPath ?? undefined,
+    stageTimestamps: {
+      queuedAt: artifacts.stageTimestamps?.queuedAt ?? undefined,
+      processingAt: artifacts.stageTimestamps?.processingAt ?? undefined,
+      processedAt: artifacts.stageTimestamps?.processedAt ?? undefined,
+      failedAt: artifacts.stageTimestamps?.failedAt ?? undefined
+    }
+  };
+};
+
+const buildCheckProcessing = (check: any) => {
+  const processing = check.processing ?? {};
+  const lastError =
+    processing.lastError ?? (Array.isArray(check.errors) && check.errors.length > 0 ? String(check.errors[0]) : undefined);
+
+  return {
+    retryCount: Number(processing.retryCount ?? 0),
+    lastError,
+    queuedAt: processing.queuedAt ?? undefined,
+    processingAt: processing.processingAt ?? undefined,
+    processedAt: processing.processedAt ?? undefined
+  };
+};
+
+const buildCheckExtracted = (check: any) => {
+  if (check.extracted) {
+    return {
+      checkNumber: check.extracted.checkNumber ?? undefined,
+      date: check.extracted.date ?? undefined,
+      payeeName: check.extracted.payeeName ?? undefined,
+      amount: check.extracted.amount != null ? Number(check.extracted.amount) : undefined,
+      memo: check.extracted.memo ?? undefined,
+      source: check.extracted.source ?? undefined
+    };
+  }
+
+  if (check.autoFill) {
+    return {
+      checkNumber: check.autoFill.checkNumber ?? undefined,
+      date: check.autoFill.date ?? undefined,
+      payeeName: check.autoFill.payeeName ?? undefined,
+      amount: check.autoFill.amount != null ? Number(check.autoFill.amount) : undefined,
+      memo: check.autoFill.memo ?? undefined,
+      source: 'legacy' as const
+    };
+  }
+
+  return undefined;
+};
+
+const buildCheckPayload = async (check: any, relatedTransaction?: any) => {
+  const proposal = relatedTransaction?.proposal
+    ? {
+        qbTxnType: relatedTransaction.proposal.qbTxnType ?? undefined,
+        bankAccountId: relatedTransaction.proposal.bankAccountId ?? undefined,
+        categoryAccountId: relatedTransaction.proposal.categoryAccountId ?? undefined,
+        payeeType: relatedTransaction.proposal.payeeType ?? undefined,
+        payeeId: relatedTransaction.proposal.payeeId ?? undefined,
+        payeeName: relatedTransaction.proposal.payeeName ?? undefined,
+        transferTargetAccountId: relatedTransaction.proposal.transferTargetAccountId ?? undefined,
+        memo: relatedTransaction.proposal.memo ?? undefined,
+        confidence: Number(relatedTransaction.proposal.confidence ?? 0),
+        reasons: Array.isArray(relatedTransaction.proposal.reasons)
+          ? relatedTransaction.proposal.reasons.map((reason: unknown) => String(reason))
+          : [],
+        status: relatedTransaction.proposal.status ?? 'proposed',
+        version: relatedTransaction.proposal.version ?? 'v1'
+      }
+    : undefined;
+  const geminiPath =
+    relatedTransaction?.evidence?.geminiPath ??
+    check.artifacts?.geminiPath ??
+    undefined;
+  const ai = await readGeminiAiStatus(geminiPath);
+
+  return {
+  id: check._id.toString(),
+  statementId: String(check.statementId),
+  companyId: String(check.companyId),
+  status: check.status,
+  confidence: check.confidence
+    ? {
+      imageQuality: check.confidence.imageQuality,
+      ocrConfidence: check.confidence.ocrConfidence,
+      fieldConfidence: check.confidence.fieldConfidence,
+      crossValidation: check.confidence.crossValidation,
+      overall: Number(check.confidence.overall ?? 0)
+    }
+    : undefined,
+  artifacts: buildCheckArtifacts(check),
+  extracted: buildCheckExtracted(check),
+  processing: buildCheckProcessing(check),
+  autoFill: check.autoFill
+    ? {
+      checkNumber: check.autoFill.checkNumber ?? undefined,
+      date: check.autoFill.date ?? undefined,
+      payeeName: check.autoFill.payeeName ?? undefined,
+      amount: check.autoFill.amount != null ? Number(check.autoFill.amount) : undefined,
+      memo: check.autoFill.memo ?? undefined
+    }
+    : undefined,
+  gcs: (() => {
+    const gcs = check.gcs ?? { frontPath: '' };
+    return {
+      frontPath: String(gcs.frontPath ?? ''),
+      backPath: gcs.backPath ?? undefined,
+      ocrPath: gcs.ocrPath ?? undefined,
+      structuredPath: gcs.structuredPath ?? undefined
+    };
+  })(),
+  proposal,
+  ai,
+  match: check.match
+    ? {
+      statementTransactionId: check.match.statementTransactionId ?? undefined,
+      matchConfidence: check.match.matchConfidence ?? undefined,
+      reasons: Array.isArray(check.match.reasons) ? check.match.reasons.map((reason: unknown) => String(reason)) : []
+    }
+    : undefined,
+  updatedAt: check.updatedAt instanceof Date ? check.updatedAt.toISOString() : String(check.updatedAt)
+  };
+};
+
+const loadStatementTransactions = async (statementId: string, companyId: unknown) => {
+  const txns = await StatementTransactionModel.find({
+    statementId,
+    companyId
+  }).lean();
+
+  const map = new Map<string, any>();
+  for (const txn of txns) {
+    map.set(String(txn._id), txn);
+    if (txn.statementCheckId) {
+      map.set(String(txn.statementCheckId), txn);
+    }
+  }
+  return map;
+};
+
 const toListItem = (statement: any) =>
   bankStatementListItemSchema.parse({
     id: statement._id.toString(),
@@ -160,13 +421,7 @@ const toListItem = (statement: any) =>
     fileName: statement.fileName,
     source: statement.source,
     status: statement.status,
-    progress: {
-      totalChecks: Number(statement.progress?.totalChecks ?? 0),
-      checksQueued: Number(statement.progress?.checksQueued ?? 0),
-      checksProcessing: Number(statement.progress?.checksProcessing ?? 0),
-      checksReady: Number(statement.progress?.checksReady ?? 0),
-      checksFailed: Number(statement.progress?.checksFailed ?? 0)
-    },
+    progress: buildStatementProgress(statement),
     confidence: undefined,
     issuesCount: Array.isArray(statement.issues) ? statement.issues.length : 0,
     updatedAt: statement.updatedAt instanceof Date ? statement.updatedAt.toISOString() : String(statement.updatedAt),
@@ -181,6 +436,15 @@ const toDetailItem = async (statement: any) => {
     .sort({ createdAt: 1 })
     .limit(500)
     .lean();
+  const transactionMap = await loadStatementTransactions(statement._id.toString(), statement.companyId);
+  const checksPayload = await Promise.all(
+    checks.map((check) =>
+      buildCheckPayload(
+        check,
+        transactionMap.get(String(check.match?.statementTransactionId ?? check._id))
+      )
+    )
+  );
 
   return bankStatementDetailSchema.parse({
     ...toListItem(statement),
@@ -192,51 +456,8 @@ const toDetailItem = async (statement: any) => {
       rootPrefix: statement.gcs?.rootPrefix,
       pdfPath: statement.gcs?.pdfPath
     },
-    checks: checks.map((check) => ({
-      id: String(check._id),
-      statementId: String(check.statementId),
-      companyId: String(check.companyId),
-      status: check.status,
-      confidence: check.confidence
-        ? {
-          imageQuality: check.confidence.imageQuality,
-          ocrConfidence: check.confidence.ocrConfidence,
-          fieldConfidence: check.confidence.fieldConfidence,
-          crossValidation: check.confidence.crossValidation,
-          overall: Number(check.confidence.overall ?? 0)
-        }
-        : undefined,
-      autoFill: check.autoFill
-        ? {
-          checkNumber: check.autoFill.checkNumber ?? undefined,
-          date: check.autoFill.date ?? undefined,
-          payeeName: check.autoFill.payeeName ?? undefined,
-          amount: check.autoFill.amount != null ? Number(check.autoFill.amount) : undefined,
-          memo: check.autoFill.memo ?? undefined
-        }
-        : undefined,
-      gcs: (() => {
-        const gcs = check.gcs ?? { frontPath: '' };
-        return {
-          frontPath: String(gcs.frontPath ?? ''),
-          backPath: gcs.backPath ?? undefined,
-          ocrPath: gcs.ocrPath ?? undefined,
-          structuredPath: gcs.structuredPath ?? undefined
-        };
-      })(),
-      match: check.match
-        ? {
-          statementTransactionId: check.match.statementTransactionId ?? undefined,
-          matchConfidence:
-            check.match.matchConfidence != null
-              ? Number(check.match.matchConfidence)
-              : undefined,
-          reasons: Array.isArray(check.match.reasons)
-            ? check.match.reasons.map((reason) => String(reason))
-            : []
-        }
-        : undefined
-    })),
+    artifacts: buildStatementArtifacts(statement),
+    checks: checksPayload,
     issues: Array.isArray(statement.issues)
       ? statement.issues.map((issue: unknown) => String(issue))
       : []
@@ -312,7 +533,7 @@ export const detectStatementMonth = async (req: Request, res: Response) => {
       detectStatementMonthFromPdf({
         pdfBuffer: req.file.buffer,
         fileName: req.file.originalname,
-      }),
+      })
     );
     return ok(res, payload);
   } catch (error) {
@@ -378,12 +599,20 @@ export const createStatement = async (req: Request, res: Response) => {
         rootPrefix: expectedRootPrefix,
         pdfPath: parsed.data.gcsPath
       },
+      artifacts: {
+        stageTimestamps: {
+          uploadedAt: nowIso()
+        }
+      },
       progress: {
+        phase: 'uploaded',
         totalChecks: 0,
         checksQueued: 0,
         checksProcessing: 0,
         checksReady: 0,
-        checksFailed: 0
+        checksFailed: 0,
+        completedChecks: 0,
+        remainingChecks: 0
       },
       hash,
       issues,
@@ -488,13 +717,8 @@ export const getStatementStatus = async (req: Request, res: Response) => {
     const payload = bankStatementStatusResponseSchema.parse({
       statementId: statement._id.toString(),
       status: statement.status,
-      progress: {
-        totalChecks: Number(statement.progress?.totalChecks ?? 0),
-        checksQueued: Number(statement.progress?.checksQueued ?? 0),
-        checksProcessing: Number(statement.progress?.checksProcessing ?? 0),
-        checksReady: Number(statement.progress?.checksReady ?? 0),
-        checksFailed: Number(statement.progress?.checksFailed ?? 0)
-      },
+      progress: buildStatementProgress(statement),
+      artifacts: buildStatementArtifacts(statement),
       updatedAt: statement.updatedAt instanceof Date ? statement.updatedAt.toISOString() : String(statement.updatedAt),
       issues: Array.isArray(statement.issues)
         ? statement.issues.map((issue: unknown) => String(issue))
@@ -533,40 +757,17 @@ export const getStatementChecks = async (req: Request, res: Response) => {
   }
 
   const checks = await StatementCheckModel.find(filter).sort({ createdAt: 1 }).limit(500);
+  const transactionMap = await loadStatementTransactions(String(req.params.id), String(req.companyId));
+  const checksPayload = await Promise.all(
+    checks.map((check) =>
+      buildCheckPayload(
+        check,
+        transactionMap.get(String(check.match?.statementTransactionId ?? check._id))
+      )
+    )
+  );
   return ok(res, {
-    checks: checks.map((check) => ({
-      id: check._id.toString(),
-      statementId: check.statementId,
-      companyId: String(check.companyId),
-      status: check.status,
-      confidence: check.confidence
-        ? {
-          imageQuality: check.confidence.imageQuality,
-          ocrConfidence: check.confidence.ocrConfidence,
-          fieldConfidence: check.confidence.fieldConfidence,
-          crossValidation: check.confidence.crossValidation,
-          overall: Number(check.confidence.overall ?? 0)
-        }
-        : undefined,
-      autoFill: check.autoFill ?? undefined,
-      gcs: (() => {
-        const gcs = check.gcs ?? { frontPath: '' };
-        return {
-          frontPath: String(gcs.frontPath ?? ''),
-          backPath: gcs.backPath ?? undefined,
-          ocrPath: gcs.ocrPath ?? undefined,
-          structuredPath: gcs.structuredPath ?? undefined
-        };
-      })(),
-      match: check.match
-        ? {
-          statementTransactionId: check.match.statementTransactionId ?? undefined,
-          matchConfidence: check.match.matchConfidence ?? undefined,
-          reasons: check.match.reasons ?? []
-        }
-        : undefined,
-      updatedAt: check.updatedAt instanceof Date ? check.updatedAt.toISOString() : String(check.updatedAt)
-    }))
+    checks: checksPayload
   });
 };
 
@@ -587,11 +788,19 @@ export const reprocessStatement = async (req: Request, res: Response) => {
 
     statement.status = 'uploaded' as any;
     statement.progress = {
+      phase: 'uploaded',
       totalChecks: 0,
       checksQueued: 0,
       checksProcessing: 0,
       checksReady: 0,
-      checksFailed: 0
+      checksFailed: 0,
+      completedChecks: 0,
+      remainingChecks: 0
+    } as any;
+    statement.artifacts = {
+      stageTimestamps: {
+        uploadedAt: nowIso()
+      }
     } as any;
     statement.issues = [] as any;
     await statement.save();
@@ -640,6 +849,21 @@ export const retryStatementCheck = async (req: Request, res: Response) => {
 
   check.status = 'queued' as any;
   check.errors = [] as any;
+  check.processing = {
+    ...(check.processing ?? {}),
+    retryCount: Number(check.processing?.retryCount ?? 0) + 1,
+    queuedAt: nowIso(),
+    processingAt: undefined,
+    processedAt: undefined,
+    lastError: undefined
+  };
+  check.artifacts = {
+    ...(check.artifacts ?? {}),
+    stageTimestamps: {
+      ...(check.artifacts?.stageTimestamps ?? {}),
+      queuedAt: nowIso()
+    }
+  };
   await check.save();
 
   const queue = await enqueueAccountingJob({
@@ -691,7 +915,8 @@ export const getStatementStream = async (req: Request, res: Response) => {
     const statusPayload = {
       statementId: latestStatement._id.toString(),
       status: latestStatement.status,
-      progress: latestStatement.progress,
+      progress: buildStatementProgress(latestStatement),
+      artifacts: buildStatementArtifacts(latestStatement),
       updatedAt: latestStatement.updatedAt,
       issues: latestStatement.issues ?? []
     };
@@ -705,14 +930,17 @@ export const getStatementStream = async (req: Request, res: Response) => {
       .sort({ updatedAt: 1 })
       .limit(500)
       .lean();
+    const transactionMap = await loadStatementTransactions(String(statementId), String(companyId));
 
-    const checkPayload = checks.map((check) => ({
-      checkId: String(check._id),
-      status: check.status,
-      confidence: check.confidence?.overall ?? null,
-      autoFill: check.autoFill ?? null,
-      updatedAt: check.updatedAt
-    }));
+    const checkPayload = await Promise.all(
+      checks.map(async (check) => ({
+        ...(await buildCheckPayload(
+          check,
+          transactionMap.get(String(check.match?.statementTransactionId ?? check._id))
+        )),
+        checkId: String(check._id)
+      }))
+    );
 
     const checksFingerprint = JSON.stringify(checkPayload);
     if (checksFingerprint !== lastChecksFingerprint) {

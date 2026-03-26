@@ -23,6 +23,7 @@ const statementTransactionSchema = new Schema(
   {
     statementId: { type: String, required: true, index: true },
     companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
+    statementCheckId: { type: String, required: false, index: true },
     postDate: { type: String, required: true },
     description: { type: String, required: true },
     merchant: { type: String, required: false },
@@ -37,7 +38,10 @@ const statementTransactionSchema = new Schema(
     },
     evidence: {
       statementPdfPath: { type: String, required: false },
-      pageImagePath: { type: String, required: false }
+      pageImagePath: { type: String, required: false },
+      checkCropPath: { type: String, required: false },
+      ocrPath: { type: String, required: false },
+      geminiPath: { type: String, required: false }
     },
     proposal: { type: proposalSchema, default: () => ({}) },
     reviewStatus: {
@@ -59,6 +63,7 @@ const statementTransactionSchema = new Schema(
 );
 
 statementTransactionSchema.index({ companyId: 1, statementId: 1, postDate: -1 });
+statementTransactionSchema.index({ companyId: 1, statementId: 1, statementCheckId: 1 });
 statementTransactionSchema.plugin(tenantPlugin);
 
 export type StatementTransactionDoc = InferSchemaType<typeof statementTransactionSchema> & {

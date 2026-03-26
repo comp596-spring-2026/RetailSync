@@ -10,6 +10,13 @@ type MatchingInput = {
   check?: {
     payeeName?: string;
     amount?: number;
+    extracted?: {
+      checkNumber?: string;
+      date?: string;
+      payeeName?: string;
+      amount?: number;
+      memo?: string;
+    };
   };
 };
 
@@ -79,8 +86,14 @@ export const buildMatchingProposal = async (input: MatchingInput): Promise<Match
     reasons.push(hardRule.reason);
   }
 
-  if (input.check?.payeeName) {
-    const payeeNameNorm = normalize(input.check.payeeName);
+  const checkPayeeName = input.check?.extracted?.payeeName ?? input.check?.payeeName;
+  const checkAmount = input.check?.extracted?.amount ?? input.check?.amount;
+  const checkMemo = input.check?.extracted?.memo;
+  const checkDate = input.check?.extracted?.date;
+  const checkNumber = input.check?.extracted?.checkNumber;
+
+  if (checkPayeeName) {
+    const payeeNameNorm = normalize(checkPayeeName);
     const entities = await QuickBooksReferenceModel.find({
       companyId: input.companyId,
       entityType: { $in: ['vendor', 'customer', 'employee'] },
@@ -116,6 +129,18 @@ export const buildMatchingProposal = async (input: MatchingInput): Promise<Match
       reasons.push(
         `Entity resolution: ${best.displayName} (${best.entityType}) ${best.score.toFixed(2)}`
       );
+      if (input.type === 'debit') {
+        qbTxnType = 'Check';
+      }
+      if (checkNumber) {
+        reasons.push(`Check number signal: ${checkNumber}`);
+      }
+      if (checkDate) {
+        reasons.push(`Check date signal: ${checkDate}`);
+      }
+      if (checkMemo) {
+        reasons.push(`Check memo signal: ${checkMemo.slice(0, 80)}`);
+      }
       return {
         qbTxnType,
         categoryAccountId,
@@ -160,10 +185,23 @@ export const buildMatchingProposal = async (input: MatchingInput): Promise<Match
     }
   }
 
-  if (input.type === 'debit' && input.check?.payeeName) {
+  if (input.type === 'debit' && checkPayeeName) {
     qbTxnType = 'Check';
     reasons.push('Check evidence present for debit transaction');
     score += 0.1;
+  }
+
+  if (typeof checkAmount === 'number' && Number.isFinite(checkAmount)) {
+    reasons.push(`Check amount signal: ${checkAmount.toFixed(2)}`);
+  }
+  if (checkNumber) {
+    reasons.push(`Check number signal: ${checkNumber}`);
+  }
+  if (checkDate) {
+    reasons.push(`Check date signal: ${checkDate}`);
+  }
+  if (checkMemo) {
+    reasons.push(`Check memo signal: ${checkMemo.slice(0, 80)}`);
   }
 
   if (reasons.length === 0) {

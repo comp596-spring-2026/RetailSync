@@ -112,4 +112,48 @@ describe('StatementsPage', () => {
     expect(screen.getByText('No Access')).toBeInTheDocument();
     expect(listStatementsMock).not.toHaveBeenCalled();
   });
+
+  it('renders the richer progress summary for statements', async () => {
+    listStatementsMock.mockResolvedValueOnce({
+      data: {
+        data: {
+          statements: [
+            {
+              id: 'statement-1',
+              statementMonth: '2026-03',
+              fileName: 'march-statement.pdf',
+              source: 'upload',
+              status: 'checks_queued',
+              progress: {
+                phase: 'checks_queued',
+                totalChecks: 5,
+                checksQueued: 2,
+                checksProcessing: 1,
+                checksReady: 2,
+                checksFailed: 0,
+                completedChecks: 2,
+                remainingChecks: 3
+              },
+              issuesCount: 0,
+              updatedAt: '2026-03-18T18:51:49.113Z',
+              createdAt: '2026-03-18T18:51:49.113Z'
+            }
+          ]
+        }
+      }
+    });
+
+    render(
+      <Provider store={createStore({ accountingView: false, bankStatementsView: true })}>
+        <MemoryRouter>
+          <StatementsPage />
+        </MemoryRouter>
+      </Provider>
+    );
+
+    expect(await screen.findByText(/Phase: checks queued/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 done • 3 left/i)).toBeInTheDocument();
+    expect(screen.getByText(/queued 2 • processing 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/ready 2 • failed 0/i)).toBeInTheDocument();
+  });
 });

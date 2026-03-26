@@ -2,6 +2,7 @@ import {
   AccountingObservabilityDebug,
   AccountingObservabilitySummary,
   AccountingJobType,
+  BankStatementDetail,
   QuickBooksAccountRegisterQuery,
   QuickBooksAccountRegisterResponse,
   BankStatementListItem,
@@ -33,6 +34,7 @@ import {
   QuickBooksWriteListResponse,
   QuickBooksWriteTxnType,
   QuickBooksWriteUpdateInput,
+  StatementCheck,
   RequestStatementUploadUrlInput
 } from '@retailsync/shared';
 import { api } from '../../../app/api/client';
@@ -45,6 +47,17 @@ import type {
   QuickBooksHubOperationsParams,
   QuickBooksHubOperationsPayload
 } from '../types/quickbooksHub';
+
+type StatementProgressPayload = {
+  phase: BankStatementStatus;
+  totalChecks: number;
+  checksQueued: number;
+  checksProcessing: number;
+  checksReady: number;
+  checksFailed: number;
+  completedChecks: number;
+  remainingChecks: number;
+};
 
 export class AccountingApi {
   private listQuickBooksHub<TResponse>(path: string, params?: Record<string, unknown>) {
@@ -62,13 +75,7 @@ export class AccountingApi {
           fileName: string;
           source: string;
           status: BankStatementStatus;
-          progress: {
-            totalChecks: number;
-            checksQueued: number;
-            checksProcessing: number;
-            checksReady: number;
-            checksFailed: number;
-          };
+          progress: StatementProgressPayload;
           confidence?: number;
           issuesCount: number;
           updatedAt: string;
@@ -79,7 +86,9 @@ export class AccountingApi {
   }
 
   getStatement(id: string) {
-    return api.get('/accounting/statements/' + id);
+    return api.get<{
+      data: BankStatementDetail;
+    }>('/accounting/statements/' + id);
   }
 
   getStatementStatus(id: string) {
@@ -87,13 +96,7 @@ export class AccountingApi {
       data: {
         statementId: string;
         status: BankStatementStatus;
-        progress: {
-          totalChecks: number;
-          checksQueued: number;
-          checksProcessing: number;
-          checksReady: number;
-          checksFailed: number;
-        };
+        progress: StatementProgressPayload;
         updatedAt: string;
         issues: string[];
       };
@@ -101,7 +104,11 @@ export class AccountingApi {
   }
 
   listStatementChecks(id: string, status?: string) {
-    return api.get('/accounting/statements/' + id + '/checks', {
+    return api.get<{
+      data: {
+        checks: StatementCheck[];
+      };
+    }>('/accounting/statements/' + id + '/checks', {
       params: status ? { status } : undefined
     });
   }

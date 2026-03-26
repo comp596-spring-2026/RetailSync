@@ -58,7 +58,10 @@ const ledgerEntrySchema = new Schema(
       statementPdfPath: { type: String, default: null },
       statementPageImagePath: { type: String, default: null },
       checkFrontPath: { type: String, default: null },
-      checkBackPath: { type: String, default: null }
+      checkBackPath: { type: String, default: null },
+      checkCropPath: { type: String, default: null },
+      ocrPath: { type: String, default: null },
+      geminiPath: { type: String, default: null }
     },
     confidence: { type: confidenceSchema, required: false },
     proposal: { type: proposalSchema, default: () => ({}) },
@@ -88,6 +91,7 @@ ledgerEntrySchema.index(
   { companyId: 1, statementId: 1, statementTransactionId: 1 },
   { unique: true }
 );
+ledgerEntrySchema.index({ companyId: 1, statementCheckId: 1 });
 ledgerEntrySchema.index({ companyId: 1, reviewStatus: 1, 'posting.status': 1, date: -1 });
 ledgerEntrySchema.plugin(tenantPlugin);
 

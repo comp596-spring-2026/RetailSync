@@ -19,3 +19,7 @@ export const getStorageClient = () => {
 
   return storageClient;
 };
+
+export const resetStorageClientForTests = () => {
+  storageClient = null;
+};

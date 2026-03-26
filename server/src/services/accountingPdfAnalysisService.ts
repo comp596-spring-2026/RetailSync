@@ -44,6 +44,7 @@ export type StatementMonthDetectionResult = {
   source: StatementMonthDetectionSource;
   summary: string;
   evidence: string | null;
+  autoApply: boolean;
 };
 
 type Candidate = {
@@ -275,6 +276,7 @@ export const detectStatementMonthFromPdf = ({
       source: 'unknown',
       summary: 'Could not detect a statement month from this PDF. Choose it manually.',
       evidence: null,
+      autoApply: false
     };
   }
 
@@ -292,5 +294,6 @@ export const detectStatementMonthFromPdf = ({
     source: best.source,
     summary: `This looks like a ${toMonthLabel(best.statementMonth)} statement.`,
     evidence: best.evidence || null,
+    autoApply: confidence === 'high'
   };
 };

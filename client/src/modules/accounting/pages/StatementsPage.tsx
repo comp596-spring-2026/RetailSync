@@ -32,11 +32,14 @@ type StatementItem = {
   fileName: string;
   status: BankStatementStatus;
   progress: {
+    phase: BankStatementStatus;
     totalChecks: number;
     checksQueued: number;
     checksProcessing: number;
     checksReady: number;
     checksFailed: number;
+    completedChecks: number;
+    remainingChecks: number;
   };
   issuesCount: number;
   updatedAt: string;
@@ -59,6 +62,10 @@ const statusOptions: Array<{ value: BankStatementStatus; label: string }> = [
   { value: 'ready_for_review', label: 'Ready for review' },
   { value: 'failed', label: 'Failed' }
 ];
+
+const formatProgressLabel = (progress: StatementItem['progress']) => {
+  return `${progress.completedChecks} done • ${progress.remainingChecks} left`;
+};
 
 export const StatementsPage = () => {
   const dispatch = useAppDispatch();
@@ -246,15 +253,26 @@ export const StatementsPage = () => {
                     />
                   </TableCell>
                   <TableCell>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      total {row.progress.totalChecks}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      queued {row.progress.checksQueued} • processing {row.progress.checksProcessing}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      ready {row.progress.checksReady} • failed {row.progress.checksFailed}
-                    </Typography>
+                    <Stack spacing={0.5}>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={`Phase: ${row.progress.phase.replace(/_/g, ' ')}`}
+                        sx={{ alignSelf: 'flex-start' }}
+                      />
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        {formatProgressLabel(row.progress)}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        total {row.progress.totalChecks}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        queued {row.progress.checksQueued} • processing {row.progress.checksProcessing}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        ready {row.progress.checksReady} • failed {row.progress.checksFailed}
+                      </Typography>
+                    </Stack>
                   </TableCell>
                   <TableCell>{formatDate(row.updatedAt, 'short')}</TableCell>
                   <TableCell align="right">

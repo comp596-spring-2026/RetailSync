@@ -61,6 +61,17 @@ const EXTRACTION_ADVANCED_STATUSES: BankStatementStatus[] = [
 const PROCESSING_POLL_INTERVAL_MS = 1500;
 const PROCESSING_WAIT_TIMEOUT_MS = 30000;
 
+type StatementProgress = {
+  phase: BankStatementStatus;
+  totalChecks: number;
+  checksQueued: number;
+  checksProcessing: number;
+  checksReady: number;
+  checksFailed: number;
+  completedChecks: number;
+  remainingChecks: number;
+};
+
 const getDetectionMessage = (
   detection: DetectStatementMonthResponse,
   statementMonth: string,
@@ -71,7 +82,9 @@ const getDetectionMessage = (
 
   const monthLabel = formatStatementMonthLabel(detection.statementMonth);
   if (detection.statementMonth === statementMonth) {
-    return `This looks like a ${monthLabel} statement. You can adjust the month before upload if needed.`;
+    return detection.autoApply
+      ? `Applied the ${monthLabel} month from the PDF. You can still adjust it before upload.`
+      : `This looks like a ${monthLabel} statement. You can adjust the month before upload if needed.`;
   }
 
   return detection.summary || `This looks like a ${monthLabel} statement.`;
@@ -96,19 +109,19 @@ const formatStatementStatusLabel = (status: BankStatementStatus) =>
 const getProcessingSummary = (status: BankStatementStatus | null) => {
   switch (status) {
     case 'uploaded':
-      return 'Upload complete. Preparing the statement for extraction.';
+      return 'Preparing the statement for extraction.';
     case 'extracting':
-      return 'Extracting statement pages and text now.';
+      return 'Extracting statement pages and text.';
     case 'structuring':
-      return 'Extraction is complete. Building transactions and review data.';
+      return 'Building transactions and review data.';
     case 'checks_queued':
-      return 'Extraction is complete. Queuing checks and review tasks.';
+      return 'Queuing checks and review tasks.';
     case 'ready_for_review':
-      return 'Processing is complete. The statement is ready for review.';
+      return 'Processing complete. Ready for review.';
     case 'failed':
-      return 'Statement processing failed. Review the details below and try again.';
+      return 'Statement processing failed.';
     default:
-      return 'Starting statement processing...';
+      return 'Starting statement processing.';
   }
 };
 
@@ -122,6 +135,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
   const [processingStatement, setProcessingStatement] = useState(false);
   const [processingTimedOut, setProcessingTimedOut] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<BankStatementStatus | null>(null);
+  const [processingProgress, setProcessingProgress] = useState<StatementProgress | null>(null);
   const [processingIssues, setProcessingIssues] = useState<string[]>([]);
   const [detectingStatementMonth, setDetectingStatementMonth] = useState(false);
   const [detection, setDetection] = useState<DetectStatementMonthResponse | null>(null);
@@ -143,6 +157,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setProcessingStatement(false);
     setProcessingTimedOut(false);
     setProcessingStatus(null);
+    setProcessingProgress(null);
     setProcessingIssues([]);
     setDetectingStatementMonth(false);
     setDetection(null);
@@ -170,9 +185,11 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
   const waitForExtractionAdvance = async (
     statementId: string,
     initialStatus: BankStatementStatus,
+    initialProgress: StatementProgress | null,
   ): Promise<{
     kind: 'advanced' | 'failed' | 'timeout' | 'cancelled';
     status: BankStatementStatus;
+    progress: StatementProgress | null;
     issues: string[];
   }> => {
     processingRequestIdRef.current += 1;
@@ -184,44 +201,46 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setProcessingStatement(true);
     setProcessingTimedOut(false);
     setProcessingStatus(initialStatus);
+    setProcessingProgress(initialProgress);
     setProcessingIssues([]);
 
     while (requestId === processingRequestIdRef.current) {
       const response = await accountingApi.getStatementStatus(statementId);
       if (requestId !== processingRequestIdRef.current) {
-        return { kind: 'cancelled', status: latestStatus, issues: latestIssues };
+        return { kind: 'cancelled', status: latestStatus, progress: initialProgress, issues: latestIssues };
       }
 
       latestStatus = response.data.data.status;
       latestIssues = response.data.data.issues ?? [];
       setProcessingStatus(latestStatus);
+      setProcessingProgress(response.data.data.progress ?? null);
       setProcessingIssues(latestIssues);
 
       if (latestStatus === 'failed') {
         setProcessingStatement(false);
-        return { kind: 'failed', status: latestStatus, issues: latestIssues };
+        return { kind: 'failed', status: latestStatus, progress: response.data.data.progress ?? null, issues: latestIssues };
       }
 
       if (EXTRACTION_ADVANCED_STATUSES.includes(latestStatus)) {
         setProcessingStatement(false);
-        return { kind: 'advanced', status: latestStatus, issues: latestIssues };
+        return { kind: 'advanced', status: latestStatus, progress: response.data.data.progress ?? null, issues: latestIssues };
       }
 
       if (!EXTRACTION_ACTIVE_STATUSES.includes(latestStatus)) {
         setProcessingStatement(false);
-        return { kind: 'advanced', status: latestStatus, issues: latestIssues };
+        return { kind: 'advanced', status: latestStatus, progress: response.data.data.progress ?? null, issues: latestIssues };
       }
 
       if (Date.now() - startedAt >= PROCESSING_WAIT_TIMEOUT_MS) {
         setProcessingStatement(false);
         setProcessingTimedOut(true);
-        return { kind: 'timeout', status: latestStatus, issues: latestIssues };
+        return { kind: 'timeout', status: latestStatus, progress: response.data.data.progress ?? null, issues: latestIssues };
       }
 
       await sleep(PROCESSING_POLL_INTERVAL_MS);
     }
 
-    return { kind: 'cancelled', status: latestStatus, issues: latestIssues };
+    return { kind: 'cancelled', status: latestStatus, progress: initialProgress, issues: latestIssues };
   };
 
   const inspectSelectedFile = async (nextFile: File | null) => {
@@ -246,8 +265,9 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
       const nextDetection = response.data.data;
       setDetection(nextDetection);
 
-      if (nextDetection.statementMonth && !statementMonthTouchedRef.current) {
+      if (nextDetection.statementMonth && nextDetection.autoApply && !statementMonthTouchedRef.current) {
         setStatementMonth(nextDetection.statementMonth);
+        setStatementMonthTouched(false);
       }
     } catch (error) {
       if (requestId !== detectionRequestIdRef.current) return;
@@ -304,6 +324,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setSubmitError(null);
     setProcessingTimedOut(false);
     setProcessingIssues([]);
+    setProcessingProgress(null);
 
     try {
       const signed = await accountingApi.requestUploadUrl({
@@ -337,6 +358,16 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
       const result = await waitForExtractionAdvance(
         created.data.data.statement.id,
         created.data.data.statement.status,
+        {
+          phase: created.data.data.statement.status,
+          totalChecks: created.data.data.statement.progress.totalChecks,
+          checksQueued: created.data.data.statement.progress.checksQueued,
+          checksProcessing: created.data.data.statement.progress.checksProcessing,
+          checksReady: created.data.data.statement.progress.checksReady,
+          checksFailed: created.data.data.statement.progress.checksFailed,
+          completedChecks: created.data.data.statement.progress.completedChecks,
+          remainingChecks: created.data.data.statement.progress.remainingChecks,
+        }
       );
 
       if (result.kind === 'advanced') {
@@ -373,6 +404,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setProcessingStatement(false);
     setProcessingTimedOut(false);
     setProcessingStatus(null);
+    setProcessingProgress(null);
     setProcessingIssues([]);
     setDetectingStatementMonth(false);
     detectionRequestIdRef.current += 1;
@@ -388,7 +420,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Typography variant="body2" color="text.secondary">
-            Drop in a bank statement PDF and RetailSync will inspect it before upload to suggest the statement month.
+            Drop in a bank statement PDF and RetailSync will detect the statement month before upload.
           </Typography>
 
           <Paper
@@ -433,9 +465,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                   {file ? 'Statement PDF ready' : 'Drag and drop a PDF here'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" textAlign={{ sm: 'center' }}>
-                  {file
-                    ? 'Replace the file, review the suggested month, then start processing.'
-                    : 'You can also browse for a PDF statement from your computer.'}
+                  {file ? 'Month detection runs automatically after you pick a PDF.' : 'Or browse for a PDF from your computer.'}
                 </Typography>
               </Stack>
 
@@ -472,7 +502,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                         onClick={() => fileInputRef.current?.click()}
                         disabled={uploading || processingStatement || processingTimedOut}
                       >
-                        Replace file
+                        Change
                       </Button>
                       <Button
                         size="small"
@@ -481,7 +511,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                         onClick={clearSelectedFile}
                         disabled={uploading || processingStatement || processingTimedOut}
                       >
-                        Remove
+                        Clear
                       </Button>
                     </Stack>
                   </Stack>
@@ -521,7 +551,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
             }}
             disabled={uploading || processingStatement || processingTimedOut}
             InputLabelProps={{ shrink: true }}
-            helperText="RetailSync will suggest a month from the PDF, but you can override it before upload."
+            helperText="RetailSync will auto-detect the month when confidence is high. You can override it anytime."
             InputProps={{
               startAdornment: (
                 <Box
@@ -541,7 +571,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
 
           {detectingStatementMonth ? (
             <Alert severity="info">
-              Scanning the PDF to suggest the statement month…
+              Detecting the statement month…
             </Alert>
           ) : null}
 
@@ -571,12 +601,25 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                       variant="outlined"
                     />
                   ) : null}
+                  {processingProgress ? (
+                    <Chip size="small" label={`Phase: ${formatStatementStatusLabel(processingProgress.phase)}`} variant="outlined" />
+                  ) : null}
                 </Stack>
                 <Typography variant="body2">
                   {processingTimedOut
-                    ? 'Upload finished and extraction is still running in the background. You can close this dialog and monitor the statement from the list.'
+                    ? 'Upload finished and processing is still running in the background.'
                     : getProcessingSummary(processingStatus)}
                 </Typography>
+                {processingProgress ? (
+                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                    <Chip size="small" label={`Done ${processingProgress.completedChecks}`} variant="outlined" />
+                    <Chip size="small" label={`Left ${processingProgress.remainingChecks}`} variant="outlined" />
+                    <Chip size="small" label={`Queued ${processingProgress.checksQueued}`} variant="outlined" />
+                    <Chip size="small" label={`Processing ${processingProgress.checksProcessing}`} variant="outlined" />
+                    <Chip size="small" label={`Ready ${processingProgress.checksReady}`} variant="outlined" />
+                    <Chip size="small" label={`Failed ${processingProgress.checksFailed}`} variant="outlined" />
+                  </Stack>
+                ) : null}
                 {processingStatement ? <LinearProgress /> : null}
                 {processingIssues.length > 0 ? (
                   <Typography variant="caption" color="text.secondary">
@@ -591,7 +634,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
             <Alert
               severity={detection.statementMonth ? 'success' : 'info'}
               action={
-                detection.statementMonth && detection.statementMonth !== statementMonth ? (
+                detection.statementMonth && !detection.autoApply && detection.statementMonth !== statementMonth ? (
                   <Button color="inherit" size="small" onClick={applyDetectedMonth}>
                     Use {detection.statementMonth}
                   </Button>
@@ -608,6 +651,9 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                       color="success"
                       variant="outlined"
                     />
+                  ) : null}
+                  {detection.autoApply ? (
+                    <Chip size="small" label="Auto-applied" color="success" variant="outlined" />
                   ) : null}
                   {isDevelopment ? (
                     <Chip

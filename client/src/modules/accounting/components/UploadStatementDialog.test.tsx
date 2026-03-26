@@ -31,6 +31,7 @@ const detectedMonthPayload = {
   source: 'pdf_text' as const,
   summary: 'This looks like a December 2025 statement.',
   evidence: 'Statement Ending 12/31/2025',
+  autoApply: true,
 };
 
 type StatementStatusResponse = {
@@ -39,11 +40,14 @@ type StatementStatusResponse = {
       statementId: string;
       status: 'uploaded' | 'extracting' | 'structuring' | 'checks_queued' | 'ready_for_review' | 'failed';
       progress: {
+        phase: 'uploaded' | 'extracting' | 'structuring' | 'checks_queued' | 'ready_for_review' | 'failed';
         totalChecks: number;
         checksQueued: number;
         checksProcessing: number;
         checksReady: number;
         checksFailed: number;
+        completedChecks: number;
+        remainingChecks: number;
       };
       updatedAt: string;
       issues: string[];
@@ -84,6 +88,7 @@ describe('UploadStatementDialog', () => {
     expect((await screen.findAllByText(/December 2025/i)).length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue('2025-12')).toBeInTheDocument();
     expect(screen.getByText(/Statement Ending 12\/31\/2025/i)).toBeInTheDocument();
+    expect(screen.getByText(/Auto-applied/i)).toBeInTheDocument();
   });
 
   it('supports drag and drop and uploads using the detected month', async () => {
@@ -111,11 +116,14 @@ describe('UploadStatementDialog', () => {
             source: 'upload',
             status: 'extracting',
             progress: {
+              phase: 'extracting',
               totalChecks: 0,
               checksQueued: 0,
               checksProcessing: 0,
               checksReady: 0,
               checksFailed: 0,
+              completedChecks: 0,
+              remainingChecks: 0,
             },
             issuesCount: 0,
             updatedAt: '2026-03-18T18:51:49.113Z',
@@ -131,11 +139,14 @@ describe('UploadStatementDialog', () => {
           statementId: 'statement-a',
           status: 'structuring',
           progress: {
+            phase: 'structuring',
             totalChecks: 0,
             checksQueued: 0,
             checksProcessing: 0,
             checksReady: 0,
             checksFailed: 0,
+            completedChecks: 0,
+            remainingChecks: 0,
           },
           updatedAt: '2026-03-18T18:52:02.000Z',
           issues: [],
@@ -259,7 +270,8 @@ describe('UploadStatementDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /Upload & Start/i }));
 
     expect(await screen.findByText(/Processing statement/i)).toBeInTheDocument();
-    expect(screen.getByText(/Extracting statement pages and text now/i)).toBeInTheDocument();
+    expect(screen.getByText(/Extracting statement pages and text/i)).toBeInTheDocument();
+    expect(screen.getByText(/Phase: Extracting/i)).toBeInTheDocument();
 
     statusResolver({
       data: {
@@ -267,11 +279,14 @@ describe('UploadStatementDialog', () => {
           statementId: 'statement-a',
           status: 'structuring',
           progress: {
+            phase: 'structuring',
             totalChecks: 0,
             checksQueued: 0,
             checksProcessing: 0,
             checksReady: 0,
             checksFailed: 0,
+            completedChecks: 0,
+            remainingChecks: 0,
           },
           updatedAt: '2026-03-18T18:52:02.000Z',
           issues: [],
