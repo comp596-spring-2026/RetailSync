@@ -98,7 +98,7 @@ const formatViolation = ({ importer, specifier, line, resolvedPath }: ImportRefe
 
 const allowedCrossModuleImports = [
   'modules/accounting/hooks/useQuickBooksWorkspace.ts:5 imports "../../settings/components" -> modules/settings/components',
-  'modules/accounting/pages/QuickBooksSyncPage.tsx:18 imports "../../settings/components" -> modules/settings/components',
+  'modules/accounting/pages/QuickBooksSyncPage.tsx:21 imports "../../settings/components" -> modules/settings/components',
   'modules/auth/pages/CreateCompanyPage.tsx:13 imports "../../users/state" -> modules/users/state',
   'modules/auth/pages/JoinCompanyPage.tsx:12 imports "../../users/state" -> modules/users/state',
   'modules/auth/state/authSlice.ts:4 imports "../../users/state" -> modules/users/state',

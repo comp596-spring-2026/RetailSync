@@ -129,10 +129,25 @@ describe('TaxDashboardPage', () => {
         data: {
           ok: true,
           reason: null,
+          connected: true,
+          degraded: false,
+          status: 'connected',
+          needsReconnect: false,
           environment: 'sandbox',
           realmId: 'realm-1',
           companyName: 'RetailSync QB',
-          expiresInSec: 3600
+          expiresInSec: 3600,
+          health: {
+            status: 'healthy',
+            checkedAt: '2026-03-10T00:00:00.000Z',
+            refreshedAt: '2026-03-10T00:00:00.000Z',
+            accessTokenExpiresAt: '2026-03-10T01:00:00.000Z',
+            accessTokenExpiresInSec: 3600,
+            refreshTokenExpiresAt: '2026-04-10T00:00:00.000Z',
+            refreshTokenExpiresInSec: 2678400,
+            lastRefreshError: null,
+            lastRefreshErrorAt: null
+          }
         }
       }
     });
@@ -249,11 +264,70 @@ describe('TaxDashboardPage', () => {
       data: {
         data: {
           ok: false,
-          reason: 'quickbooks_refresh_token_missing',
+          reason: null,
+          connected: true,
+          degraded: true,
+          status: 'degraded',
+          needsReconnect: false,
           environment: 'sandbox',
           realmId: 'realm-1',
           companyName: 'RetailSync QB',
-          expiresInSec: null
+          expiresInSec: null,
+          health: {
+            status: 'degraded',
+            checkedAt: '2026-03-10T00:00:00.000Z',
+            refreshedAt: '2026-03-10T00:00:00.000Z',
+            accessTokenExpiresAt: null,
+            accessTokenExpiresInSec: null,
+            refreshTokenExpiresAt: null,
+            refreshTokenExpiresInSec: null,
+            lastRefreshError: 'Recent token refresh failed',
+            lastRefreshErrorAt: '2026-03-10T00:00:00.000Z'
+          }
+        }
+      }
+    });
+
+    render(
+      <Provider store={createStore(true)}>
+        <MemoryRouter>
+          <TaxDashboardPage />
+        </MemoryRouter>
+      </Provider>
+    );
+
+    await waitFor(() => {
+      expect(getQuickbooksTaxPaymentsMock).toHaveBeenCalled();
+      expect(screen.getByRole('heading', { name: 'Recover Payment' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('QuickBooks is connected but degraded: Recent token refresh failed.')).toBeInTheDocument();
+  });
+
+  it('keeps tax tools accessible when reconnect is required', async () => {
+    getQuickbooksOAuthStatusMock.mockResolvedValue({
+      data: {
+        data: {
+          ok: false,
+          reason: 'quickbooks_refresh_token_missing',
+          connected: true,
+          degraded: true,
+          status: 'connected',
+          needsReconnect: true,
+          environment: 'sandbox',
+          realmId: 'realm-1',
+          companyName: 'RetailSync QB',
+          expiresInSec: null,
+          health: {
+            status: 'degraded',
+            checkedAt: '2026-03-10T00:00:00.000Z',
+            refreshedAt: '2026-03-10T00:00:00.000Z',
+            accessTokenExpiresAt: null,
+            accessTokenExpiresInSec: null,
+            refreshTokenExpiresAt: null,
+            refreshTokenExpiresInSec: null,
+            lastRefreshError: 'Refresh token is missing',
+            lastRefreshErrorAt: '2026-03-10T00:00:00.000Z'
+          }
         }
       }
     });
@@ -271,7 +345,9 @@ describe('TaxDashboardPage', () => {
       expect(screen.getByRole('heading', { name: 'Recover Payment' })).toBeInTheDocument();
     });
     expect(
-      screen.getByText('QuickBooks connection needs attention: quickbooks refresh token missing.')
+      screen.getByText(
+        'QuickBooks is still connected, but it needs to be reconnected: the refresh token is missing.'
+      )
     ).toBeInTheDocument();
   });
 });

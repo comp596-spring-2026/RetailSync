@@ -58,7 +58,14 @@ export const TaxDashboardPage = () => {
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
   const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
-  const { loading: workspaceLoading, isConnected, error: workspaceError, warning: workspaceWarning } = useQuickBooksWorkspace(canView);
+  const {
+    loading: workspaceLoading,
+    isConnected,
+    isDegraded,
+    needsReconnect,
+    error: workspaceError,
+    warning: workspaceWarning,
+  } = useQuickBooksWorkspace(canView);
 
   const dateWindow = useMemo(defaultWindow, []);
   const [from, setFrom] = useState(dateWindow.from);
@@ -229,6 +236,8 @@ export const TaxDashboardPage = () => {
       <RequireQuickBooksConnection
         loading={workspaceLoading}
         isConnected={isConnected}
+        isDegraded={isDegraded}
+        needsReconnect={needsReconnect}
         error={workspaceError}
         warning={workspaceWarning}
       >

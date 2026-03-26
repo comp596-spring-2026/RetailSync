@@ -16,7 +16,10 @@ import {
 import { getOrCreateSettings } from "../../integrations/google/settings";
 import {
   QuickBooksEnvironment,
+  QuickBooksSecretHealth,
+  QuickBooksSecretPayload,
   buildQuickBooksAuthorizationUrl,
+  buildQuickBooksSecretHealth,
   ensureFreshQuickBooksSecret,
   exchangeQuickBooksAuthorizationCode,
   fetchQuickBooksCompanyName,
@@ -80,6 +83,32 @@ type QuickBooksOAuthStatePayload = {
   purpose: "quickbooks_connect";
 };
 
+type QuickBooksOAuthHealthStatus = {
+  status: "healthy" | "degraded";
+  checkedAt: string | null;
+  refreshedAt: string | null;
+  accessTokenExpiresAt: string | null;
+  accessTokenExpiresInSec: number | null;
+  refreshTokenExpiresAt: string | null;
+  refreshTokenExpiresInSec: number | null;
+  lastRefreshError: string | null;
+  lastRefreshErrorAt: string | null;
+};
+
+type QuickBooksOAuthStatus = {
+  ok: boolean;
+  reason: string | null;
+  connected: boolean;
+  degraded: boolean;
+  status: "not_connected" | "connected" | "degraded";
+  needsReconnect: boolean;
+  environment: "sandbox" | "production";
+  realmId: string | null;
+  companyName: string | null;
+  expiresInSec: number | null;
+  health: QuickBooksOAuthHealthStatus | null;
+};
+
 export const quickBooksOAuthCookieOptions = () => ({
   httpOnly: true,
   sameSite: (env.nodeEnv === "production" ? "none" : "lax") as "none" | "lax",
@@ -103,6 +132,63 @@ const normalizeSyncStatus = (value: unknown): QuickBooksSyncStatus => {
     return value;
   }
   return "idle";
+};
+
+const toIsoStringOrNull = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value) ? new Date(value).toISOString() : null;
+
+const getQuickBooksSecretHealth = (secret: QuickBooksSecretPayload | null | undefined) => {
+  if (!secret) {
+    return null;
+  }
+  return secret.health ?? buildQuickBooksSecretHealth({ payload: secret });
+};
+
+const toQuickBooksOAuthHealthStatus = (
+  health: QuickBooksSecretHealth | null,
+): QuickBooksOAuthHealthStatus | null => {
+  if (!health) {
+    return null;
+  }
+
+  return {
+    status: health.status,
+    checkedAt: toIsoStringOrNull(health.checkedAt),
+    refreshedAt: toIsoStringOrNull(health.refreshedAt),
+    accessTokenExpiresAt: toIsoStringOrNull(health.accessTokenExpiresAt),
+    accessTokenExpiresInSec: health.accessTokenExpiresInSec ?? null,
+    refreshTokenExpiresAt: toIsoStringOrNull(health.refreshTokenExpiresAt),
+    refreshTokenExpiresInSec: health.refreshTokenExpiresInSec ?? null,
+    lastRefreshError: health.lastRefreshError ?? null,
+    lastRefreshErrorAt: toIsoStringOrNull(health.lastRefreshErrorAt),
+  };
+};
+
+const buildQuickBooksOAuthStatus = (args: {
+  ok: boolean;
+  reason: string | null;
+  connected: boolean;
+  environment: "sandbox" | "production";
+  realmId: string | null;
+  companyName: string | null;
+  expiresInSec: number | null;
+  health: QuickBooksSecretHealth | null;
+}): QuickBooksOAuthStatus => {
+  const degraded = args.health?.status === "degraded" || (!args.ok && args.connected);
+
+  return {
+    ok: args.ok,
+    reason: args.reason,
+    connected: args.connected,
+    degraded,
+    status: !args.connected ? "not_connected" : degraded ? "degraded" : "connected",
+    needsReconnect: Boolean(!args.ok && args.connected),
+    environment: args.environment,
+    realmId: args.realmId,
+    companyName: args.companyName,
+    expiresInSec: args.expiresInSec,
+    health: toQuickBooksOAuthHealthStatus(args.health),
+  };
 };
 
 export const ensureQuickbooksShape = (settings: SettingsWithQuickBooks) => {
@@ -376,28 +462,35 @@ export const getQuickBooksOAuthStatus = async (
   companyId: string,
   userId: string,
 ) => {
+  const settings = await getOrCreateSettings(companyId, userId);
+  const quickbooks = ensureQuickbooksShape(settings);
+
   try {
-    const settings = await getOrCreateSettings(companyId, userId);
-    const quickbooks = ensureQuickbooksShape(settings);
     if (!quickbooks.connected) {
-      return {
+      return buildQuickBooksOAuthStatus({
         ok: false,
         reason: "not_connected",
+        connected: false,
+        environment: quickbooks.environment,
         realmId: null,
         companyName: null,
         expiresInSec: null,
-      };
+        health: null,
+      });
     }
 
     const secret = await ensureFreshQuickBooksSecret(companyId);
     if (!secret) {
-      return {
+      return buildQuickBooksOAuthStatus({
         ok: false,
         reason: "quickbooks_secret_missing",
+        connected: true,
+        environment: quickbooks.environment,
         realmId: quickbooks.realmId ?? null,
         companyName: quickbooks.companyName ?? null,
         expiresInSec: null,
-      };
+        health: null,
+      });
     }
 
     if (secret.companyName && quickbooks.companyName !== secret.companyName) {
@@ -411,26 +504,35 @@ export const getQuickBooksOAuthStatus = async (
       await settings.save();
     }
 
-    const expiresInSec = secret.expiresAt
-      ? Math.max(0, Math.floor((secret.expiresAt - Date.now()) / 1000))
-      : null;
+    const health = getQuickBooksSecretHealth(secret);
 
-    return {
+    return buildQuickBooksOAuthStatus({
       ok: true,
       reason: null,
+      connected: true,
       environment: secret.environment,
       realmId: secret.realmId,
       companyName: secret.companyName,
-      expiresInSec,
-    };
+      expiresInSec: health?.accessTokenExpiresInSec ?? null,
+      health,
+    });
   } catch (error) {
-    return {
+    const secret = quickbooks.connected ? await loadQuickBooksSecret(companyId) : null;
+    const health = getQuickBooksSecretHealth(secret);
+
+    return buildQuickBooksOAuthStatus({
       ok: false,
       reason: extractQuickBooksCallbackReason(error),
-      realmId: null,
-      companyName: null,
-      expiresInSec: null,
-    };
+      connected: quickbooks.connected,
+      environment:
+        secret?.environment === "production" || quickbooks.environment === "production"
+          ? "production"
+          : "sandbox",
+      realmId: secret?.realmId ?? quickbooks.realmId ?? null,
+      companyName: secret?.companyName ?? quickbooks.companyName ?? null,
+      expiresInSec: health?.accessTokenExpiresInSec ?? null,
+      health,
+    });
   }
 };
 

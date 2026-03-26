@@ -520,6 +520,440 @@ export const quickBooksJournalAdjustmentInputSchema = z
     }
   });
 
+export const quickBooksHubPageSchema = coercePositiveInt(1, 10_000).optional().default(1);
+
+export const quickBooksHubPageSizeSchema = coercePositiveInt(1, 200).optional().default(25);
+
+export const quickBooksHubEntityTypeSchema = z.enum(['customer', 'vendor']);
+
+export const quickBooksHubAccountSortSchema = z.enum([
+  'name',
+  '-name',
+  'type',
+  '-type',
+  'status',
+  '-status',
+  'updatedAt',
+  '-updatedAt'
+]);
+
+export const quickBooksHubEntitySortSchema = z.enum([
+  'displayName',
+  '-displayName',
+  'status',
+  '-status',
+  'balance',
+  '-balance',
+  'updatedAt',
+  '-updatedAt'
+]);
+
+export const quickBooksHubOperationSortSchema = z.enum([
+  'date',
+  '-date',
+  'amount',
+  '-amount',
+  'status',
+  '-status',
+  'updatedAt',
+  '-updatedAt'
+]);
+
+export const quickBooksHubAccountStatusSchema = z.enum(['active', 'system']);
+export const quickBooksHubEntityStatusSchema = z.enum(['active', 'inactive']);
+export const quickBooksHubOperationStatusSchema = statementPostingStatusSchema;
+
+const quickBooksHubListResponseMetaSchema = z.object({
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+  total: z.number().int().nonnegative(),
+  totalPages: z.number().int().nonnegative()
+});
+
+export const quickBooksHubChartAccountSchema = z.object({
+  id: z.string().trim().min(1),
+  qbId: z.string().trim().nullable(),
+  name: z.string().trim().min(1),
+  type: z.string().trim().nullable(),
+  detailType: z.string().trim().nullable(),
+  status: quickBooksHubAccountStatusSchema,
+  balance: z.number().nullable()
+});
+
+export const quickBooksHubChartOfAccountsQuerySchema = z.object({
+  page: quickBooksHubPageSchema,
+  pageSize: quickBooksHubPageSizeSchema,
+  search: z.string().trim().optional(),
+  sort: quickBooksHubAccountSortSchema.optional().default('name'),
+  type: z.string().trim().optional(),
+  status: quickBooksHubAccountStatusSchema.optional()
+});
+
+export const quickBooksHubChartOfAccountsResponseSchema =
+  quickBooksHubListResponseMetaSchema.extend({
+    items: z.array(quickBooksHubChartAccountSchema)
+  });
+
+export const quickBooksHubEntitySchema = z.object({
+  id: z.string().trim().min(1),
+  qbId: z.string().trim().min(1),
+  entityType: quickBooksHubEntityTypeSchema,
+  displayName: z.string().trim().min(1),
+  email: z.string().trim().nullable(),
+  phone: z.string().trim().nullable(),
+  status: quickBooksHubEntityStatusSchema,
+  balance: z.number().nullable()
+});
+
+export const quickBooksHubEntitiesQuerySchema = z.object({
+  entityType: quickBooksHubEntityTypeSchema,
+  page: quickBooksHubPageSchema,
+  pageSize: quickBooksHubPageSizeSchema,
+  search: z.string().trim().optional(),
+  sort: quickBooksHubEntitySortSchema.optional().default('displayName'),
+  status: quickBooksHubEntityStatusSchema.optional()
+});
+
+export const quickBooksHubEntitiesResponseSchema = quickBooksHubListResponseMetaSchema.extend({
+  items: z.array(quickBooksHubEntitySchema)
+});
+
+export const quickBooksHubOperationTypeSchema = z.enum([
+  'Expense',
+  'Deposit',
+  'Transfer',
+  'Check',
+  'debit',
+  'credit'
+]);
+
+export const quickBooksHubOperationSchema = z.object({
+  id: z.string().trim().min(1),
+  date: quickBooksTaxDateSchema,
+  type: quickBooksHubOperationTypeSchema.nullable(),
+  description: z.string().trim().min(1),
+  payee: z.string().trim().nullable(),
+  amount: z.number(),
+  status: quickBooksHubOperationStatusSchema,
+  qbId: z.string().trim().nullable(),
+  error: z.string().trim().nullable()
+});
+
+export const quickBooksHubOperationsQuerySchema = z.object({
+  page: quickBooksHubPageSchema,
+  pageSize: quickBooksHubPageSizeSchema,
+  search: z.string().trim().optional(),
+  sort: quickBooksHubOperationSortSchema.optional().default('-date'),
+  status: quickBooksHubOperationStatusSchema.optional(),
+  type: quickBooksHubOperationTypeSchema.optional(),
+  startDate: quickBooksTaxDateSchema.optional(),
+  endDate: quickBooksTaxDateSchema.optional()
+});
+
+export const quickBooksHubOperationsResponseSchema = quickBooksHubListResponseMetaSchema.extend({
+  items: z.array(quickBooksHubOperationSchema)
+});
+
+export const quickBooksLiveTransactionTypeSchema = z.enum([
+  'deposit',
+  'check',
+  'expense',
+  'transfer'
+]);
+
+export const quickBooksLiveSortSchema = z.enum([
+  'date',
+  '-date',
+  'amount',
+  '-amount'
+]);
+
+export const quickBooksAccountRegisterRowSchema = z.object({
+  id: z.string().trim().min(1),
+  accountId: z.string().trim().min(1),
+  date: quickBooksTaxDateSchema.nullable(),
+  txnType: z.string().trim().nullable(),
+  qbTxnId: z.string().trim().nullable(),
+  docNum: z.string().trim().nullable(),
+  name: z.string().trim().nullable(),
+  memo: z.string().trim().nullable(),
+  splitAccount: z.string().trim().nullable(),
+  amount: z.number().nullable(),
+  debit: z.number().nullable(),
+  credit: z.number().nullable(),
+  balance: z.number().nullable()
+});
+
+export const quickBooksAccountRegisterQuerySchema = quickBooksTaxWindowQuerySchema.extend({
+  page: quickBooksHubPageSchema,
+  pageSize: quickBooksHubPageSizeSchema,
+  search: z.string().trim().optional(),
+  sort: quickBooksLiveSortSchema.optional().default('-date')
+});
+
+export const quickBooksAccountRegisterResponseSchema =
+  quickBooksHubListResponseMetaSchema.extend({
+    accountId: z.string().trim().min(1),
+    from: quickBooksTaxDateSchema,
+    to: quickBooksTaxDateSchema,
+    basis: quickBooksTaxBasisSchema,
+    items: z.array(quickBooksAccountRegisterRowSchema)
+  });
+
+export const quickBooksLiveTransactionListItemSchema = z.object({
+  id: z.string().trim().min(1),
+  qbTxnId: z.string().trim().min(1),
+  type: quickBooksLiveTransactionTypeSchema,
+  txnDate: quickBooksTaxDateSchema,
+  docNum: z.string().trim().nullable(),
+  payeeName: z.string().trim().nullable(),
+  accountName: z.string().trim().nullable(),
+  amount: z.number().nullable(),
+  memo: z.string().trim().nullable(),
+  status: z.enum(['posted', 'unknown']).default('posted')
+});
+
+export const quickBooksLiveTransactionsQuerySchema = z.object({
+  page: quickBooksHubPageSchema,
+  pageSize: quickBooksHubPageSizeSchema,
+  search: z.string().trim().optional(),
+  sort: quickBooksLiveSortSchema.optional().default('-date'),
+  startDate: quickBooksTaxDateSchema.optional(),
+  endDate: quickBooksTaxDateSchema.optional()
+});
+
+export const quickBooksLiveTransactionsResponseSchema =
+  quickBooksHubListResponseMetaSchema.extend({
+    type: quickBooksLiveTransactionTypeSchema,
+    items: z.array(quickBooksLiveTransactionListItemSchema)
+  });
+
+export const quickBooksTransactionDetailQuerySchema = z.object({
+  type: quickBooksLiveTransactionTypeSchema
+});
+
+export const quickBooksTransactionDetailSchema = z.object({
+  id: z.string().trim().min(1),
+  qbTxnId: z.string().trim().min(1),
+  type: quickBooksLiveTransactionTypeSchema,
+  txnDate: quickBooksTaxDateSchema.nullable(),
+  docNum: z.string().trim().nullable(),
+  payeeName: z.string().trim().nullable(),
+  memo: z.string().trim().nullable(),
+  amount: z.number().nullable(),
+  accountId: z.string().trim().nullable(),
+  accountName: z.string().trim().nullable(),
+  categoryAccountId: z.string().trim().nullable(),
+  categoryAccountName: z.string().trim().nullable(),
+  fromAccountId: z.string().trim().nullable(),
+  fromAccountName: z.string().trim().nullable(),
+  toAccountId: z.string().trim().nullable(),
+  toAccountName: z.string().trim().nullable(),
+  raw: z.record(z.unknown())
+});
+
+export const quickBooksWriteTxnTypeSchema = z.enum(['sales-receipt', 'invoice', 'payment']);
+
+export const quickBooksWriteStatusSchema = z.enum([
+  'open',
+  'closed',
+  'paid',
+  'applied',
+  'unapplied',
+  'unknown'
+]);
+
+export const quickBooksWriteSortSchema = z.enum([
+  'date',
+  '-date',
+  'totalAmount',
+  '-totalAmount',
+  'docNumber',
+  '-docNumber'
+]);
+
+export const quickBooksWriteLineSchema = z.object({
+  id: z.string().trim().nullable(),
+  detailType: z.string().trim().nullable(),
+  description: z.string().trim().nullable(),
+  amount: z.number(),
+  itemId: z.string().trim().nullable(),
+  itemName: z.string().trim().nullable(),
+  quantity: z.number().nullable(),
+  unitPrice: z.number().nullable(),
+  taxCodeId: z.string().trim().nullable(),
+  taxCodeName: z.string().trim().nullable(),
+  serviceDate: quickBooksTaxDateSchema.nullable()
+});
+
+export const quickBooksWriteLinkedTransactionSchema = z.object({
+  txnId: z.string().trim().min(1),
+  txnType: z.string().trim().min(1),
+  amount: z.number().nullable()
+});
+
+export const quickBooksWriteListQuerySchema = z.object({
+  page: quickBooksHubPageSchema,
+  pageSize: quickBooksHubPageSizeSchema,
+  search: z.string().trim().optional(),
+  sort: quickBooksWriteSortSchema.optional().default('-date'),
+  startDate: quickBooksTaxDateSchema.optional(),
+  endDate: quickBooksTaxDateSchema.optional(),
+  customerId: z.string().trim().optional()
+});
+
+export const quickBooksWriteListItemSchema = z.object({
+  id: z.string().trim().min(1),
+  qbTxnId: z.string().trim().min(1),
+  txnType: quickBooksWriteTxnTypeSchema,
+  txnDate: quickBooksTaxDateSchema.nullable(),
+  docNumber: z.string().trim().nullable(),
+  customerId: z.string().trim().nullable(),
+  customerName: z.string().trim().nullable(),
+  totalAmount: z.number().nullable(),
+  balanceAmount: z.number().nullable(),
+  currencyCode: z.string().trim().nullable(),
+  status: quickBooksWriteStatusSchema,
+  emailStatus: z.string().trim().nullable(),
+  memo: z.string().trim().nullable()
+});
+
+export const quickBooksWriteListResponseSchema = quickBooksHubListResponseMetaSchema.extend({
+  txnType: quickBooksWriteTxnTypeSchema,
+  items: z.array(quickBooksWriteListItemSchema)
+});
+
+export const quickBooksWriteDetailSchema = quickBooksWriteListItemSchema.extend({
+  syncToken: z.string().trim().nullable(),
+  dueDate: quickBooksTaxDateSchema.nullable(),
+  customerMemo: z.string().trim().nullable(),
+  customerEmail: z.string().trim().nullable(),
+  depositAccountId: z.string().trim().nullable(),
+  depositAccountName: z.string().trim().nullable(),
+  arAccountId: z.string().trim().nullable(),
+  arAccountName: z.string().trim().nullable(),
+  paymentMethodId: z.string().trim().nullable(),
+  paymentMethodName: z.string().trim().nullable(),
+  lines: z.array(quickBooksWriteLineSchema),
+  linkedTransactions: z.array(quickBooksWriteLinkedTransactionSchema),
+  raw: z.record(z.unknown())
+});
+
+export const quickBooksWriteSalesLineInputSchema = z.object({
+  description: z.string().trim().max(1000).optional(),
+  amount: z.number().positive(),
+  itemId: z.string().trim().min(1),
+  quantity: z.number().positive().optional(),
+  unitPrice: z.number().nonnegative().optional(),
+  taxCodeId: z.string().trim().min(1).optional(),
+  serviceDate: quickBooksTaxDateSchema.optional()
+});
+
+const quickBooksWriteCreateBaseSchema = z.object({
+  customerId: z.string().trim().min(1),
+  txnDate: quickBooksTaxDateSchema,
+  docNumber: z.string().trim().max(100).optional(),
+  memo: z.string().trim().max(1000).optional(),
+  customerMemo: z.string().trim().max(1000).optional(),
+  customerEmail: z.string().trim().email().optional()
+});
+
+export const quickBooksWriteSalesReceiptCreateInputSchema = quickBooksWriteCreateBaseSchema.extend(
+  {
+    txnType: z.literal('sales-receipt'),
+    depositAccountId: z.string().trim().min(1).optional(),
+    paymentMethodId: z.string().trim().min(1).optional(),
+    lines: z.array(quickBooksWriteSalesLineInputSchema).min(1)
+  }
+);
+
+export const quickBooksWriteInvoiceCreateInputSchema = quickBooksWriteCreateBaseSchema.extend({
+  txnType: z.literal('invoice'),
+  dueDate: quickBooksTaxDateSchema.optional(),
+  arAccountId: z.string().trim().min(1).optional(),
+  lines: z.array(quickBooksWriteSalesLineInputSchema).min(1)
+});
+
+export const quickBooksWritePaymentLinkInputSchema = z.object({
+  txnId: z.string().trim().min(1),
+  txnType: z.enum(['Invoice', 'CreditMemo']),
+  amount: z.number().positive()
+});
+
+export const quickBooksWritePaymentCreateInputSchema = quickBooksWriteCreateBaseSchema.extend({
+  txnType: z.literal('payment'),
+  totalAmount: z.number().positive(),
+  depositAccountId: z.string().trim().min(1).optional(),
+  paymentMethodId: z.string().trim().min(1).optional(),
+  linkedTransactions: z.array(quickBooksWritePaymentLinkInputSchema).default([])
+});
+
+export const quickBooksWriteCreateInputSchema = z.discriminatedUnion('txnType', [
+  quickBooksWriteSalesReceiptCreateInputSchema,
+  quickBooksWriteInvoiceCreateInputSchema,
+  quickBooksWritePaymentCreateInputSchema
+]);
+
+const quickBooksWriteUpdateBaseSchema = z.object({
+  syncToken: z.string().trim().min(1),
+  txnDate: quickBooksTaxDateSchema.optional(),
+  docNumber: z.string().trim().max(100).optional(),
+  memo: z.string().trim().max(1000).optional(),
+  customerMemo: z.string().trim().max(1000).optional(),
+  customerEmail: z.string().trim().email().optional()
+});
+
+export const quickBooksWriteSalesReceiptUpdateInputSchema = quickBooksWriteUpdateBaseSchema.extend(
+  {
+    txnType: z.literal('sales-receipt'),
+    customerId: z.string().trim().min(1).optional(),
+    depositAccountId: z.string().trim().min(1).optional(),
+    paymentMethodId: z.string().trim().min(1).optional(),
+    lines: z.array(quickBooksWriteSalesLineInputSchema).min(1).optional()
+  }
+);
+
+export const quickBooksWriteInvoiceUpdateInputSchema = quickBooksWriteUpdateBaseSchema.extend({
+  txnType: z.literal('invoice'),
+  customerId: z.string().trim().min(1).optional(),
+  dueDate: quickBooksTaxDateSchema.optional(),
+  arAccountId: z.string().trim().min(1).optional(),
+  lines: z.array(quickBooksWriteSalesLineInputSchema).min(1).optional()
+});
+
+export const quickBooksWritePaymentUpdateInputSchema = quickBooksWriteUpdateBaseSchema.extend({
+  txnType: z.literal('payment'),
+  customerId: z.string().trim().min(1).optional(),
+  totalAmount: z.number().positive().optional(),
+  depositAccountId: z.string().trim().min(1).optional(),
+  paymentMethodId: z.string().trim().min(1).optional(),
+  linkedTransactions: z.array(quickBooksWritePaymentLinkInputSchema).optional()
+});
+
+export const quickBooksWriteUpdateInputSchema = z.discriminatedUnion('txnType', [
+  quickBooksWriteSalesReceiptUpdateInputSchema,
+  quickBooksWriteInvoiceUpdateInputSchema,
+  quickBooksWritePaymentUpdateInputSchema
+]);
+
+export type QuickBooksHubChartAccount = z.infer<typeof quickBooksHubChartAccountSchema>;
+export type QuickBooksHubChartOfAccountsQuery = z.infer<
+  typeof quickBooksHubChartOfAccountsQuerySchema
+>;
+export type QuickBooksHubChartOfAccountsResponse = z.infer<
+  typeof quickBooksHubChartOfAccountsResponseSchema
+>;
+export type QuickBooksHubEntity = z.infer<typeof quickBooksHubEntitySchema>;
+export type QuickBooksHubEntitiesQuery = z.infer<typeof quickBooksHubEntitiesQuerySchema>;
+export type QuickBooksHubEntitiesResponse = z.infer<typeof quickBooksHubEntitiesResponseSchema>;
+export type QuickBooksHubOperation = z.infer<typeof quickBooksHubOperationSchema>;
+export type QuickBooksHubOperationsQuery = z.infer<
+  typeof quickBooksHubOperationsQuerySchema
+>;
+export type QuickBooksHubOperationsResponse = z.infer<
+  typeof quickBooksHubOperationsResponseSchema
+>;
+
 export const quickBooksJournalAdjustmentResultSchema = z.object({
   created: z.boolean(),
   clientRequestId: z.string().trim().min(1),
@@ -636,6 +1070,60 @@ export type QuickBooksJournalAdjustmentInput = z.infer<typeof quickBooksJournalA
 export type QuickBooksJournalAdjustmentResult = z.infer<
   typeof quickBooksJournalAdjustmentResultSchema
 >;
+export type QuickBooksLiveTransactionType = z.infer<typeof quickBooksLiveTransactionTypeSchema>;
+export type QuickBooksAccountRegisterRow = z.infer<typeof quickBooksAccountRegisterRowSchema>;
+export type QuickBooksAccountRegisterQuery = z.infer<typeof quickBooksAccountRegisterQuerySchema>;
+export type QuickBooksAccountRegisterResponse = z.infer<
+  typeof quickBooksAccountRegisterResponseSchema
+>;
+export type QuickBooksLiveTransactionListItem = z.infer<
+  typeof quickBooksLiveTransactionListItemSchema
+>;
+export type QuickBooksLiveTransactionsQuery = z.infer<
+  typeof quickBooksLiveTransactionsQuerySchema
+>;
+export type QuickBooksLiveTransactionsResponse = z.infer<
+  typeof quickBooksLiveTransactionsResponseSchema
+>;
+export type QuickBooksTransactionDetailQuery = z.infer<
+  typeof quickBooksTransactionDetailQuerySchema
+>;
+export type QuickBooksTransactionDetail = z.infer<typeof quickBooksTransactionDetailSchema>;
+export type QuickBooksWriteTxnType = z.infer<typeof quickBooksWriteTxnTypeSchema>;
+export type QuickBooksWriteStatus = z.infer<typeof quickBooksWriteStatusSchema>;
+export type QuickBooksWriteSort = z.infer<typeof quickBooksWriteSortSchema>;
+export type QuickBooksWriteLine = z.infer<typeof quickBooksWriteLineSchema>;
+export type QuickBooksWriteLinkedTransaction = z.infer<
+  typeof quickBooksWriteLinkedTransactionSchema
+>;
+export type QuickBooksWriteListQuery = z.infer<typeof quickBooksWriteListQuerySchema>;
+export type QuickBooksWriteListItem = z.infer<typeof quickBooksWriteListItemSchema>;
+export type QuickBooksWriteListResponse = z.infer<typeof quickBooksWriteListResponseSchema>;
+export type QuickBooksWriteDetail = z.infer<typeof quickBooksWriteDetailSchema>;
+export type QuickBooksWriteSalesLineInput = z.infer<typeof quickBooksWriteSalesLineInputSchema>;
+export type QuickBooksWriteSalesReceiptCreateInput = z.infer<
+  typeof quickBooksWriteSalesReceiptCreateInputSchema
+>;
+export type QuickBooksWriteInvoiceCreateInput = z.infer<
+  typeof quickBooksWriteInvoiceCreateInputSchema
+>;
+export type QuickBooksWritePaymentLinkInput = z.infer<
+  typeof quickBooksWritePaymentLinkInputSchema
+>;
+export type QuickBooksWritePaymentCreateInput = z.infer<
+  typeof quickBooksWritePaymentCreateInputSchema
+>;
+export type QuickBooksWriteCreateInput = z.infer<typeof quickBooksWriteCreateInputSchema>;
+export type QuickBooksWriteSalesReceiptUpdateInput = z.infer<
+  typeof quickBooksWriteSalesReceiptUpdateInputSchema
+>;
+export type QuickBooksWriteInvoiceUpdateInput = z.infer<
+  typeof quickBooksWriteInvoiceUpdateInputSchema
+>;
+export type QuickBooksWritePaymentUpdateInput = z.infer<
+  typeof quickBooksWritePaymentUpdateInputSchema
+>;
+export type QuickBooksWriteUpdateInput = z.infer<typeof quickBooksWriteUpdateInputSchema>;
 export type AccountingObservabilitySummary = z.infer<
   typeof accountingObservabilitySummarySchema
 >;

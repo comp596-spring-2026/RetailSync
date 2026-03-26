@@ -6,6 +6,9 @@ import {
   requestQuickBooksApi,
   runQuickBooksReadQuery
 } from '../integrations/quickbooks';
+import { ChartOfAccountModel } from '../models/ChartOfAccount';
+import { LedgerEntryModel } from '../models/LedgerEntry';
+import { QuickBooksReferenceModel } from '../models/QuickBooksReference';
 
 export type QuickBooksTaxBasis = 'cash' | 'accrual';
 export type QuickBooksTaxReportKey =
@@ -134,6 +137,112 @@ export type QuickBooksJournalAdjustmentResult = {
   txnDate: string;
 };
 
+export type QuickBooksHubPage = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+export type QuickBooksHubChartOfAccountsResponse = QuickBooksHubPage & {
+  items: Array<{
+    id: string;
+    qbId: string | null;
+    name: string;
+    type: string | null;
+    detailType: string | null;
+    status: 'active' | 'system';
+    balance: number | null;
+  }>;
+};
+
+export type QuickBooksHubEntitiesResponse = QuickBooksHubPage & {
+  items: Array<{
+    id: string;
+    qbId: string;
+    entityType: 'customer' | 'vendor';
+    displayName: string;
+    email: string | null;
+    phone: string | null;
+    status: 'active' | 'inactive';
+    balance: number | null;
+  }>;
+};
+
+export type QuickBooksHubOperationsResponse = QuickBooksHubPage & {
+  items: Array<{
+    id: string;
+    date: string;
+    type: 'Expense' | 'Deposit' | 'Transfer' | 'Check' | 'debit' | 'credit' | null;
+    description: string;
+    payee: string | null;
+    amount: number;
+    status: 'not_posted' | 'posting' | 'posted' | 'failed';
+    qbId: string | null;
+    error: string | null;
+  }>;
+};
+
+export type QuickBooksAccountRegisterResponse = QuickBooksHubPage & {
+  accountId: string;
+  from: string;
+  to: string;
+  basis: QuickBooksTaxBasis;
+  items: Array<{
+    id: string;
+    accountId: string;
+    date: string | null;
+    txnType: string | null;
+    qbTxnId: string | null;
+    docNum: string | null;
+    name: string | null;
+    memo: string | null;
+    splitAccount: string | null;
+    amount: number | null;
+    debit: number | null;
+    credit: number | null;
+    balance: number | null;
+  }>;
+};
+
+export type QuickBooksLiveTransactionType = 'deposit' | 'check' | 'expense' | 'transfer';
+
+export type QuickBooksLiveTransactionsResponse = QuickBooksHubPage & {
+  type: QuickBooksLiveTransactionType;
+  items: Array<{
+    id: string;
+    qbTxnId: string;
+    type: QuickBooksLiveTransactionType;
+    txnDate: string;
+    docNum: string | null;
+    payeeName: string | null;
+    accountName: string | null;
+    amount: number | null;
+    memo: string | null;
+    status: 'posted' | 'unknown';
+  }>;
+};
+
+export type QuickBooksTransactionDetail = {
+  id: string;
+  qbTxnId: string;
+  type: QuickBooksLiveTransactionType;
+  txnDate: string | null;
+  docNum: string | null;
+  payeeName: string | null;
+  memo: string | null;
+  amount: number | null;
+  accountId: string | null;
+  accountName: string | null;
+  categoryAccountId: string | null;
+  categoryAccountName: string | null;
+  fromAccountId: string | null;
+  fromAccountName: string | null;
+  toAccountId: string | null;
+  toAccountName: string | null;
+  raw: Record<string, unknown>;
+};
+
 const reportKeyToEndpoint: Record<QuickBooksTaxReportKey, string> = {
   'profit-loss': 'ProfitAndLoss',
   'balance-sheet': 'BalanceSheet',
@@ -257,6 +366,41 @@ const parseDateFromLabel = (label: string): string | undefined => {
 
 const idempotencyTag = (clientRequestId: string) => `[retailsync:${clientRequestId}]`;
 
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const toPageMeta = (page: number, pageSize: number, total: number): QuickBooksHubPage => ({
+  page,
+  pageSize,
+  total,
+  totalPages: total === 0 ? 0 : Math.ceil(total / pageSize)
+});
+
+const isQuickBooksPermissionDeniedError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = message.toLowerCase();
+  return (
+    normalized.startsWith('quickbooks_api_failed:400:') &&
+    normalized.includes('permission denied')
+  );
+};
+
+const fetchOptionalOverviewReport = async (args: {
+  companyId: string;
+  reportKey: 'ar-aging' | 'ap-aging';
+  from: string;
+  to: string;
+  basis: QuickBooksTaxBasis;
+}): Promise<QuickBooksTaxReport | null> => {
+  try {
+    return await fetchQuickBooksTaxReport(args);
+  } catch (error) {
+    if (isQuickBooksPermissionDeniedError(error)) {
+      return null;
+    }
+    throw error;
+  }
+};
+
 export const fetchQuickBooksTaxReport = async (args: {
   companyId: string;
   reportKey: QuickBooksTaxReportKey;
@@ -330,14 +474,14 @@ export const fetchQuickBooksTaxOverview = async (args: {
       to: args.to,
       basis: args.basis
     }),
-    fetchQuickBooksTaxReport({
+    fetchOptionalOverviewReport({
       companyId: args.companyId,
       reportKey: 'ar-aging',
       from: args.from,
       to: args.to,
       basis: args.basis
     }),
-    fetchQuickBooksTaxReport({
+    fetchOptionalOverviewReport({
       companyId: args.companyId,
       reportKey: 'ap-aging',
       from: args.from,
@@ -355,8 +499,8 @@ export const fetchQuickBooksTaxOverview = async (args: {
       totalAssets: findLastAmountByLabel(balanceSheet.rows, ['total assets']),
       totalLiabilities: findLastAmountByLabel(balanceSheet.rows, ['total liabilities']),
       totalEquity: findLastAmountByLabel(balanceSheet.rows, ['total equity']),
-      arOpen: findLastAmountByLabel(arAging.rows, ['total']),
-      apOpen: findLastAmountByLabel(apAging.rows, ['total'])
+      arOpen: arAging ? findLastAmountByLabel(arAging.rows, ['total']) : null,
+      apOpen: apAging ? findLastAmountByLabel(apAging.rows, ['total']) : null
     }
   };
 };
@@ -379,6 +523,746 @@ export const listQuickBooksTaxChartOfAccounts = async (
       accountType: account.accountType,
       active: account.active
     }));
+};
+
+const readRawString = (
+  raw: Record<string, unknown> | null | undefined,
+  path: string[]
+): string | null => {
+  let current: unknown = raw;
+  for (const key of path) {
+    if (!current || typeof current !== 'object' || !(key in current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  if (typeof current !== 'string') {
+    return null;
+  }
+  const trimmed = current.trim();
+  return trimmed ? trimmed : null;
+};
+
+const readRawNumber = (
+  raw: Record<string, unknown> | null | undefined,
+  paths: string[][]
+): number | null => {
+  for (const path of paths) {
+    let current: unknown = raw;
+    let matched = true;
+    for (const key of path) {
+      if (!current || typeof current !== 'object' || !(key in current)) {
+        matched = false;
+        break;
+      }
+      current = (current as Record<string, unknown>)[key];
+    }
+    if (matched) {
+      const parsed = toNumber(current);
+      if (parsed != null) {
+        return parsed;
+      }
+    }
+  }
+  return null;
+};
+
+const readNested = (value: unknown, path: string[]): unknown => {
+  let current = value;
+  for (const key of path) {
+    if (!current || typeof current !== 'object' || !(key in current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+};
+
+const toNullableString = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
+const refValue = (value: unknown): string | null =>
+  toNullableString(readNested(value, ['value'])) ?? toNullableString(value);
+
+const refName = (value: unknown): string | null =>
+  toNullableString(readNested(value, ['name']));
+
+const quickBooksTxnQueryConfig: Record<
+  QuickBooksLiveTransactionType,
+  {
+    queryType: string;
+    detailType: string;
+    buildWhere: (args: { startDate?: string; endDate?: string }) => string[];
+  }
+> = {
+  deposit: {
+    queryType: 'Deposit',
+    detailType: 'Deposit',
+    buildWhere: ({ startDate, endDate }) => [
+      ...(startDate ? [`TxnDate >= '${qbEscape(startDate)}'`] : []),
+      ...(endDate ? [`TxnDate <= '${qbEscape(endDate)}'`] : [])
+    ]
+  },
+  transfer: {
+    queryType: 'Transfer',
+    detailType: 'Transfer',
+    buildWhere: ({ startDate, endDate }) => [
+      ...(startDate ? [`TxnDate >= '${qbEscape(startDate)}'`] : []),
+      ...(endDate ? [`TxnDate <= '${qbEscape(endDate)}'`] : [])
+    ]
+  },
+  check: {
+    queryType: 'Purchase',
+    detailType: 'Purchase',
+    buildWhere: ({ startDate, endDate }) => [
+      `PaymentType = 'Check'`,
+      ...(startDate ? [`TxnDate >= '${qbEscape(startDate)}'`] : []),
+      ...(endDate ? [`TxnDate <= '${qbEscape(endDate)}'`] : [])
+    ]
+  },
+  expense: {
+    queryType: 'Purchase',
+    detailType: 'Purchase',
+    buildWhere: ({ startDate, endDate }) => [
+      `PaymentType = 'Cash'`,
+      ...(startDate ? [`TxnDate >= '${qbEscape(startDate)}'`] : []),
+      ...(endDate ? [`TxnDate <= '${qbEscape(endDate)}'`] : [])
+    ]
+  }
+};
+
+const buildQuickBooksListQuery = (args: {
+  type: QuickBooksLiveTransactionType;
+  startDate?: string;
+  endDate?: string;
+  startPosition: number;
+  maxResults: number;
+}) => {
+  const config = quickBooksTxnQueryConfig[args.type];
+  const whereParts = config.buildWhere({ startDate: args.startDate, endDate: args.endDate });
+  const whereClause = whereParts.length > 0 ? ` where ${whereParts.join(' and ')}` : '';
+  return `select * from ${config.queryType}${whereClause} order by TxnDate desc startposition ${args.startPosition} maxresults ${args.maxResults}`;
+};
+
+const buildQuickBooksCountQuery = (args: {
+  type: QuickBooksLiveTransactionType;
+  startDate?: string;
+  endDate?: string;
+}) => {
+  const config = quickBooksTxnQueryConfig[args.type];
+  const whereParts = config.buildWhere({ startDate: args.startDate, endDate: args.endDate });
+  const whereClause = whereParts.length > 0 ? ` where ${whereParts.join(' and ')}` : '';
+  return `select count(*) from ${config.queryType}${whereClause}`;
+};
+
+const extractQueryRows = (payload: Record<string, unknown>, key: string) =>
+  toObjectArray((payload.QueryResponse as Record<string, unknown> | undefined)?.[key]);
+
+const extractQuickBooksCount = (payload: Record<string, unknown>) => {
+  const raw = (payload.QueryResponse as Record<string, unknown> | undefined)?.totalCount;
+  const count = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isFinite(count) ? count : 0;
+};
+
+const sortRows = <T>(
+  rows: T[],
+  sort: 'date' | '-date' | 'amount' | '-amount',
+  pickers: { date: (row: T) => string | null; amount: (row: T) => number | null }
+) => {
+  const factor = sort.startsWith('-') ? -1 : 1;
+  const field = sort.endsWith('amount') ? 'amount' : 'date';
+  return [...rows].sort((left, right) => {
+    if (field === 'amount') {
+      const leftValue = pickers.amount(left) ?? 0;
+      const rightValue = pickers.amount(right) ?? 0;
+      return (leftValue - rightValue) * factor;
+    }
+    const leftValue = pickers.date(left) ?? '';
+    const rightValue = pickers.date(right) ?? '';
+    return leftValue.localeCompare(rightValue) * factor;
+  });
+};
+
+const chartAccountSortMap: Record<string, Record<string, 1 | -1>> = {
+  name: { name: 1, _id: 1 },
+  '-name': { name: -1, _id: -1 },
+  type: { type: 1, name: 1, _id: 1 },
+  '-type': { type: -1, name: 1, _id: -1 },
+  status: { isSystem: 1, name: 1, _id: 1 },
+  '-status': { isSystem: -1, name: 1, _id: -1 },
+  updatedAt: { updatedAt: 1, _id: 1 },
+  '-updatedAt': { updatedAt: -1, _id: -1 }
+};
+
+const entitySortMap: Record<string, Record<string, 1 | -1>> = {
+  displayName: { displayName: 1, _id: 1 },
+  '-displayName': { displayName: -1, _id: -1 },
+  status: { active: 1, displayName: 1, _id: 1 },
+  '-status': { active: -1, displayName: 1, _id: -1 },
+  updatedAt: { updatedAt: 1, _id: 1 },
+  '-updatedAt': { updatedAt: -1, _id: -1 }
+};
+
+const operationSortMap: Record<string, Record<string, 1 | -1>> = {
+  date: { date: 1, createdAt: 1, _id: 1 },
+  '-date': { date: -1, createdAt: -1, _id: -1 },
+  amount: { amount: 1, date: -1, _id: 1 },
+  '-amount': { amount: -1, date: -1, _id: -1 },
+  status: { 'posting.status': 1, date: -1, _id: 1 },
+  '-status': { 'posting.status': -1, date: -1, _id: -1 },
+  updatedAt: { updatedAt: 1, _id: 1 },
+  '-updatedAt': { updatedAt: -1, _id: -1 }
+};
+
+export const listQuickBooksHubChartOfAccounts = async (args: {
+  companyId: string;
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort: 'name' | '-name' | 'type' | '-type' | 'status' | '-status' | 'updatedAt' | '-updatedAt';
+  type?: string;
+  status?: 'active' | 'system';
+}): Promise<QuickBooksHubChartOfAccountsResponse> => {
+  const filter: Record<string, unknown> = {
+    companyId: args.companyId
+  };
+
+  if (args.search) {
+    const regex = new RegExp(escapeRegex(args.search), 'i');
+    filter.$or = [{ name: regex }, { code: regex }, { qbAccountId: regex }];
+  }
+  if (args.type) {
+    filter.type = args.type;
+  }
+  if (args.status === 'system') {
+    filter.isSystem = true;
+  } else if (args.status === 'active') {
+    filter.isSystem = false;
+  }
+
+  const skip = (args.page - 1) * args.pageSize;
+  const [items, total] = await Promise.all([
+    ChartOfAccountModel.find(filter)
+      .sort(chartAccountSortMap[args.sort])
+      .skip(skip)
+      .limit(args.pageSize),
+    ChartOfAccountModel.countDocuments(filter)
+  ]);
+
+  return {
+    ...toPageMeta(args.page, args.pageSize, total),
+    items: items.map((account) => ({
+      id: account._id.toString(),
+      qbId: account.qbAccountId ?? null,
+      name: account.name,
+      type: account.type ?? null,
+      detailType: null,
+      status: account.isSystem ? 'system' : 'active',
+      balance: null
+    }))
+  };
+};
+
+export const listQuickBooksHubEntities = async (args: {
+  companyId: string;
+  entityType: 'customer' | 'vendor';
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort:
+    | 'displayName'
+    | '-displayName'
+    | 'status'
+    | '-status'
+    | 'balance'
+    | '-balance'
+    | 'updatedAt'
+    | '-updatedAt';
+  status?: 'active' | 'inactive';
+}): Promise<QuickBooksHubEntitiesResponse> => {
+  const filter: Record<string, unknown> = {
+    companyId: args.companyId,
+    entityType: args.entityType
+  };
+
+  if (args.search) {
+    const regex = new RegExp(escapeRegex(args.search), 'i');
+    filter.$or = [{ displayName: regex }, { qbId: regex }];
+  }
+  if (args.status === 'active') {
+    filter.active = true;
+  } else if (args.status === 'inactive') {
+    filter.active = false;
+  }
+
+  const skip = (args.page - 1) * args.pageSize;
+
+  if (args.sort === 'balance' || args.sort === '-balance') {
+    const balanceOrder = args.sort === 'balance' ? 1 : -1;
+    const balanceExpr = {
+      $ifNull: [
+        '$raw.Balance',
+        { $ifNull: ['$raw.OpenBalance', { $ifNull: ['$raw.CurrentBalance', null] }] }
+      ]
+    };
+
+    const [items, totalRows] = await Promise.all([
+      QuickBooksReferenceModel.aggregate([
+        { $match: filter },
+        {
+          $addFields: {
+            balanceSort: {
+              $convert: {
+                input: balanceExpr,
+                to: 'double',
+                onError: null,
+                onNull: null
+              }
+            }
+          }
+        },
+        { $sort: { balanceSort: balanceOrder, displayName: 1, _id: 1 } },
+        { $skip: skip },
+        { $limit: args.pageSize }
+      ]),
+      QuickBooksReferenceModel.countDocuments(filter)
+    ]);
+
+    return {
+      ...toPageMeta(args.page, args.pageSize, totalRows),
+      items: items.map((entity: any) => ({
+        id: String(entity._id),
+        qbId: String(entity.qbId),
+        entityType: entity.entityType,
+        displayName: String(entity.displayName),
+        email:
+          readRawString(entity.raw, ['PrimaryEmailAddr', 'Address']) ??
+          readRawString(entity.raw, ['BillEmail', 'Address']),
+        phone:
+          readRawString(entity.raw, ['PrimaryPhone', 'FreeFormNumber']) ??
+          readRawString(entity.raw, ['Mobile', 'FreeFormNumber']) ??
+          readRawString(entity.raw, ['MobilePhone', 'FreeFormNumber']),
+        status: entity.active === false ? 'inactive' : 'active',
+        balance: readRawNumber(entity.raw, [
+          ['Balance'],
+          ['OpenBalance'],
+          ['CurrentBalance']
+        ])
+      }))
+    };
+  }
+
+  const [items, total] = await Promise.all([
+    QuickBooksReferenceModel.find(filter)
+      .sort(entitySortMap[args.sort])
+      .skip(skip)
+      .limit(args.pageSize),
+    QuickBooksReferenceModel.countDocuments(filter)
+  ]);
+
+  return {
+    ...toPageMeta(args.page, args.pageSize, total),
+    items: items.map((entity) => ({
+      id: entity._id.toString(),
+      qbId: entity.qbId,
+      entityType: args.entityType,
+      displayName: entity.displayName,
+      email:
+        readRawString(entity.raw as Record<string, unknown> | undefined, [
+          'PrimaryEmailAddr',
+          'Address'
+        ]) ??
+        readRawString(entity.raw as Record<string, unknown> | undefined, ['BillEmail', 'Address']),
+      phone:
+        readRawString(entity.raw as Record<string, unknown> | undefined, [
+          'PrimaryPhone',
+          'FreeFormNumber'
+        ]) ??
+        readRawString(entity.raw as Record<string, unknown> | undefined, ['Mobile', 'FreeFormNumber']) ??
+        readRawString(entity.raw as Record<string, unknown> | undefined, [
+          'MobilePhone',
+          'FreeFormNumber'
+        ]),
+      status: entity.active === false ? 'inactive' : 'active',
+      balance: readRawNumber(entity.raw as Record<string, unknown> | undefined, [
+        ['Balance'],
+        ['OpenBalance'],
+        ['CurrentBalance']
+      ])
+    }))
+  };
+};
+
+export const listQuickBooksHubOperations = async (args: {
+  companyId: string;
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort:
+    | 'date'
+    | '-date'
+    | 'amount'
+    | '-amount'
+    | 'status'
+    | '-status'
+    | 'updatedAt'
+    | '-updatedAt';
+  status?: 'not_posted' | 'posting' | 'posted' | 'failed';
+  type?: 'Expense' | 'Deposit' | 'Transfer' | 'Check' | 'debit' | 'credit';
+  startDate?: string;
+  endDate?: string;
+}): Promise<QuickBooksHubOperationsResponse> => {
+  const filter: Record<string, unknown> = {
+    companyId: args.companyId
+  };
+
+  if (args.status) {
+    filter['posting.status'] = args.status;
+  }
+  if (args.type) {
+    if (args.type === 'debit' || args.type === 'credit') {
+      filter.type = args.type;
+    } else {
+      filter['proposal.qbTxnType'] = args.type;
+    }
+  }
+  if (args.startDate || args.endDate) {
+    filter.date = {
+      ...(args.startDate ? { $gte: args.startDate } : {}),
+      ...(args.endDate ? { $lte: args.endDate } : {})
+    };
+  }
+  if (args.search) {
+    const regex = new RegExp(escapeRegex(args.search), 'i');
+    filter.$or = [
+      { description: regex },
+      { merchant: regex },
+      { 'proposal.payeeName': regex },
+      { 'proposal.memo': regex },
+      { 'posting.qbTxnId': regex }
+    ];
+  }
+
+  const skip = (args.page - 1) * args.pageSize;
+  const [items, total] = await Promise.all([
+    LedgerEntryModel.find(filter)
+      .sort(operationSortMap[args.sort])
+      .skip(skip)
+      .limit(args.pageSize),
+    LedgerEntryModel.countDocuments(filter)
+  ]);
+
+  return {
+    ...toPageMeta(args.page, args.pageSize, total),
+    items: items.map((entry) => ({
+      id: entry._id.toString(),
+      date: entry.date,
+      type: (entry.proposal?.qbTxnType ?? entry.type ?? null) as
+        | 'Expense'
+        | 'Deposit'
+        | 'Transfer'
+        | 'Check'
+        | 'debit'
+        | 'credit'
+        | null,
+      description: entry.description,
+      payee: entry.proposal?.payeeName ?? entry.merchant ?? null,
+      amount: Number(entry.amount),
+      status: (entry.posting?.status ?? 'not_posted') as
+        | 'not_posted'
+        | 'posting'
+        | 'posted'
+        | 'failed',
+      qbId: entry.posting?.qbTxnId ?? null,
+      error: entry.posting?.error ?? null
+    }))
+  };
+};
+
+const parseRegisterRows = (
+  accountId: string,
+  rows: unknown,
+  sort: 'date' | '-date' | 'amount' | '-amount'
+) => {
+  const parsed: QuickBooksAccountRegisterResponse['items'] = [];
+  const visit = (items: unknown, path: string[] = []) => {
+    for (const row of toObjectArray(items)) {
+      const header = readColData(row.Header);
+      const headerLabel = readLabelFromColData(header);
+      const nextPath = headerLabel ? [...path, headerLabel] : path;
+      const colData = readColData(row);
+
+      if (colData.length > 0) {
+        const txnDate = toNullableString(colData[0]?.value) ?? null;
+        const txnType = toNullableString(colData[1]?.value) ?? null;
+        const docNum = toNullableString(colData[2]?.value) ?? null;
+        const name = toNullableString(colData[3]?.value) ?? null;
+        const memo = toNullableString(colData[4]?.value) ?? null;
+        const splitAccount = toNullableString(colData[5]?.value) ?? null;
+        const debit = toNumber(colData[6]?.value);
+        const credit = toNumber(colData[7]?.value);
+        const balance = toNumber(colData[8]?.value);
+        const txnId =
+          toNullableString((row as Record<string, unknown>).Id) ??
+          [txnDate ?? '', txnType ?? '', docNum ?? '', memo ?? '', String(parsed.length + 1)].join(':');
+
+        if (txnDate || txnType || docNum || memo || name || debit != null || credit != null) {
+          parsed.push({
+            id: txnId,
+            accountId,
+            date: txnDate,
+            txnType,
+            qbTxnId: txnId,
+            docNum,
+            name,
+            memo,
+            splitAccount: splitAccount ?? (nextPath.length > 0 ? nextPath[nextPath.length - 1] : null),
+            amount: debit != null ? debit : credit != null ? -credit : null,
+            debit,
+            credit,
+            balance
+          });
+        }
+      }
+
+      const childRows = (row.Rows as Record<string, unknown> | undefined)?.Row;
+      if (childRows) {
+        visit(childRows, nextPath);
+      }
+    }
+  };
+
+  visit(rows);
+
+  return sortRows(parsed, sort, {
+    date: (row) => row.date,
+    amount: (row) => row.amount
+  });
+};
+
+export const getQuickBooksAccountRegister = async (args: {
+  companyId: string;
+  accountId: string;
+  from: string;
+  to: string;
+  basis: QuickBooksTaxBasis;
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort: 'date' | '-date' | 'amount' | '-amount';
+}): Promise<QuickBooksAccountRegisterResponse> => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  const raw = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'GET',
+    path: `/v3/company/${secret.realmId}/reports/GeneralLedger`,
+    query: {
+      start_date: args.from,
+      end_date: args.to,
+      accounting_method: toAccountingMethod(args.basis),
+      account: args.accountId,
+      minorversion: 75
+    }
+  })) as Record<string, unknown>;
+
+  let rows = parseRegisterRows(
+    args.accountId,
+    (raw.Rows as Record<string, unknown> | undefined)?.Row ?? [],
+    args.sort
+  );
+
+  if (args.search) {
+    const regex = new RegExp(escapeRegex(args.search), 'i');
+    rows = rows.filter((row) =>
+      [row.docNum, row.name, row.memo, row.splitAccount, row.txnType].some((value) =>
+        value ? regex.test(value) : false
+      )
+    );
+  }
+
+  const total = rows.length;
+  const skip = (args.page - 1) * args.pageSize;
+
+  return {
+    ...toPageMeta(args.page, args.pageSize, total),
+    accountId: args.accountId,
+    from: args.from,
+    to: args.to,
+    basis: args.basis,
+    items: rows.slice(skip, skip + args.pageSize)
+  };
+};
+
+const mapLiveTransactionListItem = (
+  type: QuickBooksLiveTransactionType,
+  row: Record<string, unknown>
+): QuickBooksLiveTransactionsResponse['items'][number] | null => {
+  const qbTxnId = toNullableString(row.Id);
+  const txnDate = toNullableString(row.TxnDate);
+  if (!qbTxnId || !txnDate) {
+    return null;
+  }
+
+  const payeeName =
+    refName(row.EntityRef) ??
+    refName(row.CustomerRef) ??
+    refName(row.VendorRef) ??
+    toNullableString(row.PayeeName);
+
+  const accountName =
+    refName(row.AccountRef) ??
+    refName(row.DepositToAccountRef) ??
+    refName(row.FromAccountRef) ??
+    refName(row.ToAccountRef);
+
+  return {
+    id: qbTxnId,
+    qbTxnId,
+    type,
+    txnDate,
+    docNum: toNullableString(row.DocNumber) ?? toNullableString(row.DocNum),
+    payeeName,
+    accountName,
+    amount:
+      toNumber(row.TotalAmt) ??
+      toNumber(row.Amount) ??
+      toNumber((toObjectArray(row.Line)[0] as Record<string, unknown> | undefined)?.Amount),
+    memo: toNullableString(row.PrivateNote),
+    status: 'posted'
+  };
+};
+
+export const listQuickBooksLiveTransactions = async (args: {
+  companyId: string;
+  type: QuickBooksLiveTransactionType;
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort: 'date' | '-date' | 'amount' | '-amount';
+  startDate?: string;
+  endDate?: string;
+}): Promise<QuickBooksLiveTransactionsResponse> => {
+  const query = buildQuickBooksListQuery({
+    type: args.type,
+    startDate: args.startDate,
+    endDate: args.endDate,
+    startPosition: 1,
+    maxResults: 1000
+  });
+  const [payload, countPayload] = await Promise.all([
+    runQuickBooksReadQuery(args.companyId, query),
+    runQuickBooksReadQuery(
+      args.companyId,
+      buildQuickBooksCountQuery({
+        type: args.type,
+        startDate: args.startDate,
+        endDate: args.endDate
+      })
+    )
+  ]);
+
+  const config = quickBooksTxnQueryConfig[args.type];
+  let items = extractQueryRows(payload, config.queryType)
+    .map((row) => mapLiveTransactionListItem(args.type, row))
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+  if (args.search) {
+    const regex = new RegExp(escapeRegex(args.search), 'i');
+    items = items.filter((row) =>
+      [row.docNum, row.payeeName, row.accountName, row.memo].some((value) =>
+        value ? regex.test(value) : false
+      )
+    );
+  }
+
+  items = sortRows(items, args.sort, {
+    date: (row) => row.txnDate,
+    amount: (row) => row.amount
+  });
+
+  const total = args.search ? items.length : extractQuickBooksCount(countPayload);
+  const skip = (args.page - 1) * args.pageSize;
+
+  return {
+    ...toPageMeta(args.page, args.pageSize, total),
+    type: args.type,
+    items: items.slice(skip, skip + args.pageSize)
+  };
+};
+
+export const getQuickBooksTransactionDetail = async (args: {
+  companyId: string;
+  qbTxnId: string;
+  type: QuickBooksLiveTransactionType;
+}): Promise<QuickBooksTransactionDetail> => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  const config = quickBooksTxnQueryConfig[args.type];
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'GET',
+    path: `/v3/company/${secret.realmId}/${config.detailType.toLowerCase()}/${args.qbTxnId}`,
+    query: {
+      minorversion: 75
+    }
+  })) as Record<string, unknown>;
+
+  const raw = (payload[config.detailType] as Record<string, unknown> | undefined) ?? payload;
+  const firstLine = toObjectArray(raw.Line)[0];
+  const expenseDetail =
+    (readNested(firstLine, ['AccountBasedExpenseLineDetail']) as Record<string, unknown> | null) ??
+    null;
+  const depositDetail =
+    (readNested(firstLine, ['DepositLineDetail']) as Record<string, unknown> | null) ?? null;
+
+  return {
+    id: args.qbTxnId,
+    qbTxnId: args.qbTxnId,
+    type: args.type,
+    txnDate: toNullableString(raw.TxnDate),
+    docNum: toNullableString(raw.DocNumber) ?? toNullableString(raw.DocNum),
+    payeeName:
+      refName(raw.EntityRef) ??
+      refName(raw.CustomerRef) ??
+      refName(raw.VendorRef) ??
+      null,
+    memo: toNullableString(raw.PrivateNote),
+    amount:
+      toNumber(raw.TotalAmt) ??
+      toNumber(raw.Amount) ??
+      toNumber((firstLine as Record<string, unknown> | undefined)?.Amount),
+    accountId:
+      refValue(raw.AccountRef) ??
+      refValue(raw.DepositToAccountRef) ??
+      refValue(raw.FromAccountRef) ??
+      null,
+    accountName:
+      refName(raw.AccountRef) ??
+      refName(raw.DepositToAccountRef) ??
+      refName(raw.FromAccountRef) ??
+      null,
+    categoryAccountId:
+      refValue(expenseDetail?.AccountRef) ?? refValue(depositDetail?.AccountRef) ?? null,
+    categoryAccountName:
+      refName(expenseDetail?.AccountRef) ?? refName(depositDetail?.AccountRef) ?? null,
+    fromAccountId: refValue(raw.FromAccountRef),
+    fromAccountName: refName(raw.FromAccountRef),
+    toAccountId: refValue(raw.ToAccountRef),
+    toAccountName: refName(raw.ToAccountRef),
+    raw
+  };
 };
 
 export const listQuickBooksTaxLedger = async (args: {

@@ -1,5 +1,17 @@
 export type QuickBooksEnvironment = 'sandbox' | 'production';
 
+export type QuickBooksSecretHealth = {
+  status: 'healthy' | 'degraded';
+  checkedAt: number;
+  refreshedAt: number | null;
+  accessTokenExpiresAt: number | null;
+  accessTokenExpiresInSec: number | null;
+  refreshTokenExpiresAt: number | null;
+  refreshTokenExpiresInSec: number | null;
+  lastRefreshError: string | null;
+  lastRefreshErrorAt: number | null;
+};
+
 export type QuickBooksSecretPayload = {
   accessToken: string;
   refreshToken: string;
@@ -12,6 +24,7 @@ export type QuickBooksSecretPayload = {
   expiresAt: number | null;
   refreshExpiresAt: number | null;
   updatedAt: number;
+  health?: QuickBooksSecretHealth | null;
 };
 
 export type QuickBooksTokenApiResponse = {
@@ -33,6 +46,22 @@ export type QuickBooksApiEnvelope = {
   };
 };
 
+export type QuickBooksQueryParams = Record<string, string | number | undefined | null>;
+
+export type QuickBooksReportName = 'GeneralLedger';
+
+export type QuickBooksTransactionType =
+  | 'Purchase'
+  | 'Deposit'
+  | 'Transfer'
+  | 'JournalEntry'
+  | 'SalesReceipt'
+  | 'Payment'
+  | 'Check'
+  | 'Invoice'
+  | 'Bill'
+  | 'CreditMemo';
+
 export type QuickBooksAccountRecord = {
   id: string;
   name: string;
@@ -52,9 +81,87 @@ export type QuickBooksEntityRecord = {
 
 export type QuickBooksReadQueryResult = Record<string, unknown>;
 
+export type QuickBooksAccountRegisterQuery = {
+  accountId?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+  query?: QuickBooksQueryParams;
+};
+
+export type QuickBooksTransactionDetailRequest = {
+  txnType: QuickBooksTransactionType;
+  txnId: string;
+};
+
+export type QuickBooksTransactionDetailResult = {
+  txnType: QuickBooksTransactionType;
+  txnId: string;
+  row: Record<string, unknown> | null;
+  payload: QuickBooksReadQueryResult;
+};
+
 export type QuickBooksJournalLineInput = {
   accountId: string;
   amount: number;
   postingType: 'Debit' | 'Credit';
   description?: string;
+};
+
+export type QuickBooksTxnCreateResult = {
+  txnId: string;
+  txnDate: string;
+};
+
+export type QuickBooksPrivateNoteInput = {
+  memo?: string;
+  privateNoteTag?: string;
+};
+
+export type QuickBooksSalesItemLineInput = {
+  amount: number;
+  itemRefId: string;
+  description?: string;
+  quantity?: number;
+  unitPrice?: number;
+  serviceDate?: string;
+  taxCodeRefId?: string;
+  classRefId?: string;
+};
+
+export type QuickBooksPaymentLinkedTxnInput = {
+  txnId: string;
+  txnType?: 'Invoice' | 'SalesReceipt';
+  amount?: number;
+};
+
+export type QuickBooksSalesReceiptCreateInput = QuickBooksPrivateNoteInput & {
+  companyId: string;
+  txnDate: string;
+  customerRefId?: string;
+  depositToAccountId?: string;
+  docNumber?: string;
+  lines: QuickBooksSalesItemLineInput[];
+};
+
+export type QuickBooksInvoiceCreateInput = QuickBooksPrivateNoteInput & {
+  companyId: string;
+  txnDate: string;
+  customerRefId: string;
+  dueDate?: string;
+  docNumber?: string;
+  customerMemo?: string;
+  lines: QuickBooksSalesItemLineInput[];
+};
+
+export type QuickBooksPaymentCreateInput = QuickBooksPrivateNoteInput & {
+  companyId: string;
+  txnDate: string;
+  amount: number;
+  customerRefId: string;
+  depositToAccountId?: string;
+  paymentMethodRefId?: string;
+  docNumber?: string;
+  linkedTxns?: QuickBooksPaymentLinkedTxnInput[];
 };

@@ -2,10 +2,15 @@ import {
   AccountingObservabilityDebug,
   AccountingObservabilitySummary,
   AccountingJobType,
+  QuickBooksAccountRegisterQuery,
+  QuickBooksAccountRegisterResponse,
   BankStatementListItem,
   BankStatementStatus,
   CreateBankStatementInput,
   DetectStatementMonthResponse,
+  QuickBooksLiveTransactionType,
+  QuickBooksLiveTransactionsQuery,
+  QuickBooksLiveTransactionsResponse,
   QuickBooksJournalAdjustmentInput,
   QuickBooksJournalAdjustmentResult,
   QuickBooksRecoverPaymentInput,
@@ -20,12 +25,34 @@ import {
   QuickBooksTaxReport,
   QuickBooksTaxReportKey,
   QuickBooksTaxWindowQuery,
+  QuickBooksTransactionDetail,
   QuickBooksSettings,
+  QuickBooksWriteCreateInput,
+  QuickBooksWriteDetail,
+  QuickBooksWriteListQuery,
+  QuickBooksWriteListResponse,
+  QuickBooksWriteTxnType,
+  QuickBooksWriteUpdateInput,
   RequestStatementUploadUrlInput
 } from '@retailsync/shared';
 import { api } from '../../../app/api/client';
+import type {
+  QuickBooksHubChartOfAccountsParams,
+  QuickBooksHubChartOfAccountsPayload,
+  QuickBooksHubEntitiesParams,
+  QuickBooksHubEntitiesPayload,
+  QuickBooksHubEntityType,
+  QuickBooksHubOperationsParams,
+  QuickBooksHubOperationsPayload
+} from '../types/quickbooksHub';
 
 export class AccountingApi {
+  private listQuickBooksHub<TResponse>(path: string, params?: Record<string, unknown>) {
+    return api.get<{
+      data: TResponse;
+    }>(path, { params });
+  }
+
   listStatements(params: ListBankStatementsQuery = {}) {
     return api.get<{
       data: {
@@ -201,6 +228,78 @@ export class AccountingApi {
 
   postApprovedToQuickbooks() {
     return api.post('/integrations/quickbooks/sync/post-approved');
+  }
+
+  getQuickbooksHubChartOfAccounts(params?: QuickBooksHubChartOfAccountsParams) {
+    return this.listQuickBooksHub<QuickBooksHubChartOfAccountsPayload>(
+      '/integrations/quickbooks/hub/chart-of-accounts',
+      params
+    );
+  }
+
+  getQuickbooksHubEntities(entityType: QuickBooksHubEntityType, params?: Omit<QuickBooksHubEntitiesParams, 'entityType'>) {
+    return this.listQuickBooksHub<QuickBooksHubEntitiesPayload>('/integrations/quickbooks/hub/entities', {
+      ...params,
+      entityType
+    });
+  }
+
+  getQuickbooksHubOperations(params?: QuickBooksHubOperationsParams) {
+    return this.listQuickBooksHub<QuickBooksHubOperationsPayload>(
+      '/integrations/quickbooks/hub/operations',
+      params
+    );
+  }
+
+  getQuickbooksAccountRegister(accountId: string, params: QuickBooksAccountRegisterQuery) {
+    return api.get<{
+      data: QuickBooksAccountRegisterResponse;
+    }>(`/integrations/quickbooks/live/registers/${accountId}`, { params });
+  }
+
+  getQuickbooksLiveTransactions(
+    type: QuickBooksLiveTransactionType,
+    params: QuickBooksLiveTransactionsQuery
+  ) {
+    return api.get<{
+      data: QuickBooksLiveTransactionsResponse;
+    }>(`/integrations/quickbooks/live/transactions/${type}`, { params });
+  }
+
+  getQuickbooksTransactionDetail(type: QuickBooksLiveTransactionType, qbTxnId: string) {
+    return api.get<{
+      data: QuickBooksTransactionDetail;
+    }>(`/integrations/quickbooks/live/transaction/${qbTxnId}`, {
+      params: { type }
+    });
+  }
+
+  getQuickbooksWriteTransactions(txnType: QuickBooksWriteTxnType, params: QuickBooksWriteListQuery) {
+    return api.get<{
+      data: QuickBooksWriteListResponse;
+    }>(`/integrations/quickbooks/write/${txnType}`, { params });
+  }
+
+  getQuickbooksWriteTransactionDetail(txnType: QuickBooksWriteTxnType, qbTxnId: string) {
+    return api.get<{
+      data: QuickBooksWriteDetail;
+    }>(`/integrations/quickbooks/write/${txnType}/${qbTxnId}`);
+  }
+
+  postQuickbooksWriteTransaction(txnType: QuickBooksWriteTxnType, payload: QuickBooksWriteCreateInput) {
+    return api.post<{
+      data: QuickBooksWriteDetail;
+    }>(`/integrations/quickbooks/write/${txnType}`, payload);
+  }
+
+  patchQuickbooksWriteTransaction(
+    txnType: QuickBooksWriteTxnType,
+    qbTxnId: string,
+    payload: QuickBooksWriteUpdateInput
+  ) {
+    return api.patch<{
+      data: QuickBooksWriteDetail;
+    }>(`/integrations/quickbooks/write/${txnType}/${qbTxnId}`, payload);
   }
 
   getQuickbooksTaxOverview(params?: QuickBooksTaxWindowQuery) {

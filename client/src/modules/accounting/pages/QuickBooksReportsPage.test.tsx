@@ -124,10 +124,15 @@ describe('QuickBooksReportsPage', () => {
         data: {
           ok: false,
           reason: 'not_connected',
+          connected: false,
+          degraded: false,
+          status: 'not_connected',
+          needsReconnect: false,
           environment: 'sandbox',
           realmId: null,
           companyName: null,
-          expiresInSec: null
+          expiresInSec: null,
+          health: null
         }
       }
     });
@@ -172,11 +177,26 @@ describe('QuickBooksReportsPage', () => {
       data: {
         data: {
           ok: false,
-          reason: 'quickbooks_refresh_token_missing',
+          reason: null,
+          connected: true,
+          degraded: true,
+          status: 'degraded',
+          needsReconnect: false,
           environment: 'sandbox',
           realmId: 'realm-1',
           companyName: 'RetailSync QB',
-          expiresInSec: null
+          expiresInSec: null,
+          health: {
+            status: 'degraded',
+            checkedAt: '2026-03-10T00:00:00.000Z',
+            refreshedAt: '2026-03-10T00:00:00.000Z',
+            accessTokenExpiresAt: null,
+            accessTokenExpiresInSec: null,
+            refreshTokenExpiresAt: null,
+            refreshTokenExpiresInSec: null,
+            lastRefreshError: 'Recent token refresh failed',
+            lastRefreshErrorAt: '2026-03-10T00:00:00.000Z'
+          }
         }
       }
     });
@@ -197,8 +217,6 @@ describe('QuickBooksReportsPage', () => {
     });
     expect(screen.queryByText('QuickBooks Home Redirect')).not.toBeInTheDocument();
     expect(screen.getByText('QuickBooks Reports')).toBeInTheDocument();
-    expect(
-      screen.getByText('QuickBooks connection needs attention: quickbooks refresh token missing.')
-    ).toBeInTheDocument();
+    expect(screen.getByText('QuickBooks is connected but degraded: Recent token refresh failed.')).toBeInTheDocument();
   });
 });

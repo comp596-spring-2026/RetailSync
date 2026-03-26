@@ -1,7 +1,6 @@
 import jwt from 'jsonwebtoken';
 import type { Request, Response } from 'express';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setupTestEnv } from './test/testUtils';
 
 const {
   getOrCreateSettingsMock,
@@ -143,6 +142,7 @@ describe('quickbooksController oauth flow', () => {
   ) => Promise<unknown>;
   let quickBooksCallback: (req: Request, res: Response) => Promise<unknown>;
   let disconnectQuickBooks: (req: Request, res: Response) => Promise<unknown>;
+  let getQuickBooksOAuthStatus: (req: Request, res: Response) => Promise<unknown>;
   let quickBooksReadQuery: (req: Request, res: Response) => Promise<unknown>;
   let originalNodeEnv: string;
   let originalClientUrl: string;
@@ -166,9 +166,13 @@ describe('quickbooksController oauth flow', () => {
     );
 
   beforeAll(async () => {
-    setupTestEnv();
+    process.env.PORT = process.env.PORT ?? '4000';
+    process.env.MONGO_URI = process.env.MONGO_URI ?? 'mongodb://127.0.0.1:27017/retailsync-test';
+    process.env.CLIENT_URL = process.env.CLIENT_URL ?? 'http://localhost:5173';
+    process.env.NODE_ENV = 'test';
     process.env.ENCRYPTION_KEY =
-      process.env.ENCRYPTION_KEY ?? Buffer.from('12345678901234567890123456789012').toString('base64');
+      process.env.ENCRYPTION_KEY ??
+      Buffer.from('12345678901234567890123456789012').toString('base64');
     process.env.QUICKBOOKS_CLIENT_ID = process.env.QUICKBOOKS_CLIENT_ID ?? 'qb-client-id';
     process.env.QUICKBOOKS_CLIENT_SECRET =
       process.env.QUICKBOOKS_CLIENT_SECRET ?? 'qb-client-secret';
@@ -176,6 +180,7 @@ describe('quickbooksController oauth flow', () => {
       process.env.QUICKBOOKS_INTEGRATION_REDIRECT_URI ??
       'http://localhost:4000/api/integrations/quickbooks/callback';
 
+    vi.resetModules();
     const envModule = await import('./config/env');
     env = envModule.env;
     originalNodeEnv = env.nodeEnv;
@@ -185,6 +190,7 @@ describe('quickbooksController oauth flow', () => {
     createQuickBooksConnectUrlResponse = controller.createQuickBooksConnectUrlResponse;
     quickBooksCallback = controller.quickBooksCallback;
     disconnectQuickBooks = controller.disconnectQuickBooks;
+    getQuickBooksOAuthStatus = controller.getQuickBooksOAuthStatus;
     quickBooksReadQuery = controller.quickBooksReadQuery;
   });
 
@@ -388,6 +394,147 @@ describe('quickbooksController oauth flow', () => {
           environment: 'production',
           realmId: null,
           companyName: null
+        })
+      })
+    );
+  });
+
+  it('returns additive degraded health metadata when quickbooks remains connected', async () => {
+    const now = Date.now();
+    const settings = createSettingsDoc();
+    settings.quickbooks.connected = true;
+    settings.quickbooks.environment = 'sandbox';
+    settings.quickbooks.realmId = 'realm-1';
+    settings.quickbooks.companyName = 'RetailSync QB';
+
+    getOrCreateSettingsMock.mockResolvedValue(settings);
+    ensureFreshQuickBooksSecretMock.mockResolvedValue({
+      accessToken: 'access-token-1',
+      refreshToken: 'refresh-token-1',
+      tokenType: 'Bearer',
+      scope: 'com.intuit.quickbooks.accounting',
+      idToken: null,
+      realmId: 'realm-1',
+      environment: 'sandbox',
+      companyName: 'RetailSync QB',
+      expiresAt: now + 3600 * 1000,
+      refreshExpiresAt: now + 2 * 24 * 60 * 60 * 1000,
+      updatedAt: now - 60_000,
+      health: {
+        status: 'degraded',
+        checkedAt: now,
+        refreshedAt: now - 60_000,
+        accessTokenExpiresAt: now + 3600 * 1000,
+        accessTokenExpiresInSec: 3600,
+        refreshTokenExpiresAt: now + 2 * 24 * 60 * 60 * 1000,
+        refreshTokenExpiresInSec: 2 * 24 * 60 * 60,
+        lastRefreshError: 'quickbooks_token_refresh_failed:invalid_grant',
+        lastRefreshErrorAt: now - 30_000
+      }
+    });
+
+    const { res, status, json } = createResponse();
+    const req = {
+      companyId: 'company-1',
+      user: {
+        id: 'user-1'
+      }
+    } as unknown as Request;
+
+    await getQuickBooksOAuthStatus(req, res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: expect.objectContaining({
+          ok: true,
+          reason: null,
+          connected: true,
+          degraded: true,
+          status: 'degraded',
+          needsReconnect: false,
+          environment: 'sandbox',
+          realmId: 'realm-1',
+          companyName: 'RetailSync QB',
+          health: expect.objectContaining({
+            status: 'degraded',
+            accessTokenExpiresInSec: 3600,
+            refreshTokenExpiresInSec: 2 * 24 * 60 * 60,
+            lastRefreshError: 'quickbooks_token_refresh_failed:invalid_grant'
+          })
+        })
+      })
+    );
+  });
+
+  it('keeps connected context when token refresh fails during oauth status checks', async () => {
+    const now = Date.now();
+    const settings = createSettingsDoc();
+    settings.quickbooks.connected = true;
+    settings.quickbooks.environment = 'production';
+    settings.quickbooks.realmId = 'realm-prod-1';
+    settings.quickbooks.companyName = 'RetailSync Books';
+
+    getOrCreateSettingsMock.mockResolvedValue(settings);
+    ensureFreshQuickBooksSecretMock.mockRejectedValue(
+      new Error('quickbooks_token_refresh_failed:invalid_grant:refresh token revoked')
+    );
+    loadQuickBooksSecretMock.mockResolvedValue({
+      accessToken: 'stale-access-token',
+      refreshToken: 'refresh-token-1',
+      tokenType: 'Bearer',
+      scope: 'com.intuit.quickbooks.accounting',
+      idToken: null,
+      realmId: 'realm-prod-1',
+      environment: 'production',
+      companyName: 'RetailSync Books',
+      expiresAt: now - 1000,
+      refreshExpiresAt: now + 24 * 60 * 60 * 1000,
+      updatedAt: now - 5000,
+      health: {
+        status: 'degraded',
+        checkedAt: now,
+        refreshedAt: now - 10_000,
+        accessTokenExpiresAt: now - 1000,
+        accessTokenExpiresInSec: 0,
+        refreshTokenExpiresAt: now + 24 * 60 * 60 * 1000,
+        refreshTokenExpiresInSec: 24 * 60 * 60,
+        lastRefreshError: 'invalid_grant:refresh token revoked',
+        lastRefreshErrorAt: now - 1000
+      }
+    });
+
+    const { res, status, json } = createResponse();
+    const req = {
+      companyId: 'company-1',
+      user: {
+        id: 'user-1'
+      }
+    } as unknown as Request;
+
+    await getQuickBooksOAuthStatus(req, res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: expect.objectContaining({
+          ok: false,
+          reason: 'quickbooks_invalid_grant',
+          connected: true,
+          degraded: true,
+          status: 'degraded',
+          needsReconnect: true,
+          environment: 'production',
+          realmId: 'realm-prod-1',
+          companyName: 'RetailSync Books',
+          expiresInSec: 0,
+          health: expect.objectContaining({
+            status: 'degraded',
+            accessTokenExpiresInSec: 0,
+            lastRefreshError: 'invalid_grant:refresh token revoked'
+          })
         })
       })
     );

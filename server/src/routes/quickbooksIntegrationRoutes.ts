@@ -12,13 +12,23 @@ import {
   updateQuickBooksSettings
 } from '../controllers/quickbooksController';
 import {
+  getQuickBooksAccountRegisterByAccount,
+  getQuickBooksHubChartOfAccounts,
+  getQuickBooksHubEntities,
+  getQuickBooksHubOperations,
+  getQuickBooksLiveTransactionsByType,
+  getQuickBooksTransactionDetailById,
+  getQuickBooksWriteTransactionDetailById,
+  getQuickBooksWriteTransactionsByType,
   getQuickBooksTaxChartOfAccounts,
   getQuickBooksTaxLedger,
   getQuickBooksTaxOverview,
   getQuickBooksTaxPayments,
   getQuickBooksTaxReport,
+  patchQuickBooksWriteTransaction,
   postQuickBooksJournalAdjustment,
-  postQuickBooksRecoverPayment
+  postQuickBooksRecoverPayment,
+  postQuickBooksWriteTransaction
 } from '../controllers/quickbooksTaxController';
 import { requireAuth } from '../middleware/requireAuth';
 import { requirePermission } from '../middleware/requirePermission';
@@ -72,6 +82,66 @@ router.post(
   requireAuth,
   requirePermission('quickbooks', 'view'),
   quickBooksReadQuery
+);
+router.get(
+  '/live/registers/:accountId',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksAccountRegisterByAccount
+);
+router.get(
+  '/live/transactions/:type',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksLiveTransactionsByType
+);
+router.get(
+  '/live/transaction/:qbTxnId',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksTransactionDetailById
+);
+router.get(
+  '/write/:txnType',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksWriteTransactionsByType
+);
+router.get(
+  '/write/:txnType/:qbTxnId',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksWriteTransactionDetailById
+);
+router.post(
+  '/write/:txnType',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  postQuickBooksWriteTransaction
+);
+router.patch(
+  '/write/:txnType/:qbTxnId',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  patchQuickBooksWriteTransaction
+);
+router.get(
+  '/hub/chart-of-accounts',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksHubChartOfAccounts
+);
+router.get(
+  '/hub/entities',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksHubEntities
+);
+router.get(
+  '/hub/operations',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksHubOperations
 );
 router.get(
   '/tax/overview',
