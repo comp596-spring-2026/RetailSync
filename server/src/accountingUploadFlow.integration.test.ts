@@ -111,6 +111,7 @@ maybeDescribe('accounting upload flow with bundled PDF', () => {
       .expect(200);
 
     expect(detectResponse.body.data.statementMonth).toBe(expectedDetection.statementMonth);
+    expect(detectResponse.body.data.autoApply).toBe(expectedDetection.autoApply);
 
     const statementMonth =
       detectResponse.body.data.statementMonth ?? expectedDetection.statementMonth ?? '2025-12';
@@ -154,6 +155,9 @@ maybeDescribe('accounting upload flow with bundled PDF', () => {
     expect(['checks_queued', 'ready_for_review']).toContain(
       statusResponse.body.data.status
     );
+    expect(statusResponse.body.data.progress.phase).toBe(statusResponse.body.data.status);
+    expect(typeof statusResponse.body.data.progress.completedChecks).toBe('number');
+    expect(typeof statusResponse.body.data.progress.remainingChecks).toBe('number');
     expect(statusResponse.body.data.issues).toEqual([]);
 
     const detailResponse = await request(app)
@@ -163,6 +167,9 @@ maybeDescribe('accounting upload flow with bundled PDF', () => {
 
     expect(detailResponse.body.data.fileName).toBe('testStatmentPDF.pdf');
     expect(detailResponse.body.data.gcs.pdfPath).toBe(gcsPath);
+    expect(detailResponse.body.data.progress.phase).toBe(detailResponse.body.data.status);
+    expect(typeof detailResponse.body.data.progress.completedChecks).toBe('number');
+    expect(typeof detailResponse.body.data.progress.remainingChecks).toBe('number');
 
     const ocrTextPath = `${rootPrefix}/derived/ocr/text.txt`;
     const normalizedPath = `${rootPrefix}/derived/gemini/normalized.v1.json`;

@@ -33,6 +33,7 @@ describe('accountingPdfAnalysisService', () => {
     expect(result.statementMonth).toBe('2026-03');
     expect(result.source).toBe('pdf_text');
     expect(result.confidence).toBe('high');
+    expect(result.autoApply).toBe(true);
   });
 
   it('falls back to the filename when text has no usable month', () => {
@@ -45,6 +46,7 @@ describe('accountingPdfAnalysisService', () => {
 
     expect(result.statementMonth).toBe('2026-02');
     expect(result.source).toBe('filename');
+    expect(result.autoApply).toBe(false);
   });
 
   it('returns no month when nothing is detectable', () => {
@@ -58,6 +60,7 @@ describe('accountingPdfAnalysisService', () => {
     expect(result.statementMonth).toBeNull();
     expect(result.confidence).toBe('none');
     expect(result.source).toBe('unknown');
+    expect(result.autoApply).toBe(false);
   });
 
   it('normalizes extracted text to printable content', () => {
@@ -93,6 +96,7 @@ describe('accountingPdfAnalysisService', () => {
       expect(result.statementMonth).toBe('2025-12');
       expect(result.source).toBe('pdf_text');
       expect(result.evidence?.toLowerCase()).toContain('statement ending');
+      expect(result.autoApply).toBe(true);
       return;
     }
 

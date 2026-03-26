@@ -7,16 +7,20 @@ import {
 } from '@retailsync/shared';
 import { z } from 'zod';
 import { env } from '../config/env';
+import { getStorageClient } from '../integrations/google/storage.client';
 import { BankStatement } from '../models/BankStatement';
 import { ChartOfAccountModel } from '../models/ChartOfAccount';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { LedgerEntryModel } from '../models/LedgerEntry';
 import { RunModel } from '../models/Run';
+import { StatementCheckModel } from '../models/StatementCheck';
 import { fail, ok } from '../utils/apiResponse';
 
 const debugQuerySchema = z.object({
   statementId: z.string().trim().optional()
 });
+
+const storage = getStorageClient();
 
 const buildLogsUrl = (projectId: string, query: string) => {
   const encoded = encodeURIComponent(query);
@@ -89,6 +93,56 @@ const normalizeQuickBooks = (quickbooks: any) =>
         : null
   });
 
+const readTextObject = async (objectPath?: string | null) => {
+  if (!env.gcsBucketName || !objectPath) return null;
+  try {
+    const [buffer] = await storage.bucket(env.gcsBucketName).file(objectPath).download();
+    return buffer.toString('utf-8');
+  } catch {
+    return null;
+  }
+};
+
+const readGeminiProviderStatus = async (geminiPath?: string | null) => {
+  const raw = await readTextObject(geminiPath);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      providerStatus: ['healthy', 'degraded', 'unavailable'].includes(String(parsed.providerStatus))
+        ? String(parsed.providerStatus)
+        : 'unavailable',
+      source: ['gemini', 'fallback', 'hybrid'].includes(String(parsed.source))
+        ? String(parsed.source)
+        : 'fallback',
+      degradedReason: typeof parsed.degradedReason === 'string' ? parsed.degradedReason : null
+    };
+  } catch {
+    return null;
+  }
+};
+
+const buildStatementProgress = (statement: any) => {
+  const totalChecks = Number(statement.progress?.totalChecks ?? 0);
+  const checksQueued = Number(statement.progress?.checksQueued ?? 0);
+  const checksProcessing = Number(statement.progress?.checksProcessing ?? 0);
+  const checksReady = Number(statement.progress?.checksReady ?? 0);
+  const checksFailed = Number(statement.progress?.checksFailed ?? 0);
+  const completedChecks = checksReady + checksFailed;
+  const remainingChecks = Math.max(totalChecks - completedChecks, 0);
+
+  return {
+    phase: statement.progress?.phase ?? statement.status,
+    totalChecks,
+    checksQueued,
+    checksProcessing,
+    checksReady,
+    checksFailed,
+    completedChecks,
+    remainingChecks
+  };
+};
+
 export const getAccountingObservabilitySummary = async (req: Request, res: Response) => {
   if (!req.companyId) {
     return fail(res, 'Company onboarding required', 403);
@@ -136,11 +190,7 @@ export const getAccountingObservabilitySummary = async (req: Request, res: Respo
       source: statement.source,
       status: statement.status,
       progress: {
-        totalChecks: Number(statement.progress?.totalChecks ?? 0),
-        checksQueued: Number(statement.progress?.checksQueued ?? 0),
-        checksProcessing: Number(statement.progress?.checksProcessing ?? 0),
-        checksReady: Number(statement.progress?.checksReady ?? 0),
-        checksFailed: Number(statement.progress?.checksFailed ?? 0)
+        ...buildStatementProgress(statement)
       },
       confidence: undefined,
       issuesCount: Array.isArray(statement.issues) ? statement.issues.length : 0,
@@ -243,6 +293,27 @@ export const runAccountingObservabilityDebug = async (req: Request, res: Respons
   }
   if (statement?.status === 'failed') {
     actions.push('Reprocess failed statement from Statements tab.');
+  }
+  if (statementId && hasValidStatementId && statement) {
+    const checks = await StatementCheckModel.find({
+      companyId: req.companyId,
+      statementId
+    })
+      .select('artifacts')
+      .limit(500)
+      .lean();
+    const aiStatuses = await Promise.all(
+      checks.map((check) => readGeminiProviderStatus(check.artifacts?.geminiPath ?? null))
+    );
+    const degraded = aiStatuses.filter(
+      (ai) => ai && (ai.providerStatus === 'degraded' || ai.providerStatus === 'unavailable')
+    ).length;
+    const healthy = aiStatuses.filter((ai) => ai && ai.providerStatus === 'healthy').length;
+    if (healthy > 0 || degraded > 0) {
+      actions.push(
+        `Gemini proposal state: ${healthy} healthy, ${degraded} degraded/unavailable checks on this statement.`
+      );
+    }
   }
 
   const payload = accountingObservabilityDebugSchema.parse({

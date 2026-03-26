@@ -12,6 +12,56 @@ const confidenceSchema = new Schema(
   { _id: false }
 );
 
+const stageTimestampsSchema = new Schema(
+  {
+    queuedAt: { type: String, required: false },
+    processingAt: { type: String, required: false },
+    processedAt: { type: String, required: false },
+    failedAt: { type: String, required: false }
+  },
+  { _id: false }
+);
+
+const artifactsSchema = new Schema(
+  {
+    pageNumber: { type: Number, required: false },
+    cropBBox: { type: [Number], default: undefined },
+    cropImagePath: { type: String, required: false },
+    ocrTextPath: { type: String, required: false },
+    ocrJsonPath: { type: String, required: false },
+    geminiPath: { type: String, required: false },
+    stageTimestamps: { type: stageTimestampsSchema, default: () => ({}) }
+  },
+  { _id: false }
+);
+
+const extractedSchema = new Schema(
+  {
+    checkNumber: { type: String, required: false },
+    date: { type: String, required: false },
+    payeeName: { type: String, required: false },
+    amount: { type: Number, required: false },
+    memo: { type: String, required: false },
+    source: {
+      type: String,
+      enum: ['ocr', 'gemini', 'deterministic', 'legacy'],
+      required: false
+    }
+  },
+  { _id: false }
+);
+
+const processingSchema = new Schema(
+  {
+    retryCount: { type: Number, default: 0 },
+    lastError: { type: String, required: false },
+    queuedAt: { type: String, required: false },
+    processingAt: { type: String, required: false },
+    processedAt: { type: String, required: false }
+  },
+  { _id: false }
+);
+
 const statementCheckSchema = new Schema(
   {
     statementId: { type: String, required: true, index: true },
@@ -23,6 +73,9 @@ const statementCheckSchema = new Schema(
       index: true
     },
     confidence: { type: confidenceSchema, required: false },
+    artifacts: { type: artifactsSchema, default: () => ({}) },
+    extracted: { type: extractedSchema, required: false },
+    processing: { type: processingSchema, default: () => ({}) },
     autoFill: {
       checkNumber: { type: String, required: false },
       date: { type: String, required: false },
@@ -51,6 +104,7 @@ const statementCheckSchema = new Schema(
 );
 
 statementCheckSchema.index({ companyId: 1, statementId: 1, createdAt: -1 });
+statementCheckSchema.index({ companyId: 1, statementId: 1, status: 1, createdAt: -1 });
 statementCheckSchema.plugin(tenantPlugin);
 
 export type StatementCheckDoc = InferSchemaType<typeof statementCheckSchema> & { _id: string };

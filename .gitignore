@@ -14,3 +14,4 @@ coverage
 credentials/
 .agents
 .vscode
+server/tmp

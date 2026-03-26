@@ -55,12 +55,32 @@ export const proposalSchema = z.object({
   version: z.string().trim().default('v1')
 });
 
+export const accountingAiStatusSchema = z.object({
+  provider: z.literal('gemini'),
+  providerStatus: z.enum(['healthy', 'degraded', 'unavailable']),
+  degraded: z.boolean().default(false),
+  degradedReason: z.string().trim().optional(),
+  source: z.enum(['gemini', 'fallback', 'hybrid']),
+  confidence: z.number().min(0).max(1).default(0),
+  reasons: z.array(z.string().trim()).default([]),
+  artifacts: z
+    .object({
+      promptPath: z.string().trim().optional(),
+      rawPath: z.string().trim().optional(),
+      normalizedPath: z.string().trim().optional()
+    })
+    .default({})
+});
+
 export const statementProgressSchema = z.object({
+  phase: bankStatementStatusSchema.default('uploaded'),
   totalChecks: z.number().int().nonnegative().default(0),
   checksQueued: z.number().int().nonnegative().default(0),
   checksProcessing: z.number().int().nonnegative().default(0),
   checksReady: z.number().int().nonnegative().default(0),
-  checksFailed: z.number().int().nonnegative().default(0)
+  checksFailed: z.number().int().nonnegative().default(0),
+  completedChecks: z.number().int().nonnegative().default(0),
+  remainingChecks: z.number().int().nonnegative().default(0)
 });
 
 export const statementGcsSchema = z.object({
@@ -68,10 +88,66 @@ export const statementGcsSchema = z.object({
   pdfPath: z.string().trim().min(1)
 });
 
+export const statementStageTimestampsSchema = z.object({
+  uploadedAt: z.string().trim().optional(),
+  extractingAt: z.string().trim().optional(),
+  structuringAt: z.string().trim().optional(),
+  checksQueuedAt: z.string().trim().optional(),
+  readyForReviewAt: z.string().trim().optional(),
+  failedAt: z.string().trim().optional()
+});
+
+export const statementArtifactsSchema = z.object({
+  pageImagePaths: z.array(z.string().trim()).default([]),
+  ocrPath: z.string().trim().optional(),
+  ocrTextPath: z.string().trim().optional(),
+  geminiPath: z.string().trim().optional(),
+  detectionEvidence: z.string().trim().optional(),
+  detectedStatementMonth: statementMonthSchema.optional(),
+  detectedStatementDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  autoAppliedStatementMonth: z.boolean().default(false),
+  stageTimestamps: statementStageTimestampsSchema.default({})
+});
+
+export const statementCheckStageTimestampsSchema = z.object({
+  queuedAt: z.string().trim().optional(),
+  processingAt: z.string().trim().optional(),
+  processedAt: z.string().trim().optional(),
+  failedAt: z.string().trim().optional()
+});
+
+export const statementCheckArtifactsSchema = z.object({
+  pageNumber: z.number().int().positive().optional(),
+  cropBBox: z.array(z.number()).length(4).optional(),
+  cropImagePath: z.string().trim().optional(),
+  ocrTextPath: z.string().trim().optional(),
+  ocrJsonPath: z.string().trim().optional(),
+  geminiPath: z.string().trim().optional(),
+  stageTimestamps: statementCheckStageTimestampsSchema.default({})
+});
+
+export const statementCheckExtractedSchema = z.object({
+  checkNumber: z.string().trim().optional(),
+  date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  payeeName: z.string().trim().optional(),
+  amount: z.number().optional(),
+  memo: z.string().trim().optional(),
+  source: z.enum(['ocr', 'gemini', 'deterministic', 'legacy']).optional()
+});
+
+export const statementCheckProcessingSchema = z.object({
+  retryCount: z.number().int().nonnegative().default(0),
+  lastError: z.string().trim().optional(),
+  queuedAt: z.string().trim().optional(),
+  processingAt: z.string().trim().optional(),
+  processedAt: z.string().trim().optional()
+});
+
 export const statementTransactionSchema = z.object({
   id: z.string().trim().min(1),
   statementId: z.string().trim().min(1),
   companyId: z.string().trim().min(1),
+  statementCheckId: z.string().trim().optional(),
   postDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
   description: z.string().trim().min(1),
   merchant: z.string().trim().optional(),
@@ -89,9 +165,13 @@ export const statementTransactionSchema = z.object({
   evidence: z
     .object({
       statementPdfPath: z.string().trim().optional(),
-      pageImagePath: z.string().trim().optional()
+      pageImagePath: z.string().trim().optional(),
+      checkCropPath: z.string().trim().optional(),
+      ocrPath: z.string().trim().optional(),
+      geminiPath: z.string().trim().optional()
     })
     .optional(),
+  ai: accountingAiStatusSchema.optional(),
   proposal: proposalSchema.optional(),
   reviewStatus: statementReviewStatusSchema.default('proposed'),
   posting: z
@@ -109,6 +189,11 @@ export const statementCheckSchema = z.object({
   companyId: z.string().trim().min(1),
   status: statementCheckStatusSchema,
   confidence: confidenceBreakdownSchema.optional(),
+  artifacts: statementCheckArtifactsSchema.optional(),
+  extracted: statementCheckExtractedSchema.optional(),
+  processing: statementCheckProcessingSchema.default({
+    retryCount: 0
+  }),
   autoFill: z
     .object({
       checkNumber: z.string().trim().optional(),
@@ -124,6 +209,8 @@ export const statementCheckSchema = z.object({
     ocrPath: z.string().trim().optional(),
     structuredPath: z.string().trim().optional()
   }),
+  ai: accountingAiStatusSchema.optional(),
+  proposal: proposalSchema.optional(),
   match: z
     .object({
       statementTransactionId: z.string().trim().optional(),
@@ -171,7 +258,8 @@ export const detectStatementMonthResponseSchema = z.object({
   confidence: z.enum(['high', 'medium', 'low', 'none']),
   source: z.enum(['pdf_text', 'filename', 'unknown']),
   summary: z.string().trim().min(1),
-  evidence: z.string().trim().nullable()
+  evidence: z.string().trim().nullable(),
+  autoApply: z.boolean().default(false)
 });
 
 export const createBankStatementSchema = z.object({
@@ -213,6 +301,7 @@ export const bankStatementDetailSchema = bankStatementListItemSchema.extend({
   bankName: z.string().trim().optional(),
   accountLast4: z.string().trim().optional(),
   gcs: statementGcsSchema,
+  artifacts: statementArtifactsSchema.optional(),
   checks: z.array(statementCheckSchema),
   issues: z.array(z.string().trim()).default([])
 });
@@ -222,6 +311,7 @@ export const bankStatementStatusResponseSchema = z.object({
   status: bankStatementStatusSchema,
   progress: statementProgressSchema,
   updatedAt: z.string().trim(),
+  artifacts: statementArtifactsSchema.optional(),
   issues: z.array(z.string().trim()).default([])
 });
 
@@ -242,15 +332,19 @@ export const ledgerEntrySchema = z.object({
   amount: z.number(),
   type: z.enum(['debit', 'credit']),
   balanceAfter: z.number().optional(),
-  attachments: z
+    attachments: z
     .object({
       statementPdfPath: z.string().trim().optional(),
       statementPageImagePath: z.string().trim().optional(),
       checkFrontPath: z.string().trim().optional(),
-      checkBackPath: z.string().trim().optional()
+      checkBackPath: z.string().trim().optional(),
+      checkCropPath: z.string().trim().optional(),
+      ocrPath: z.string().trim().optional(),
+      geminiPath: z.string().trim().optional()
     })
     .default({}),
   confidence: confidenceBreakdownSchema.optional(),
+  ai: accountingAiStatusSchema.optional(),
   proposal: proposalSchema.default({
     confidence: 0,
     reasons: [],
@@ -1035,6 +1129,10 @@ export type BankStatementStatus = z.infer<typeof bankStatementStatusSchema>;
 export type StatementReviewStatus = z.infer<typeof statementReviewStatusSchema>;
 export type StatementPostingStatus = z.infer<typeof statementPostingStatusSchema>;
 export type StatementCheckStatus = z.infer<typeof statementCheckStatusSchema>;
+export type StatementArtifacts = z.infer<typeof statementArtifactsSchema>;
+export type StatementCheckArtifacts = z.infer<typeof statementCheckArtifactsSchema>;
+export type StatementCheckExtracted = z.infer<typeof statementCheckExtractedSchema>;
+export type StatementCheckProcessing = z.infer<typeof statementCheckProcessingSchema>;
 export type AccountingJobType = z.infer<typeof accountingJobTypeSchema>;
 export type AccountingTaskPayload = z.infer<typeof accountingTaskPayloadSchema>;
 export type RequestStatementUploadUrlInput = z.infer<typeof requestStatementUploadUrlSchema>;
