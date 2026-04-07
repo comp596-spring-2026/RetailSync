@@ -14,6 +14,7 @@ export type GeminiGenerateContentArgs = {
   temperature?: number;
   maxOutputTokens?: number;
   responseMimeType?: string;
+  responseJsonSchema?: unknown;
 };
 
 export type GeminiGenerateContentResult = {
@@ -112,7 +113,8 @@ export const generateGeminiContent = async (args: GeminiGenerateContentArgs): Pr
       generationConfig: {
         temperature: args.temperature ?? env.statementGeminiTemperature,
         maxOutputTokens: args.maxOutputTokens ?? env.statementGeminiMaxOutputTokens,
-        responseMimeType: args.responseMimeType ?? 'application/json'
+        responseMimeType: args.responseMimeType ?? 'application/json',
+        ...(args.responseJsonSchema ? { responseJsonSchema: args.responseJsonSchema } : {})
       }
     }),
     signal: AbortSignal.timeout(timeoutMs)

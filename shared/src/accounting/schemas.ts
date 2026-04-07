@@ -1030,6 +1030,17 @@ export const quickBooksWriteUpdateInputSchema = z.discriminatedUnion('txnType', 
   quickBooksWritePaymentUpdateInputSchema
 ]);
 
+export const quickBooksWriteDeleteInputSchema = z.object({
+  txnType: quickBooksWriteTxnTypeSchema,
+  syncToken: z.string().trim().min(1)
+});
+
+export const quickBooksWriteDeleteResultSchema = z.object({
+  txnType: quickBooksWriteTxnTypeSchema,
+  qbTxnId: z.string().trim().min(1),
+  deleted: z.literal(true)
+});
+
 export type QuickBooksHubChartAccount = z.infer<typeof quickBooksHubChartAccountSchema>;
 export type QuickBooksHubChartOfAccountsQuery = z.infer<
   typeof quickBooksHubChartOfAccountsQuerySchema
@@ -1222,6 +1233,8 @@ export type QuickBooksWritePaymentUpdateInput = z.infer<
   typeof quickBooksWritePaymentUpdateInputSchema
 >;
 export type QuickBooksWriteUpdateInput = z.infer<typeof quickBooksWriteUpdateInputSchema>;
+export type QuickBooksWriteDeleteInput = z.infer<typeof quickBooksWriteDeleteInputSchema>;
+export type QuickBooksWriteDeleteResult = z.infer<typeof quickBooksWriteDeleteResultSchema>;
 export type AccountingObservabilitySummary = z.infer<
   typeof accountingObservabilitySummarySchema
 >;

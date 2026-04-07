@@ -28,7 +28,7 @@ export const usePos = () => {
       importCsv: (file: File) => dispatch(importCsv(file)),
       syncGoogleSheet: () => dispatch(syncGoogleSheet()),
       acknowledgeAlert: (alertId: string) => dispatch(acknowledgeAlert(alertId)),
-      setView: (view: 'table' | 'dashboard') => dispatch(setView(view)),
+      setView: (view: 'table' | 'analytics' | 'ai') => dispatch(setView(view)),
       setIconOnly: (iconOnly: boolean) => dispatch(setIconOnly(iconOnly)),
       setDateRange: (dateRange: PosDateRange) => dispatch(setDateRange(dateRange)),
       setPage: (page: number) => dispatch(setPage(page)),

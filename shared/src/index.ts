@@ -1,5 +1,6 @@
 export * from "./accounting";
 export * from "./constants/modules";
+export * from "./pos";
 export * from "./permissions/permissions";
 export * from "./schemas";
 export * from "./types";

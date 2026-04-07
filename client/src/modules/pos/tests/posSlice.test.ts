@@ -1,6 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import posReducer, { fetchDaily, fetchOverview, setIconOnly, setView, type PosState } from '../state';
+import posReducer, { fetchDaily, fetchOverview, restoreState, setIconOnly, setView, type PosState } from '../state';
 
 const mockedPosApi = vi.hoisted(() => ({
   dailyPaged: vi.fn(),
@@ -31,11 +31,20 @@ describe('posSlice', () => {
 
   it('updates view and iconOnly reducers', () => {
     const initial = posReducer(undefined, { type: '@@INIT' }) as PosState;
-    const afterView = posReducer(initial, setView('dashboard')) as PosState;
+    const afterView = posReducer(initial, setView('analytics')) as PosState;
+    const afterAiView = posReducer(afterView, setView('ai')) as PosState;
     const afterIconOnly = posReducer(afterView, setIconOnly(true)) as PosState;
 
-    expect(afterView.view).toBe('dashboard');
+    expect(afterView.view).toBe('analytics');
+    expect(afterAiView.view).toBe('ai');
     expect(afterIconOnly.iconOnly).toBe(true);
+  });
+
+  it('normalizes the legacy dashboard view alias to analytics', () => {
+    const initial = posReducer(undefined, { type: '@@INIT' }) as PosState;
+    const restored = posReducer(initial, restoreState({ view: 'dashboard' as never })) as PosState;
+
+    expect(restored.view).toBe('analytics');
   });
 
   it('defaults date range to a 30-day window', () => {

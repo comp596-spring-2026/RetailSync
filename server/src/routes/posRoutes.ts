@@ -12,7 +12,8 @@ import {
   listPosDaily,
   listPosDailyPaged,
   matchPosImportMapping,
-  previewPosImportFromSharedSheet
+  previewPosImportFromSharedSheet,
+  queryPosAi
 } from '../controllers/posController';
 import { requireAuth } from '../middleware/requireAuth';
 import { requirePermission } from '../middleware/requirePermission';
@@ -75,6 +76,7 @@ router.get('/daily', requirePermission('pos', 'view'), listPosDaily);
 router.get('/trend', requirePermission('pos', 'view'), getPosTrend);
 router.get('/daily-paged', requirePermission('pos', 'view'), listPosDailyPaged);
 router.get('/overview', requirePermission('pos', 'view'), getPosOverview);
+router.post('/ai/query', requirePermission('pos', 'view'), queryPosAi);
 router.get('/export', requirePermission('pos', 'view'), exportPosDailyCsv);
 
 export default router;

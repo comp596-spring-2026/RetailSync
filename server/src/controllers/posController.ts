@@ -1,4 +1,4 @@
-import { posDailyQuerySchema } from '@retailsync/shared';
+import { posAiDashboardQuerySchema, posDailyQuerySchema } from '@retailsync/shared';
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
@@ -31,6 +31,7 @@ import {
   evaluateConfiguredPosRow,
   validateDerivedConfiguration
 } from '../utils/posDerivedEvaluator';
+import { runPosAiQuery } from '../services/posAiService';
 
 type CsvRow = Record<string, string | undefined>;
 
@@ -1062,6 +1063,27 @@ export const getPosOverview = async (req: Request, res: Response) => {
     start: bounds.startIso,
     end: bounds.endIso
   });
+};
+
+export const queryPosAi = async (req: Request, res: Response) => {
+  if (!req.companyId) {
+    return fail(res, 'Company onboarding required', 403);
+  }
+
+  const parsed = posAiDashboardQuerySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  try {
+    const result = await runPosAiQuery({
+      companyId: req.companyId,
+      ...parsed.data
+    });
+    return ok(res, result);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : 'POS AI query failed', 500);
+  }
 };
 
 export const exportPosDailyCsv = async (req: Request, res: Response) => {

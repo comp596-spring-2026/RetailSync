@@ -19,6 +19,7 @@ const {
   listQuickBooksWriteTransactionsMock,
   recoverQuickBooksPaymentMock,
   createQuickBooksJournalAdjustmentMock,
+  deleteQuickBooksWriteTransactionMock,
   updateQuickBooksWriteTransactionMock
 } = vi.hoisted(() => ({
   createQuickBooksWriteTransactionMock: vi.fn(),
@@ -37,6 +38,7 @@ const {
   listQuickBooksWriteTransactionsMock: vi.fn(),
   recoverQuickBooksPaymentMock: vi.fn(),
   createQuickBooksJournalAdjustmentMock: vi.fn(),
+  deleteQuickBooksWriteTransactionMock: vi.fn(),
   updateQuickBooksWriteTransactionMock: vi.fn()
 }));
 
@@ -58,6 +60,7 @@ vi.mock('./services/quickbooksTaxService', () => ({
 
 vi.mock('./services/quickbooksWriteService', () => ({
   createQuickBooksWriteTransaction: createQuickBooksWriteTransactionMock,
+  deleteQuickBooksWriteTransaction: deleteQuickBooksWriteTransactionMock,
   getQuickBooksWriteTransactionDetail: getQuickBooksWriteTransactionDetailMock,
   listQuickBooksWriteTransactions: listQuickBooksWriteTransactionsMock,
   updateQuickBooksWriteTransaction: updateQuickBooksWriteTransactionMock
@@ -102,6 +105,7 @@ describe('quickbooksTaxController', () => {
   let getQuickBooksWriteTransactionsByType: ControllerFn;
   let getQuickBooksWriteTransactionDetailById: ControllerFn;
   let getQuickBooksTaxPayments: ControllerFn;
+  let deleteQuickBooksWriteTransactionById: ControllerFn;
   let patchQuickBooksWriteTransaction: ControllerFn;
   let postQuickBooksRecoverPayment: ControllerFn;
   let postQuickBooksWriteTransaction: ControllerFn;
@@ -120,6 +124,7 @@ describe('quickbooksTaxController', () => {
     getQuickBooksWriteTransactionsByType = controller.getQuickBooksWriteTransactionsByType;
     getQuickBooksWriteTransactionDetailById = controller.getQuickBooksWriteTransactionDetailById;
     getQuickBooksTaxPayments = controller.getQuickBooksTaxPayments;
+    deleteQuickBooksWriteTransactionById = controller.deleteQuickBooksWriteTransactionById;
     patchQuickBooksWriteTransaction = controller.patchQuickBooksWriteTransaction;
     postQuickBooksRecoverPayment = controller.postQuickBooksRecoverPayment;
     postQuickBooksWriteTransaction = controller.postQuickBooksWriteTransaction;
@@ -619,6 +624,43 @@ describe('quickbooksTaxController', () => {
       })
     });
     expect(status).toHaveBeenCalledWith(200);
+  });
+
+  it('deletes a quickbooks write transaction and returns the service payload', async () => {
+    deleteQuickBooksWriteTransactionMock.mockResolvedValue({
+      txnType: 'invoice',
+      qbTxnId: 'txn-400',
+      deleted: true
+    });
+    const { res, status, json } = createResponse();
+    const req = {
+      companyId: 'company-1',
+      params: { txnType: 'invoice', qbTxnId: 'txn-400' },
+      body: {
+        txnType: 'invoice',
+        syncToken: '7'
+      }
+    } as unknown as Request;
+
+    await deleteQuickBooksWriteTransactionById(req, res);
+
+    expect(deleteQuickBooksWriteTransactionMock).toHaveBeenCalledWith({
+      companyId: 'company-1',
+      txnType: 'invoice',
+      qbTxnId: 'txn-400',
+      syncToken: '7'
+    });
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: {
+          txnType: 'invoice',
+          qbTxnId: 'txn-400',
+          deleted: true
+        }
+      })
+    );
   });
 
   it('uses defaults and calls tax payments service', async () => {

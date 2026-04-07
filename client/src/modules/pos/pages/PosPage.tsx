@@ -1,3 +1,4 @@
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import GoogleIcon from '@mui/icons-material/Google';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
@@ -29,13 +30,13 @@ import { usePos } from '../hooks/usePos';
 import { ImportPOSDataModal } from '../components/ImportPOSDataModal';
 import { fetchSettings, selectGoogleSheetsSettings, selectSettings } from '../../settings/state';
 import { hasPermission } from '../../../utils/permissions';
+import type { PosView } from '../state';
 import { PosAnalyticsViewPage } from './PosAnalyticsViewPage';
+import { PosAiViewPage } from './PosAiViewPage';
 import { PosTableViewPage } from './PosTableViewPage';
 import type { PosPrimaryAction } from './types';
 
 type LastImportSource = 'file' | 'google_sheets' | null;
-
-type PosView = 'table' | 'dashboard';
 
 const hasCanonicalConnectorConfig = (googleSheets: unknown): boolean => {
   if (!googleSheets || typeof googleSheets !== 'object') return false;
@@ -238,13 +239,29 @@ export const PosPage = () => {
   return (
     <Stack spacing={2}>
       <PageHeader
-        title={state.view === 'table' ? 'POS Table View' : 'POS Analytics View'}
+        title={
+          state.view === 'table'
+            ? 'POS Table View'
+            : state.view === 'analytics'
+              ? 'POS Analytics View'
+              : 'POS AI View'
+        }
         subtitle={
           state.view === 'table'
             ? 'Review daily POS records, totals, and mapped source data.'
-            : 'Analyze sales trends, distribution, and performance insights.'
+            : state.view === 'analytics'
+              ? 'Analyze sales trends, distribution, and performance insights.'
+              : 'Ask questions, compare patterns, and explore backend POS signals with guided insight cards.'
         }
-        icon={<PointOfSaleIcon />}
+        icon={
+          state.view === 'ai' ? (
+            <AutoAwesomeIcon />
+          ) : state.view === 'analytics' ? (
+            <InsightsIcon />
+          ) : (
+            <PointOfSaleIcon />
+          )
+        }
       />
 
       <DateRangeControlPanel
@@ -268,15 +285,19 @@ export const PosPage = () => {
                 if (!next) return;
                 actions.setView(next);
               }}
-              aria-label="POS table analytics switch"
+              aria-label="POS view switch"
             >
               <ToggleButton value="table" aria-label="Table view">
                 <TableRowsIcon fontSize="small" sx={{ mr: 0.75 }} />
                 Table
               </ToggleButton>
-              <ToggleButton value="dashboard" aria-label="Analytics view">
+              <ToggleButton value="analytics" aria-label="Analytics view">
                 <InsightsIcon fontSize="small" sx={{ mr: 0.75 }} />
                 Analytics
+              </ToggleButton>
+              <ToggleButton value="ai" aria-label="AI view">
+                <AutoAwesomeIcon fontSize="small" sx={{ mr: 0.75 }} />
+                AI
               </ToggleButton>
             </ToggleButtonGroup>
 
@@ -308,7 +329,7 @@ export const PosPage = () => {
 
       {state.error ? <Alert severity="error">{state.error}</Alert> : null}
 
-      {state.view === 'dashboard' ? (
+      {state.view === 'analytics' ? (
         <PosAnalyticsViewPage
           loading={state.loading.overview}
           chartsData={state.chartsData}
@@ -322,6 +343,17 @@ export const PosPage = () => {
           totalLottery={totalLottery}
           netIncome={netIncome}
           cashDiff={cashDiff}
+        />
+      ) : state.view === 'ai' ? (
+        <PosAiViewPage
+          loading={state.loading.overview || state.loading.daily}
+          records={state.records}
+          totals={state.totals}
+          kpis={state.kpis}
+          chartsData={state.chartsData}
+          alerts={state.alerts}
+          dateRange={state.dateRange}
+          primaryAction={primaryAction}
         />
       ) : (
         <PosTableViewPage

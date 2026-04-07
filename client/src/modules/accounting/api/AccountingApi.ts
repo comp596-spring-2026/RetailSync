@@ -29,6 +29,8 @@ import {
   QuickBooksTransactionDetail,
   QuickBooksSettings,
   QuickBooksWriteCreateInput,
+  QuickBooksWriteDeleteInput,
+  QuickBooksWriteDeleteResult,
   QuickBooksWriteDetail,
   QuickBooksWriteListQuery,
   QuickBooksWriteListResponse,
@@ -307,6 +309,16 @@ export class AccountingApi {
     return api.patch<{
       data: QuickBooksWriteDetail;
     }>(`/integrations/quickbooks/write/${txnType}/${qbTxnId}`, payload);
+  }
+
+  deleteQuickbooksWriteTransaction(
+    txnType: QuickBooksWriteTxnType,
+    qbTxnId: string,
+    payload: QuickBooksWriteDeleteInput
+  ) {
+    return api.delete<{
+      data: QuickBooksWriteDeleteResult;
+    }>(`/integrations/quickbooks/write/${txnType}/${qbTxnId}`, { data: payload });
   }
 
   getQuickbooksTaxOverview(params?: QuickBooksTaxWindowQuery) {

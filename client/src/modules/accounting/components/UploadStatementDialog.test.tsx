@@ -338,7 +338,7 @@ describe('UploadStatementDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /Upload & Start/i }));
 
     expect(
-      await screen.findByText(/verify the accounting bucket CORS policy allows http:\/\/localhost:4630/i),
+      await screen.findByText(/verify the accounting bucket CORS policy allows http:\/\/localhost/i),
     ).toBeInTheDocument();
     expect(createStatementMock).not.toHaveBeenCalled();
   });

@@ -11,7 +11,7 @@ import type {
 import type { AppDispatch, RootState } from '../../../app/store';
 import { showSnackbar } from '../../../app/store/uiSlice';
 
-export type PosView = 'table' | 'dashboard';
+export type PosView = 'table' | 'analytics' | 'ai';
 
 export type PosDateRange = {
   from: string;
@@ -79,6 +79,12 @@ export type PosState = {
 const LOCAL_STORAGE_VIEW_KEY = 'retailsync.pos.view';
 const LOCAL_STORAGE_ICON_ONLY_KEY = 'retailsync.pos.iconOnly';
 
+const normalizePosView = (value: string | null | undefined): PosView => {
+  if (value === 'ai') return 'ai';
+  if (value === 'analytics' || value === 'dashboard') return 'analytics';
+  return 'table';
+};
+
 const toLocalIso = (date: Date) => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -106,7 +112,7 @@ const readPersistedBool = (key: string, fallback: boolean) => {
 const readPersistedView = (): PosView => {
   if (typeof window === 'undefined') return 'table';
   const raw = window.localStorage.getItem(LOCAL_STORAGE_VIEW_KEY);
-  return raw === 'dashboard' ? 'dashboard' : 'table';
+  return normalizePosView(raw);
 };
 
 const persistPosPreference = (key: string, value: string) => {
@@ -643,8 +649,8 @@ export const posSlice = createSlice({
     restoreState(state, action: PayloadAction<RestoreStatePayload>) {
       const next = action.payload;
       if (next.view) {
-        state.view = next.view;
-        persistPosPreference(LOCAL_STORAGE_VIEW_KEY, next.view);
+        state.view = normalizePosView(next.view);
+        persistPosPreference(LOCAL_STORAGE_VIEW_KEY, state.view);
       }
       if (typeof next.iconOnly === 'boolean') {
         state.iconOnly = next.iconOnly;
