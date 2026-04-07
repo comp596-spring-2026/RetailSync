@@ -104,7 +104,7 @@ const allowedCrossModuleImports = [
   'modules/auth/state/authSlice.ts:4 imports "../../users/state" -> modules/users/state',
   'modules/pos/components/ImportPOSDataModal.tsx:48 imports "../../settings/api" -> modules/settings/api',
   'modules/pos/components/ImportPOSDataModal.tsx:51 imports "../../settings/state" -> modules/settings/state',
-  'modules/pos/pages/PosPage.tsx:30 imports "../../settings/state" -> modules/settings/state',
+  'modules/pos/pages/PosPage.tsx:31 imports "../../settings/state" -> modules/settings/state',
   'modules/pos/state/posSlice.ts:3 imports "../../settings/api" -> modules/settings/api',
   'modules/users/pages/AccessHubPage.tsx:6 imports "../../rbac/pages/RolesPage" -> modules/rbac/pages/RolesPage',
   'modules/users/pages/AccessHubPage.tsx:7 imports "../../settings/pages/SettingsPage" -> modules/settings/pages/SettingsPage',
