@@ -46,15 +46,6 @@ const POS_AI_WIDGET_ORDER_BY_SCOPE: Record<z.infer<typeof posAiScopeSchema>, Pos
   top_days: ['table_top_days', 'kpi_best_day', 'line_sales_trend', 'kpi_total_sales']
 };
 
-const POS_AI_INTENT_WIDGET_ORDER: Record<PosAiIntent, PosAiWidgetKey[]> = {
-  overview: POS_AI_WIDGET_ORDER_BY_SCOPE.overview,
-  comparison: POS_AI_WIDGET_ORDER_BY_SCOPE.comparison,
-  trend: POS_AI_WIDGET_ORDER_BY_SCOPE.trend,
-  weekday: POS_AI_WIDGET_ORDER_BY_SCOPE.weekday,
-  top_days: POS_AI_WIDGET_ORDER_BY_SCOPE.top_days,
-  unknown: POS_AI_WIDGET_ORDER_BY_SCOPE.overview
-};
-
 const posAiGeminiResponseSchema = z.object({
   title: z.string().trim().min(1),
   summary: z.string().trim().min(1),
