@@ -1,5 +1,6 @@
 import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import {
   Alert,
@@ -1221,8 +1222,10 @@ export const QuickBooksWriteDetailPage = () => {
 
   const [detail, setDetail] = useState<QuickBooksWriteDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1241,6 +1244,38 @@ export const QuickBooksWriteDetailPage = () => {
     if (!canView || !isConnected) return;
     void load();
   }, [canView, isConnected, load]);
+
+  const handleDelete = useCallback(async () => {
+    if (!detail?.syncToken) {
+      setError('This record cannot be deleted because the sync token is missing.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete this ${txnTypeMeta[rawTxnType].singular.toLowerCase()} in QuickBooks? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setError(null);
+    try {
+      await accountingApi.deleteQuickbooksWriteTransaction(rawTxnType, qbTxnId, {
+        txnType: rawTxnType,
+        syncToken: detail.syncToken
+      });
+      dispatch(
+        showSnackbar({
+          message: `${txnTypeMeta[rawTxnType].singular} deleted in QuickBooks.`,
+          severity: 'success'
+        })
+      );
+      navigate(writeListPath(rawTxnType));
+    } catch (apiError) {
+      setError(extractApiErrorMessage(apiError, 'Failed to delete QuickBooks write detail'));
+    } finally {
+      setDeleting(false);
+    }
+  }, [detail?.syncToken, dispatch, navigate, qbTxnId, rawTxnType]);
 
   if (!canView) {
     return <NoAccess />;
@@ -1266,11 +1301,22 @@ export const QuickBooksWriteDetailPage = () => {
             Back to list
           </Button>
           {canPost ? (
+            <Button
+              color="error"
+              variant="outlined"
+              startIcon={<DeleteOutlineIcon />}
+              onClick={() => void handleDelete()}
+              disabled={loading || deleting || !detail?.syncToken}
+            >
+              Delete
+            </Button>
+          ) : null}
+          {canPost ? (
             <Button variant="contained" startIcon={<EditIcon />} onClick={() => navigate(writeEditPath(rawTxnType, qbTxnId))}>
               Edit
             </Button>
           ) : null}
-          <Button variant="outlined" onClick={() => void load()} disabled={loading}>
+          <Button variant="outlined" onClick={() => void load()} disabled={loading || deleting}>
             Refresh
           </Button>
         </Stack>

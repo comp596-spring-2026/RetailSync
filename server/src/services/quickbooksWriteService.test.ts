@@ -357,4 +357,41 @@ describe('quickbooksWriteService', () => {
       }
     ]);
   });
+
+  it('deletes a write transaction with the sync token QuickBooks requires', async () => {
+    requestQuickBooksApiMock.mockResolvedValue({
+      SalesReceipt: {
+        Id: 'sr-1',
+        status: 'Deleted'
+      }
+    });
+
+    const { deleteQuickBooksWriteTransaction } = await import('./quickbooksWriteService');
+    const result = await deleteQuickBooksWriteTransaction({
+      companyId: 'company-1',
+      txnType: 'sales-receipt',
+      qbTxnId: 'sr-1',
+      syncToken: '4'
+    });
+
+    expect(requestQuickBooksApiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'POST',
+        path: '/v3/company/realm-1/salesreceipt',
+        query: expect.objectContaining({
+          operation: 'delete',
+          minorversion: 75
+        }),
+        body: {
+          Id: 'sr-1',
+          SyncToken: '4'
+        }
+      })
+    );
+    expect(result).toEqual({
+      txnType: 'sales-receipt',
+      qbTxnId: 'sr-1',
+      deleted: true
+    });
+  });
 });

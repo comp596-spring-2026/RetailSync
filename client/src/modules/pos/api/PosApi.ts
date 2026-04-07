@@ -1,4 +1,41 @@
 import { api } from '../../../app/api/client';
+import type {
+  PosAiQuery,
+  PosAiQueryResponse
+} from '@retailsync/shared';
+
+export type PosAiClarificationOption =
+  | string
+  | {
+      label: string;
+      prompt?: string;
+      value?: string;
+      variant?: 'neutral' | 'affirmative' | 'negative';
+    };
+
+export type PosAiClarification = {
+  question: string;
+  options?: PosAiClarificationOption[];
+  yesNo?: boolean;
+  allowYesNo?: boolean;
+};
+
+export type PosAiChatResponse = PosAiQueryResponse & {
+  clarification?: PosAiClarification | null;
+  clarifyingQuestion?: string;
+  clarificationQuestion?: string;
+  clarificationOptions?: PosAiClarificationOption[];
+  clarificationYesNo?: boolean;
+  clarificationRequired?: boolean;
+  messages?: Array<{
+    role: 'assistant' | 'user';
+    text?: string;
+    summary?: string;
+    widgets?: unknown[];
+    followUps?: string[];
+    clarification?: PosAiClarification | null;
+  }>;
+};
 
 export type PosDailyRecord = {
   _id: string;
@@ -105,6 +142,8 @@ export type PosTrendResponse = {
   end: string;
 };
 
+export type { PosAiQuery, PosAiQueryResponse };
+
 export class PosApi {
   importCsv(file: File) {
     const formData = new FormData();
@@ -187,6 +226,10 @@ export class PosApi {
 
   trend(payload: { start?: string; end?: string; granularity?: 'daily' | 'weekly' }) {
     return api.get<{ data: PosTrendResponse }>('/pos/trend', { params: payload });
+  }
+
+  aiQuery(payload: PosAiQuery) {
+    return api.post<{ data: PosAiChatResponse }>('/pos/ai/query', payload);
   }
 
   exportCsv(payload: { start?: string; end?: string }) {

@@ -10,7 +10,12 @@ type ScriptOptions = {
   maxAgeSeconds: number;
 };
 
-const DEFAULT_LOCAL_ORIGINS = ['http://localhost:4630', 'http://localhost:8080'];
+const DEFAULT_LOCAL_ORIGINS = [
+  'http://localhost:4630',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:8080'
+];
 
 const normalizeOrigin = (value: string) => value.trim().replace(/\/+$/, '');
 

@@ -1,5 +1,6 @@
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DashboardRoundedIcon from '@mui/icons-material/DashboardRounded';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SyncIcon from '@mui/icons-material/Sync';
 import TableRowsIcon from '@mui/icons-material/TableRows';
@@ -175,9 +176,13 @@ export const PosToolbar = ({
                 <TableRowsIcon fontSize="small" />
                 {iconOnly ? null : <Box sx={{ ml: 0.75 }}>Table</Box>}
               </ToggleButton>
-              <ToggleButton value="dashboard" aria-label="Analytics view">
+              <ToggleButton value="analytics" aria-label="Analytics view">
                 <DashboardRoundedIcon fontSize="small" />
                 {iconOnly ? null : <Box sx={{ ml: 0.75 }}>Analytics</Box>}
+              </ToggleButton>
+              <ToggleButton value="ai" aria-label="AI view">
+                <AutoAwesomeIcon fontSize="small" />
+                {iconOnly ? null : <Box sx={{ ml: 0.75 }}>AI</Box>}
               </ToggleButton>
             </ToggleButtonGroup>
 

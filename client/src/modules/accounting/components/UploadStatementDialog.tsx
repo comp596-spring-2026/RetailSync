@@ -93,12 +93,16 @@ const getDetectionMessage = (
 const getStorageUploadFailureMessage = (requestUrl: string) => {
   const isStorageUploadFailure =
     typeof requestUrl === 'string' && requestUrl.includes('storage.googleapis.com');
+  const currentOrigin =
+    typeof window !== 'undefined' && typeof window.location?.origin === 'string'
+      ? window.location.origin
+      : null;
 
   if (!isStorageUploadFailure) return null;
   if (!isDevelopment) {
     return 'Upload to secure storage failed. Please try again. If the problem continues, contact support.';
   }
-  return 'Upload to secure storage failed. If you are running locally, verify the accounting bucket CORS policy allows http://localhost:4630.';
+  return `Upload to secure storage failed. If you are running locally, verify the accounting bucket CORS policy allows ${currentOrigin ?? 'your local client origin'}.`;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));

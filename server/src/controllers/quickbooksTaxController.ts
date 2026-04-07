@@ -13,6 +13,7 @@ import {
   quickBooksTransactionDetailQuerySchema,
   quickBooksTaxWindowQuerySchema,
   quickBooksWriteCreateInputSchema,
+  quickBooksWriteDeleteInputSchema,
   quickBooksWriteListQuerySchema,
   quickBooksWriteTxnTypeSchema,
   quickBooksWriteUpdateInputSchema
@@ -34,6 +35,7 @@ import {
 } from '../services/quickbooksTaxService';
 import {
   createQuickBooksWriteTransaction,
+  deleteQuickBooksWriteTransaction,
   getQuickBooksWriteTransactionDetail,
   listQuickBooksWriteTransactions,
   updateQuickBooksWriteTransaction
@@ -520,6 +522,54 @@ export const patchQuickBooksWriteTransaction = async (req: Request, res: Respons
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'QuickBooks write transaction update failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const deleteQuickBooksWriteTransactionById = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const typeParsed = quickBooksWriteTxnTypeSchema.safeParse(req.params.txnType);
+  if (!typeParsed.success) {
+    return fail(res, 'Validation failed', 422, typeParsed.error.flatten());
+  }
+
+  const qbTxnId = typeof req.params.qbTxnId === 'string' ? req.params.qbTxnId.trim() : '';
+  if (!qbTxnId) {
+    return fail(res, 'Validation failed', 422, {
+      fieldErrors: {
+        qbTxnId: ['qbTxnId is required']
+      }
+    });
+  }
+
+  const parsed = quickBooksWriteDeleteInputSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  if (parsed.data.txnType !== typeParsed.data) {
+    return fail(res, 'quickbooks_write_type_mismatch', 422);
+  }
+
+  try {
+    // eslint-disable-next-line no-console
+    console.info('[quickbooks.write.delete.request]', {
+      companyId,
+      txnType: parsed.data.txnType,
+      qbTxnId
+    });
+    const data = await deleteQuickBooksWriteTransaction({
+      companyId,
+      txnType: parsed.data.txnType,
+      qbTxnId,
+      syncToken: parsed.data.syncToken
+    });
+    return ok(res, data);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'QuickBooks write transaction delete failed';
     return fail(res, message, mapQuickBooksTaxErrorStatus(message));
   }
 };

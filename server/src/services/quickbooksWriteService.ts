@@ -1,5 +1,6 @@
 import type {
   QuickBooksWriteCreateInput,
+  QuickBooksWriteDeleteResult,
   QuickBooksWriteDetail,
   QuickBooksWriteLine,
   QuickBooksWriteLinkedTransaction,
@@ -609,4 +610,36 @@ export const updateQuickBooksWriteTransaction = async (args: {
   );
 
   return mapDetail(args.txnType, parseEntityPayload(args.txnType, payload));
+};
+
+export const deleteQuickBooksWriteTransaction = async (args: {
+  companyId: string;
+  txnType: QuickBooksWriteTxnType;
+  qbTxnId: string;
+  syncToken: string;
+}): Promise<QuickBooksWriteDeleteResult> => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/${writeTxnConfig[args.txnType].path}`,
+    query: {
+      operation: 'delete',
+      minorversion: 75
+    },
+    body: {
+      Id: args.qbTxnId,
+      SyncToken: args.syncToken
+    }
+  });
+
+  return {
+    txnType: args.txnType,
+    qbTxnId: args.qbTxnId,
+    deleted: true
+  };
 };

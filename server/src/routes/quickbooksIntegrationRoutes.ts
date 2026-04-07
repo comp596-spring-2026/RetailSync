@@ -25,6 +25,7 @@ import {
   getQuickBooksTaxOverview,
   getQuickBooksTaxPayments,
   getQuickBooksTaxReport,
+  deleteQuickBooksWriteTransactionById,
   patchQuickBooksWriteTransaction,
   postQuickBooksJournalAdjustment,
   postQuickBooksRecoverPayment,
@@ -124,6 +125,12 @@ router.patch(
   requireAuth,
   requirePermission('quickbooks', 'post'),
   patchQuickBooksWriteTransaction
+);
+router.delete(
+  '/write/:txnType/:qbTxnId',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  deleteQuickBooksWriteTransactionById
 );
 router.get(
   '/hub/chart-of-accounts',

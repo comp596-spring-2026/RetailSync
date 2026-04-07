@@ -106,7 +106,7 @@ For direct browser uploads to the accounting bucket, local development also need
 pnpm --filter @retailsync/server run storage:cors:accounting -- --apply
 ```
 
-By default this applies CORS for `CLIENT_URL` plus local dev origins such as `http://localhost:4630` and `http://localhost:8080`.
+By default this applies CORS for `CLIENT_URL` plus local dev origins such as `http://localhost:4630`, `http://localhost:5173`, `http://localhost:5174`, and `http://localhost:8080`.
 
 If the configured bucket does not exist yet, bootstrap it and apply CORS in one step:
 
