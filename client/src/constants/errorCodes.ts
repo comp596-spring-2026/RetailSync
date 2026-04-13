@@ -48,6 +48,16 @@ export const APP_ERROR_MESSAGES: Record<string, string> = {
     'QuickBooks refresh token is missing. Reconnect QuickBooks.',
   quickbooks_secret_missing:
     'QuickBooks token data is missing for this company. Reconnect QuickBooks.',
+  statement_pdf_missing:
+    'The uploaded PDF was not found in storage. Upload the statement again and retry.',
+  statement_storage_access_denied:
+    'The server could not read the uploaded statement from storage. Check storage permissions.',
+  statement_queue_failed:
+    'The PDF uploaded, but RetailSync could not start statement processing. Retry in a moment.',
+  statement_hash_failed:
+    'RetailSync could not verify the uploaded statement PDF. Retry the upload.',
+  statement_create_failed:
+    'RetailSync could not create the statement record. Retry the upload.',
 };
 
 export const getAppErrorMessage = (code?: string | null, fallback = 'Something went wrong.'): string => {

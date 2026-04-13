@@ -30,6 +30,13 @@ type UploadStatementDialogProps = {
   onUploaded: () => Promise<void>;
 };
 
+type PreparedUpload = {
+  fileName: string;
+  statementMonth: string;
+  statementId: string;
+  gcsPath: string;
+};
+
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 
 const formatStatementMonthLabel = (statementMonth: string) => {
@@ -72,6 +79,8 @@ type StatementProgress = {
   remainingChecks: number;
 };
 
+type WorkflowStepState = 'done' | 'active' | 'waiting' | 'failed';
+
 const getDetectionMessage = (
   detection: DetectStatementMonthResponse,
   statementMonth: string,
@@ -90,6 +99,12 @@ const getDetectionMessage = (
   return detection.summary || `This looks like a ${monthLabel} statement.`;
 };
 
+const getDetectionEvidencePreview = (evidence: string) => {
+  const trimmed = evidence.trim();
+  if (trimmed.length <= 140) return trimmed;
+  return `${trimmed.slice(0, 137).trimEnd()}...`;
+};
+
 const getStorageUploadFailureMessage = (requestUrl: string) => {
   const isStorageUploadFailure =
     typeof requestUrl === 'string' && requestUrl.includes('storage.googleapis.com');
@@ -103,6 +118,18 @@ const getStorageUploadFailureMessage = (requestUrl: string) => {
     return 'Upload to secure storage failed. Please try again. If the problem continues, contact support.';
   }
   return `Upload to secure storage failed. If you are running locally, verify the accounting bucket CORS policy allows ${currentOrigin ?? 'your local client origin'}.`;
+};
+
+const extractApiErrorReason = (error: unknown) => {
+  if (!axios.isAxiosError(error)) return null;
+  const payload = error.response?.data;
+  if (!payload || typeof payload !== 'object') return null;
+  const details =
+    'details' in payload && payload.details && typeof payload.details === 'object'
+      ? payload.details
+      : null;
+  const reason = details && 'reason' in details ? details.reason : null;
+  return typeof reason === 'string' ? reason : null;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -129,13 +156,62 @@ const getProcessingSummary = (status: BankStatementStatus | null) => {
   }
 };
 
+const uploadWorkflowSteps = [
+  {
+    key: 'pick',
+    title: '1. Select PDF',
+    detail: 'Choose the statement you want to process.'
+  },
+  {
+    key: 'month',
+    title: '2. Confirm statement month',
+    detail: 'RetailSync detects the month and you can correct it before saving.'
+  },
+  {
+    key: 'storage',
+    title: '3. Upload to secure storage',
+    detail: 'The PDF is stored in the accounting bucket before the workflow continues.'
+  },
+  {
+    key: 'record',
+    title: '4. Save statement record',
+    detail: 'A MongoDB record is created so the statement can be resumed or retried safely.'
+  },
+  {
+    key: 'jobs',
+    title: '5. Run background jobs',
+    detail: 'Extraction, structuring, and check-related work continue after upload.'
+  },
+  {
+    key: 'review',
+    title: '6. Review outputs',
+    detail: 'Open the statement workspace to inspect the PDF, OCR, transactions, and checks.'
+  }
+] as const;
+
+const getWorkflowChipColor = (state: WorkflowStepState) => {
+  if (state === 'done') return 'success';
+  if (state === 'active') return 'primary';
+  if (state === 'failed') return 'error';
+  return 'default';
+};
+
+const getWorkflowChipLabel = (state: WorkflowStepState) => {
+  if (state === 'done') return 'Done';
+  if (state === 'active') return 'Current';
+  if (state === 'failed') return 'Failed';
+  return 'Waiting';
+};
+
 export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadStatementDialogProps) => {
   const [statementMonth, setStatementMonth] = useState(currentMonth());
   const [statementMonthTouched, setStatementMonthTouched] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitStageMessage, setSubmitStageMessage] = useState<string | null>(null);
   const [processingStatement, setProcessingStatement] = useState(false);
   const [processingTimedOut, setProcessingTimedOut] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<BankStatementStatus | null>(null);
@@ -145,6 +221,8 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
   const [detection, setDetection] = useState<DetectStatementMonthResponse | null>(null);
   const [detectionError, setDetectionError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [preparedUpload, setPreparedUpload] = useState<PreparedUpload | null>(null);
+  const [activeStatementId, setActiveStatementId] = useState<string | null>(null);
   const statementMonthTouchedRef = useRef(false);
   const detectionRequestIdRef = useRef(0);
   const processingRequestIdRef = useRef(0);
@@ -157,7 +235,9 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setFile(null);
     setUploadProgress(0);
     setUploading(false);
+    setFinalizing(false);
     setSubmitError(null);
+    setSubmitStageMessage(null);
     setProcessingStatement(false);
     setProcessingTimedOut(false);
     setProcessingStatus(null);
@@ -167,6 +247,8 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setDetection(null);
     setDetectionError(null);
     setDragActive(false);
+    setPreparedUpload(null);
+    setActiveStatementId(null);
     statementMonthTouchedRef.current = false;
     detectionRequestIdRef.current += 1;
     processingRequestIdRef.current += 1;
@@ -178,13 +260,65 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
 
   const uploadDisabled = useMemo(() => {
     if (uploading) return true;
+    if (finalizing) return true;
     if (processingStatement) return true;
     if (processingTimedOut) return true;
     if (detectingStatementMonth) return true;
     if (!file) return true;
     if (!statementMonth) return true;
     return false;
-  }, [detectingStatementMonth, file, processingStatement, processingTimedOut, statementMonth, uploading]);
+  }, [detectingStatementMonth, file, finalizing, processingStatement, processingTimedOut, statementMonth, uploading]);
+
+  const workflowStepsWithState = useMemo(() => {
+    const status = processingStatus;
+
+    const states: Record<(typeof uploadWorkflowSteps)[number]['key'], WorkflowStepState> = {
+      pick: file ? 'done' : 'active',
+      month: file ? (detectingStatementMonth ? 'active' : statementMonth ? 'done' : 'waiting') : 'waiting',
+      storage: uploading ? 'active' : preparedUpload ? 'done' : file ? 'waiting' : 'waiting',
+      record: finalizing ? 'active' : activeStatementId ? 'done' : preparedUpload ? 'waiting' : 'waiting',
+      jobs:
+        processingStatement || processingTimedOut
+          ? 'active'
+          : status === 'failed'
+            ? 'failed'
+            : status && status !== 'uploaded'
+              ? 'done'
+              : activeStatementId
+                ? 'waiting'
+                : 'waiting',
+      review:
+        status === 'ready_for_review'
+          ? 'done'
+          : status === 'failed'
+            ? 'failed'
+            : 'waiting'
+    };
+
+    if (submitError && !processingTimedOut && !processingStatement && activeStatementId) {
+      states.record = 'failed';
+      states.jobs = 'waiting';
+    }
+
+    return uploadWorkflowSteps.map((step) => ({
+      ...step,
+      state: states[step.key]
+    }));
+  }, [
+    activeStatementId,
+    detectingStatementMonth,
+    file,
+    finalizing,
+    preparedUpload,
+    processingStatement,
+    processingStatus,
+    processingTimedOut,
+    statementMonth,
+    submitError,
+    uploading
+  ]);
+
+  const busy = uploading || finalizing || processingStatement;
 
   const waitForExtractionAdvance = async (
     statementId: string,
@@ -288,6 +422,8 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
       setFile(null);
       setDetection(null);
       setDetectionError(null);
+      setPreparedUpload(null);
+      setActiveStatementId(null);
       setProcessingStatement(false);
       setProcessingTimedOut(false);
       setProcessingStatus(null);
@@ -301,6 +437,8 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
       setFile(null);
       setDetection(null);
       setDetectionError('Please choose a PDF statement file.');
+      setPreparedUpload(null);
+      setActiveStatementId(null);
       setProcessingStatement(false);
       setProcessingTimedOut(false);
       setProcessingStatus(null);
@@ -311,6 +449,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     }
 
     setFile(nextFile);
+    setPreparedUpload(null);
     await inspectSelectedFile(nextFile);
   };
 
@@ -323,32 +462,52 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
   const submit = async () => {
     if (!file) return;
 
-    setUploading(true);
-    setUploadProgress(0);
     setSubmitError(null);
+    setSubmitStageMessage(null);
     setProcessingTimedOut(false);
     setProcessingIssues([]);
     setProcessingProgress(null);
+    let finalizingAttempt = false;
 
     try {
-      const signed = await accountingApi.requestUploadUrl({
-        fileName: file.name,
-        statementMonth,
-        contentType: 'application/pdf'
-      });
+      let payload = preparedUpload;
 
-      const payload = signed.data.data;
+      if (!payload || payload.fileName !== file.name || payload.statementMonth !== statementMonth) {
+        setUploading(true);
+        setUploadProgress(0);
+        setSubmitStageMessage('Uploading PDF to secure storage…');
 
-      await axios.put(payload.uploadUrl, file, {
-        headers: {
-          'Content-Type': 'application/pdf'
-        },
-        onUploadProgress: (event) => {
-          if (!event.total) return;
-          const percent = Math.round((event.loaded / event.total) * 100);
-          setUploadProgress(Math.max(0, Math.min(100, percent)));
-        }
-      });
+        const signed = await accountingApi.requestUploadUrl({
+          fileName: file.name,
+          statementMonth,
+          contentType: 'application/pdf'
+        });
+
+        payload = {
+          fileName: file.name,
+          statementMonth,
+          statementId: signed.data.data.statementId,
+          gcsPath: signed.data.data.gcsPath
+        };
+
+        await axios.put(signed.data.data.uploadUrl, file, {
+          headers: {
+            'Content-Type': 'application/pdf'
+          },
+          onUploadProgress: (event) => {
+            if (!event.total) return;
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(Math.max(0, Math.min(100, percent)));
+          }
+        });
+
+        setPreparedUpload(payload);
+      }
+
+      finalizingAttempt = true;
+      setUploading(false);
+      setFinalizing(true);
+      setSubmitStageMessage('Saving the uploaded statement and starting processing…');
 
       const created = await accountingApi.createStatement({
         statementId: payload.statementId,
@@ -357,6 +516,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
         gcsPath: payload.gcsPath,
         source: 'upload'
       });
+      setActiveStatementId(created.data.data.statement.id);
 
       await onUploaded();
       const result = await waitForExtractionAdvance(
@@ -375,6 +535,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
       );
 
       if (result.kind === 'advanced') {
+        setPreparedUpload(null);
         onClose();
         return;
       }
@@ -390,13 +551,28 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
       const requestUrl = maybeAxiosError?.config?.url ?? '';
       const storageUploadFailureMessage =
         !maybeAxiosError?.response ? getStorageUploadFailureMessage(requestUrl) : null;
+      const submitFailureReason = extractApiErrorReason(error);
+
+      if (
+        submitFailureReason === 'statement_pdf_missing' ||
+        submitFailureReason === 'statement_storage_access_denied'
+      ) {
+        setPreparedUpload(null);
+      }
 
       setSubmitError(
         storageUploadFailureMessage ??
-          extractApiErrorMessage(error, 'Failed to upload statement'),
+          extractApiErrorMessage(
+            error,
+            finalizingAttempt
+              ? 'The PDF upload finished, but RetailSync could not create the statement. Retry from this dialog.'
+              : 'Failed to upload statement'
+          ),
       );
     } finally {
       setUploading(false);
+      setFinalizing(false);
+      setSubmitStageMessage(null);
     }
   };
 
@@ -405,12 +581,15 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setDetection(null);
     setDetectionError(null);
     setSubmitError(null);
+    setSubmitStageMessage(null);
     setProcessingStatement(false);
     setProcessingTimedOut(false);
     setProcessingStatus(null);
     setProcessingProgress(null);
     setProcessingIssues([]);
     setDetectingStatementMonth(false);
+    setPreparedUpload(null);
+    setActiveStatementId(null);
     detectionRequestIdRef.current += 1;
     processingRequestIdRef.current += 1;
     if (fileInputRef.current) {
@@ -418,8 +597,47 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     }
   };
 
+  const refreshProcessingStatus = async () => {
+    if (!activeStatementId) return;
+    try {
+      const response = await accountingApi.getStatementStatus(activeStatementId);
+      setProcessingStatus(response.data.data.status);
+      setProcessingProgress(response.data.data.progress ?? null);
+      setProcessingIssues(response.data.data.issues ?? []);
+      setProcessingTimedOut(false);
+      if (response.data.data.status !== 'failed' && response.data.data.status !== 'ready_for_review') {
+        await waitForExtractionAdvance(
+          activeStatementId,
+          response.data.data.status,
+          response.data.data.progress ?? null
+        );
+      }
+    } catch (error) {
+      setSubmitError(extractApiErrorMessage(error, 'Failed to refresh statement status'));
+    }
+  };
+
+  const retryProcessing = async () => {
+    if (!activeStatementId) return;
+    try {
+      setSubmitError(null);
+      setSubmitStageMessage('Restarting statement processing…');
+      await accountingApi.reprocessStatement(activeStatementId);
+      const response = await accountingApi.getStatementStatus(activeStatementId);
+      await waitForExtractionAdvance(
+        activeStatementId,
+        response.data.data.status,
+        response.data.data.progress ?? null
+      );
+    } catch (error) {
+      setSubmitError(extractApiErrorMessage(error, 'Failed to restart statement processing'));
+    } finally {
+      setSubmitStageMessage(null);
+    }
+  };
+
   return (
-    <Dialog open={open} onClose={uploading ? undefined : onClose} fullWidth maxWidth="sm">
+    <Dialog open={open} onClose={busy ? undefined : onClose} fullWidth maxWidth="sm">
       <DialogTitle>Upload Bank Statement</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
@@ -432,12 +650,12 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
             aria-label="Statement PDF drop zone"
             onDragOver={(event) => {
               event.preventDefault();
-              if (uploading || processingStatement || processingTimedOut) return;
+              if (busy || processingTimedOut) return;
               setDragActive(true);
             }}
             onDragEnter={(event) => {
               event.preventDefault();
-              if (uploading || processingStatement || processingTimedOut) return;
+              if (busy || processingTimedOut) return;
               setDragActive(true);
             }}
             onDragLeave={(event) => {
@@ -448,7 +666,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
             }}
             onDrop={(event) => {
               event.preventDefault();
-              if (uploading || processingStatement || processingTimedOut) return;
+              if (busy || processingTimedOut) return;
               setDragActive(false);
               const picked = event.dataTransfer.files?.[0] ?? null;
               void handleSelectedFile(picked);
@@ -504,7 +722,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                         size="small"
                         variant="outlined"
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={uploading || processingStatement || processingTimedOut}
+                        disabled={busy || processingTimedOut}
                       >
                         Change
                       </Button>
@@ -513,7 +731,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                         color="inherit"
                         startIcon={<DeleteOutlineIcon />}
                         onClick={clearSelectedFile}
-                        disabled={uploading || processingStatement || processingTimedOut}
+                        disabled={busy || processingTimedOut}
                       >
                         Clear
                       </Button>
@@ -525,7 +743,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
               <Button
                 variant={file ? 'outlined' : 'contained'}
                 onClick={() => fileInputRef.current?.click()}
-                disabled={uploading || processingStatement || processingTimedOut}
+                disabled={busy || processingTimedOut}
                 startIcon={<UploadFileOutlinedIcon />}
               >
                 {file ? 'Choose another PDF' : 'Choose PDF'}
@@ -553,7 +771,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
               setStatementMonth(event.target.value);
               setStatementMonthTouched(true);
             }}
-            disabled={uploading || processingStatement || processingTimedOut}
+            disabled={busy || processingTimedOut}
             InputLabelProps={{ shrink: true }}
             helperText="RetailSync will auto-detect the month when confidence is high. You can override it anytime."
             InputProps={{
@@ -577,6 +795,10 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
             <Alert severity="info">
               Detecting the statement month…
             </Alert>
+          ) : null}
+
+          {submitStageMessage ? (
+            <Alert severity="info">{submitStageMessage}</Alert>
           ) : null}
 
           {processingStatement || processingTimedOut ? (
@@ -659,35 +881,10 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                   {detection.autoApply ? (
                     <Chip size="small" label="Auto-applied" color="success" variant="outlined" />
                   ) : null}
-                  {isDevelopment ? (
-                    <Chip
-                      size="small"
-                      label={`Confidence: ${detection.confidence}`}
-                      variant="outlined"
-                    />
-                  ) : null}
-                  {isDevelopment ? (
-                    <Chip
-                      size="small"
-                      label={
-                        detection.source === 'pdf_text'
-                          ? 'Source: PDF text'
-                          : detection.source === 'filename'
-                            ? 'Source: file name'
-                            : 'Source: unknown'
-                      }
-                      variant="outlined"
-                    />
-                  ) : null}
                 </Stack>
                 <Typography variant="body2">
                   {getDetectionMessage(detection, statementMonth)}
                 </Typography>
-                {isDevelopment && detection.evidence ? (
-                  <Typography variant="caption" color="text.secondary">
-                    Evidence: {detection.evidence}
-                  </Typography>
-                ) : null}
               </Stack>
             </Alert>
           ) : null}
@@ -696,33 +893,111 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
             <Alert severity="warning">{detectionError}</Alert>
           ) : null}
 
+          <Paper variant="outlined" sx={{ p: 1.5 }}>
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">Workflow</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Uploading a statement starts a background pipeline. You do not need to stay in this dialog while extraction continues.
+              </Typography>
+              <Stack spacing={0.75}>
+                {workflowStepsWithState.map((step) => (
+                  <Paper
+                    key={step.key}
+                    variant="outlined"
+                    sx={{
+                      p: 1,
+                      bgcolor: step.state === 'active' ? 'action.hover' : 'background.default',
+                      borderColor:
+                        step.state === 'active'
+                          ? 'primary.main'
+                          : step.state === 'failed'
+                            ? 'error.main'
+                            : 'divider'
+                    }}
+                  >
+                    <Stack spacing={0.5}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          {step.title}
+                        </Typography>
+                        <Chip
+                          size="small"
+                          color={getWorkflowChipColor(step.state)}
+                          label={getWorkflowChipLabel(step.state)}
+                        />
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary">
+                        {step.detail}
+                      </Typography>
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            </Stack>
+          </Paper>
+
           {submitError ? (
-            <Alert severity="error">{submitError}</Alert>
+            <Alert
+              severity="error"
+              action={
+                <Stack direction="row" spacing={1}>
+                  {file && !busy ? (
+                    <Button color="inherit" size="small" onClick={() => void submit()}>
+                      Retry save
+                    </Button>
+                  ) : null}
+                  {activeStatementId && !busy ? (
+                    <Button color="inherit" size="small" onClick={() => void retryProcessing()}>
+                      Retry processing
+                    </Button>
+                  ) : null}
+                </Stack>
+              }
+            >
+              {submitError}
+            </Alert>
           ) : null}
 
           <Typography variant="body2" color="text.secondary">
             Uploaded file is stored in secure object storage and processed in background jobs.
           </Typography>
 
-          {uploading && (
+          {(uploading || finalizing) && (
             <Stack spacing={1}>
-              <LinearProgress variant="determinate" value={uploadProgress} />
+              <LinearProgress
+                variant={uploading ? 'determinate' : 'indeterminate'}
+                value={uploading ? uploadProgress : undefined}
+              />
               <Typography variant="caption" color="text.secondary">
-                Uploading {uploadProgress}%
+                {uploading ? `Uploading ${uploadProgress}%` : 'Creating statement record…'}
               </Typography>
             </Stack>
           )}
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={uploading}>
+        <Button onClick={onClose} disabled={busy}>
           {processingStatement || processingTimedOut ? 'Continue in background' : 'Cancel'}
         </Button>
+        {activeStatementId && !busy && (processingTimedOut || processingStatus === 'failed') ? (
+          <Button onClick={() => void refreshProcessingStatus()} variant="outlined">
+            Refresh Status
+          </Button>
+        ) : null}
+        {activeStatementId && !busy && (processingTimedOut || processingStatus === 'failed') ? (
+          <Button onClick={() => void retryProcessing()} variant="outlined">
+            Retry Processing
+          </Button>
+        ) : null}
         <Button onClick={() => void submit()} variant="contained" disabled={uploadDisabled}>
           {uploading
             ? 'Uploading...'
+            : finalizing
+              ? 'Saving...'
             : processingStatement
               ? 'Waiting for extraction...'
+              : preparedUpload
+                ? 'Retry Save'
               : 'Upload & Start'}
         </Button>
       </DialogActions>

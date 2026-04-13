@@ -20,7 +20,6 @@ import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import SyncAltIcon from '@mui/icons-material/SyncAlt';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
-import InventoryIcon from '@mui/icons-material/Inventory';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -131,11 +130,6 @@ export const DashboardLayout = () => {
   ];
 
   const hubLinks: NavItem[] = [
-    ...(hasPermission(permissions, 'items', 'view') ||
-      hasPermission(permissions, 'inventory', 'view') ||
-      hasPermission(permissions, 'locations', 'view')
-      ? [{ label: 'Inventory', path: '/dashboard/operations', icon: <InventoryIcon fontSize="small" /> }]
-      : []),
     ...(hasPermission(permissions, 'invoices', 'view') || hasPermission(permissions, 'suppliers', 'view')
       ? [{ label: 'Procurement', path: '/dashboard/procurement', icon: <ReceiptLongIcon fontSize="small" /> }]
       : []),

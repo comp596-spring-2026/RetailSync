@@ -540,6 +540,95 @@ describe('quickbooksController oauth flow', () => {
     );
   });
 
+  it('returns a degraded reconnect-needed oauth status when the stored secret cannot be decrypted', async () => {
+    const settings = createSettingsDoc();
+    settings.quickbooks.connected = true;
+    settings.quickbooks.environment = 'production';
+    settings.quickbooks.realmId = 'realm-prod-1';
+    settings.quickbooks.companyName = 'RetailSync Books';
+
+    getOrCreateSettingsMock.mockResolvedValue(settings);
+    ensureFreshQuickBooksSecretMock.mockRejectedValue(
+      new Error('Unsupported state or unable to authenticate data')
+    );
+    loadQuickBooksSecretMock.mockRejectedValue(
+      new Error('Unsupported state or unable to authenticate data')
+    );
+
+    const { res, status, json } = createResponse();
+    const req = {
+      companyId: 'company-1',
+      user: {
+        id: 'user-1'
+      }
+    } as unknown as Request;
+
+    await getQuickBooksOAuthStatus(req, res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: expect.objectContaining({
+          ok: false,
+          reason: 'quickbooks_secret_unreadable',
+          connected: true,
+          degraded: true,
+          status: 'degraded',
+          needsReconnect: true,
+          environment: 'production',
+          realmId: 'realm-prod-1',
+          companyName: 'RetailSync Books',
+          health: null
+        })
+      })
+    );
+  });
+
+  it('returns a degraded oauth status when the stored secret cannot be decrypted', async () => {
+    const settings = createSettingsDoc();
+    settings.quickbooks.connected = true;
+    settings.quickbooks.environment = 'production';
+    settings.quickbooks.realmId = 'realm-prod-1';
+    settings.quickbooks.companyName = 'RetailSync Books';
+
+    getOrCreateSettingsMock.mockResolvedValue(settings);
+    ensureFreshQuickBooksSecretMock.mockRejectedValue(
+      new Error('Unsupported state or unable to authenticate data')
+    );
+    loadQuickBooksSecretMock.mockRejectedValue(
+      new Error('Unsupported state or unable to authenticate data')
+    );
+
+    const { res, status, json } = createResponse();
+    const req = {
+      companyId: 'company-1',
+      user: {
+        id: 'user-1'
+      }
+    } as unknown as Request;
+
+    await getQuickBooksOAuthStatus(req, res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        data: expect.objectContaining({
+          ok: false,
+          reason: 'quickbooks_secret_unreadable',
+          connected: true,
+          degraded: true,
+          needsReconnect: true,
+          environment: 'production',
+          realmId: 'realm-prod-1',
+          companyName: 'RetailSync Books',
+          health: null
+        })
+      })
+    );
+  });
+
   it('returns quickbooks query payload when direct select query succeeds', async () => {
     const payload = {
       QueryResponse: {

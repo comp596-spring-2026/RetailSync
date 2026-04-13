@@ -309,6 +309,12 @@ export const extractQuickBooksCallbackReason = (error: unknown) => {
   const normalized = message.toLowerCase();
   if (normalized.includes("missing encryption_key")) return "encryption_key_missing";
   if (normalized.includes("encryption_key must be base64")) return "encryption_key_invalid";
+  if (
+    normalized.includes("unsupported state") ||
+    normalized.includes("unable to authenticate data")
+  ) {
+    return "quickbooks_secret_unreadable";
+  }
   if (normalized.includes("quickbooks_oauth_not_configured"))
     return "quickbooks_oauth_not_configured";
   if (normalized.includes("access_token_missing")) return "access_token_missing";
@@ -517,7 +523,12 @@ export const getQuickBooksOAuthStatus = async (
       health,
     });
   } catch (error) {
-    const secret = quickbooks.connected ? await loadQuickBooksSecret(companyId) : null;
+    let secret = null;
+    try {
+      secret = quickbooks.connected ? await loadQuickBooksSecret(companyId) : null;
+    } catch {
+      secret = null;
+    }
     const health = getQuickBooksSecretHealth(secret);
 
     return buildQuickBooksOAuthStatus({

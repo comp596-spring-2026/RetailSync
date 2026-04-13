@@ -101,6 +101,10 @@ export const statementArtifactsSchema = z.object({
   pageImagePaths: z.array(z.string().trim()).default([]),
   ocrPath: z.string().trim().optional(),
   ocrTextPath: z.string().trim().optional(),
+  transactionsTablePath: z.string().trim().optional(),
+  checksClearedTablePath: z.string().trim().optional(),
+  transactionSectionsPath: z.string().trim().optional(),
+  extractedChecksPath: z.string().trim().optional(),
   geminiPath: z.string().trim().optional(),
   detectionEvidence: z.string().trim().optional(),
   detectedStatementMonth: statementMonthSchema.optional(),
@@ -122,6 +126,7 @@ export const statementCheckArtifactsSchema = z.object({
   cropImagePath: z.string().trim().optional(),
   ocrTextPath: z.string().trim().optional(),
   ocrJsonPath: z.string().trim().optional(),
+  structuredPath: z.string().trim().optional(),
   geminiPath: z.string().trim().optional(),
   stageTimestamps: statementCheckStageTimestampsSchema.default({})
 });
@@ -313,6 +318,40 @@ export const bankStatementStatusResponseSchema = z.object({
   updatedAt: z.string().trim(),
   artifacts: statementArtifactsSchema.optional(),
   issues: z.array(z.string().trim()).default([])
+});
+
+export const statementSuggestionItemSchema = z.object({
+  id: z.string().trim().min(1),
+  source: z.enum(['transaction', 'check']),
+  date: z.string().trim().optional(),
+  description: z.string().trim().min(1),
+  amount: z.number(),
+  direction: z.enum(['debit', 'credit']),
+  checkNumber: z.string().trim().optional(),
+  payeeName: z.string().trim().optional(),
+  proposedTxnType: quickbooksTxnTypeSchema.optional(),
+  proposalConfidence: z.number().min(0).max(1).optional(),
+  reviewStatus: statementReviewStatusSchema.optional(),
+  postingStatus: statementPostingStatusSchema.optional(),
+  status: z.string().trim().optional(),
+  reasons: z.array(z.string().trim()).default([]),
+  linkedCheckId: z.string().trim().optional()
+});
+
+export const statementSuggestionsResponseSchema = z.object({
+  statementId: z.string().trim().min(1),
+  summary: z.object({
+    totalItems: z.number().int().nonnegative(),
+    checks: z.number().int().nonnegative(),
+    deposits: z.number().int().nonnegative(),
+    debits: z.number().int().nonnegative(),
+    credits: z.number().int().nonnegative(),
+    expenses: z.number().int().nonnegative(),
+    transfers: z.number().int().nonnegative(),
+    checksSuggested: z.number().int().nonnegative(),
+    uncategorized: z.number().int().nonnegative()
+  }),
+  items: z.array(statementSuggestionItemSchema)
 });
 
 export const listChecksQuerySchema = z.object({
@@ -1154,6 +1193,8 @@ export type ListBankStatementsQuery = z.infer<typeof listBankStatementsQuerySche
 export type ReprocessBankStatementInput = z.infer<typeof reprocessBankStatementSchema>;
 export type BankStatementListItem = z.infer<typeof bankStatementListItemSchema>;
 export type BankStatementDetail = z.infer<typeof bankStatementDetailSchema>;
+export type StatementSuggestionItem = z.infer<typeof statementSuggestionItemSchema>;
+export type StatementSuggestionsResponse = z.infer<typeof statementSuggestionsResponseSchema>;
 export type StatementTransaction = z.infer<typeof statementTransactionSchema>;
 export type StatementCheck = z.infer<typeof statementCheckSchema>;
 export type LedgerEntry = z.infer<typeof ledgerEntrySchema>;

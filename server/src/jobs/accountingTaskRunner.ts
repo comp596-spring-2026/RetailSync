@@ -21,9 +21,13 @@ import {
   buildCheckCropPath,
   buildCheckOcrPath,
   buildCheckStructuredPath,
+  buildStatementChecksClearedTablePath,
+  buildStatementExtractedChecksPath,
   buildGeminiPath,
   buildOcrPath,
   buildPageImagePath,
+  buildStatementTransactionSectionsPath,
+  buildStatementTransactionsTablePath,
   buildStatementOcrTextPath
 } from '../services/accountingStorageService';
 import { renderAndPersistStatementPages } from '../services/accountingPdfRenderService';
@@ -402,6 +406,78 @@ const parseTransactionsFromOcrPages = (pages: StatementPageObservationWithRegion
   return transactions.slice(0, 500);
 };
 
+const buildTransactionSections = (transactions: ParsedTransaction[]) => {
+  const byPage = new Map<number, ParsedTransaction[]>();
+  for (const txn of transactions) {
+    const pageNumber = Number(txn.sourceLocator.pageNumber ?? 1);
+    const pageTransactions = byPage.get(pageNumber) ?? [];
+    pageTransactions.push(txn);
+    byPage.set(pageNumber, pageTransactions);
+  }
+
+  return Array.from(byPage.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([pageNumber, pageTransactions]) => ({
+      pageNumber,
+      transactionCount: pageTransactions.length,
+      firstRowIndex: Math.min(...pageTransactions.map((txn) => Number(txn.sourceLocator.rowIndex ?? 0))),
+      lastRowIndex: Math.max(...pageTransactions.map((txn) => Number(txn.sourceLocator.rowIndex ?? 0)))
+    }));
+};
+
+const buildChecksClearedRows = (transactions: ParsedTransaction[]) =>
+  transactions
+    .filter((txn) => typeof txn.checkNumber === 'string' && txn.checkNumber.trim().length > 0)
+    .map((txn) => ({
+      localId: txn.localId,
+      pageNumber: txn.sourceLocator.pageNumber ?? null,
+      postDate: txn.postDate,
+      checkNumber: txn.checkNumber,
+      description: txn.description,
+      merchant: txn.merchant,
+      amount: txn.amount,
+      type: txn.type,
+      bbox: txn.sourceLocator.bbox ?? undefined
+    }));
+
+const saveExtractedChecksArtifact = async (args: {
+  bucketName: string;
+  companyId: string;
+  statementId: string;
+  rootPrefix: string;
+}) => {
+  const extractedChecksPath = buildStatementExtractedChecksPath(args.rootPrefix);
+  const checks = await StatementCheckModel.find({
+    companyId: args.companyId,
+    statementId: args.statementId
+  })
+    .sort({ createdAt: 1 })
+    .lean();
+
+  await saveJson(
+    args.bucketName,
+    extractedChecksPath,
+    checks.map((check) => ({
+      id: String(check._id),
+      status: check.status,
+      pageNumber: check.artifacts?.pageNumber ?? undefined,
+      cropBBox: Array.isArray(check.artifacts?.cropBBox) ? check.artifacts.cropBBox : undefined,
+      cropImagePath: check.artifacts?.cropImagePath ?? check.gcs?.frontPath ?? undefined,
+      ocrTextPath: check.artifacts?.ocrTextPath ?? undefined,
+      ocrJsonPath: check.artifacts?.ocrJsonPath ?? check.gcs?.ocrPath ?? undefined,
+      structuredPath: check.artifacts?.structuredPath ?? check.gcs?.structuredPath ?? undefined,
+      geminiPath: check.artifacts?.geminiPath ?? undefined,
+      extracted: check.extracted ?? undefined,
+      autoFill: check.autoFill ?? undefined,
+      confidence: check.confidence ?? undefined,
+      match: check.match ?? undefined,
+      processing: check.processing ?? undefined
+    }))
+  );
+
+  return extractedChecksPath;
+};
+
 const detectStatementMonthEvidence = (pages: StatementPageObservation[]) => {
   const evidence: Array<{
     pageNumber: number;
@@ -643,11 +719,16 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       );
       const { pages: ocrPages, combinedText } = await readStatementOcrPages(bucketName, ocrPath);
       const parsed = parseTransactionsFromOcrPages(ocrPages);
+      const transactionSections = buildTransactionSections(parsed);
+      const checksClearedRows = buildChecksClearedRows(parsed);
       const statementMonth = String(
         statement.statementMonth ?? statement.artifacts?.detectedStatementMonth ?? ''
       );
 
       const normalizedPath = buildGeminiPath(rootPrefix, 'normalized.v1.json');
+      const transactionsTablePath = buildStatementTransactionsTablePath(rootPrefix);
+      const checksClearedTablePath = buildStatementChecksClearedTablePath(rootPrefix);
+      const transactionSectionsPath = buildStatementTransactionSectionsPath(rootPrefix);
       await saveJson(bucketName, normalizedPath, {
         schemaVersion: 'v1',
         statementId: payload.statementId,
@@ -657,6 +738,11 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         transactionCount: parsed.length,
         transactions: parsed
       });
+      await Promise.all([
+        saveJson(bucketName, transactionsTablePath, parsed),
+        saveJson(bucketName, checksClearedTablePath, checksClearedRows),
+        saveJson(bucketName, transactionSectionsPath, transactionSections)
+      ]);
 
       await Promise.all([
         StatementTransactionModel.deleteMany({
@@ -791,6 +877,9 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         pageImagePaths: pageImagePaths.length > 0 ? pageImagePaths : statement.artifacts?.pageImagePaths ?? [],
         ocrPath,
         ocrTextPath,
+        transactionsTablePath,
+        checksClearedTablePath,
+        transactionSectionsPath,
         geminiPath: normalizedPath,
         stageTimestamps: {
           structuringAt: statement.artifacts?.stageTimestamps?.structuringAt ?? nowIso()
@@ -807,6 +896,9 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       await statement.save();
 
       artifacts.normalized = normalizedPath;
+      artifacts.transactionsTable = transactionsTablePath;
+      artifacts.checksClearedTable = checksClearedTablePath;
+      artifacts.transactionSections = transactionSectionsPath;
       artifacts.statementOcrText = ocrTextPath;
       return { artifacts };
     }
@@ -918,7 +1010,19 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         }
       }
 
+      const extractedChecksPath = await saveExtractedChecksArtifact({
+        bucketName,
+        companyId: payload.companyId,
+        statementId: payload.statementId,
+        rootPrefix
+      });
+      mergeStatementArtifacts(statement, {
+        extractedChecksPath
+      });
+      await statement.save();
+
       artifacts.checks = checks.map((check) => check.frontPath).join(',');
+      artifacts.extractedChecks = extractedChecksPath;
       artifacts.statementChecksQueuedAt = queuedAt;
       return {
         artifacts,
@@ -1181,10 +1285,25 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       }
 
       await updateStatementProgressFromChecks(payload.companyId, payload.statementId);
+      const extractedChecksPath = await saveExtractedChecksArtifact({
+        bucketName,
+        companyId: payload.companyId,
+        statementId: payload.statementId,
+        rootPrefix
+      });
+      await BankStatement.updateOne(
+        { _id: payload.statementId, companyId: payload.companyId },
+        {
+          $set: {
+            'artifacts.extractedChecksPath': extractedChecksPath
+          }
+        }
+      );
 
       artifacts.checkOcr = ocrPath;
       artifacts.checkOcrText = ocrTextPath;
       artifacts.checkStructured = structuredPath;
+      artifacts.extractedChecks = extractedChecksPath;
       return { artifacts };
     }
     case 'matching.refresh': {

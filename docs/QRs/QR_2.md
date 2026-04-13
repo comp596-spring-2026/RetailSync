@@ -1,52 +1,65 @@
-# Quarterly Project Report #2
-
-©2026 Richard Zins CC BY-NC-SA 4.0
-
-## Table of Contents
-
-- [Expected Paragraphs](#expected-paragraphs)
-- [What Did You Do](#what-did-you-do)
-- [How Did You Do It](#how-did-you-do-it)
-- [What Problems Did You Encounter](#what-problems-did-you-encounter)
-
 ## Expected Paragraphs
 
 ### What did you do?
 
-This quarter I focused on turning RetailSync into a usable end-to-end operations and accounting platform instead of just a collection of isolated modules. The project now supports tenant-aware authentication, permissions, POS ingestion, inventory workflows, Google Sheets integration, bank statement upload and extraction, check review, ledger approval, and QuickBooks connectivity. The biggest outcome is that the system can now move operational data from store activity into accounting review flows in a way that is much closer to a real working product.
+In this phase of the project, I focused on turning RetailSync from a foundation-level full-stack application into a more realistic workflow-based system. Earlier work was mostly about setting up authentication, tenant/company structure, permissions, and the initial database and module design. In this report period, I worked more on how the different parts of the system connect together in actual use cases.
+
+The biggest progress was in the accounting workflow. I built and improved a statement-processing flow where a user can upload a bank statement PDF, store it in secure Google Cloud Storage, save the statement record in MongoDB, trigger background processing, extract OCR and structured data, detect checks, and review the results inside the app. I also improved the statement detail page so it now acts more like a review workspace, with a PDF viewer, artifact viewing, progress tracking, and better retry/error handling.
+
+I also worked on QuickBooks integration, especially around CRUD completeness, authorization reliability, and how statement-driven accounting data relates to QuickBooks posting. In addition to product features, I spent time on deployment-related and infrastructure-related issues such as environment configuration, Google Cloud Storage bucket CORS, task dispatch behavior, and debugging background workflow failures. Overall, this phase was about making RetailSync behave more like a real connected product instead of a collection of separate modules.
 
 ### How did you do it?
 
-I built the project as a TypeScript monorepo with a React client, an Express API, shared schemas, MongoDB models, and a growing automated test suite. I implemented features incrementally by first defining shared validation contracts, then building backend services and routes, then wiring client pages and state around them. I also relied on local docs, targeted testing, and iterative debugging so each new feature could connect cleanly to the rest of the system instead of becoming a one-off implementation.
+I built the project using a full-stack TypeScript setup. The frontend uses React, Redux Toolkit, and Material UI, while the backend uses Express, MongoDB, Mongoose, and Zod. I kept the project organized as a monorepo so shared schemas and validation rules could be reused between frontend and backend.
+
+My workflow was usually to first define the shape of the data and validation rules, then implement the backend route or service, and finally connect it to the frontend. For workflow-heavy features like statement upload and extraction, I also had to think about storage paths, background jobs, retries, status tracking, and how the UI would represent long-running activity.
+
+I used Google Cloud Storage for secure file upload and artifact storage, MongoDB for application state and workflow records, and background task logic for asynchronous processing. I also used tools like pnpm workspaces, Vitest, Docker/local environment setup, and cloud configuration debugging to keep development manageable. This phase required a lot of iterative debugging because many issues came from the interaction between frontend, backend, storage, and third-party integrations rather than from a single file.
 
 ### What problems did you encounter?
 
-The main problems were integration complexity, especially around external systems and file-processing workflows. Accounting features are more fragile than basic CRUD because they depend on OCR quality, storage configuration, queue behavior, and third-party APIs such as QuickBooks and Google Cloud Storage. I also ran into environment-specific issues during testing and local development, including browser-to-bucket CORS failures, sandbox-related test limitations, and the need to keep multi-tenant permission boundaries correct across every route and query.
+One of the biggest challenges was that the project now has multi-step workflows, which means bugs can happen across several layers at once. For example, a statement PDF might upload successfully, but the later processing could still fail because of storage-read problems, queue dispatch issues, or invalid environment configuration. That made debugging more difficult because I had to trace the full path from browser upload to cloud storage, MongoDB persistence, task execution, artifact generation, and frontend display.
+
+I also encountered problems with Google Cloud Storage bucket configuration, especially around CORS for browser uploads. Since the upload flow depends on signed URLs and direct browser-to-storage communication, the bucket settings had to match the local frontend origin correctly. I also had issues with background processing and QuickBooks authorization, including degraded OAuth states and environment-dependent failures.
+
+Another challenge was UI trust and visibility. When a workflow takes time, the user needs to see what stage is happening or it feels like the system is frozen. Because of that, I had to improve the UX around loading, processing activity, retries, and saved artifacts. This phase showed me that workflow software needs both backend correctness and clear frontend feedback to feel reliable.
 
 ## What Did You Do
 
-This quarter I finished or materially advanced several major features. On the product side, RetailSync now supports user authentication, company onboarding, role-based permissions, POS imports, inventory and reporting flows, and accounting modules that handle statement uploads, extraction progress, check processing, review, and QuickBooks integration. I also extended the QuickBooks write surface so the manual write entities now support full CRUD in the app for `sales-receipt`, `invoice`, and `payment`, while the accounting pipeline continues to create and read statement-driven `check`, `expense`, `deposit`, `transfer`, and fallback journal entries through the live posting flow.
+### What features did you finish?
 
-Yes, these features can be demoed. A realistic demo can now show a user signing in, selecting a company, importing operational data, uploading a bank statement PDF, watching extraction progress, reviewing checks and ledger results, and interacting with QuickBooks-connected write screens. A second demo path can show the accounting workspace with QuickBooks read/write operations and the upload-to-storage flow that now has clearer browser-origin-aware debugging for CORS problems.
+I finished or significantly improved the bank statement workflow, including secure PDF upload, MongoDB statement persistence, processing status handling, background extraction flow, artifact tracking, and statement review UI. I also improved the statement detail page with embedded artifact viewing, clearer progress indicators, and a better activity/debugging experience.
 
-Many of the features are integrated in a way where they can be used together. Authentication, tenancy, permissions, statement upload, storage, extraction, review, ledger approval, and QuickBooks posting are all connected. The system is no longer just a set of standalone pages; the most important workflows now cross multiple modules and shared services.
+I also completed more of the QuickBooks integration by confirming supported transaction flows and adding missing CRUD coverage for the manual QuickBooks write path. In addition, I fixed infrastructure and workflow issues involving Google Cloud Storage uploads, bucket CORS behavior, environment configuration, and local task dispatch behavior.
+
+### Can the features be demoed?
+
+Yes, the features can be demoed. A demo can now show login, tenant-aware access, a bank statement upload, storage of the PDF in Google Cloud Storage, creation of the statement record in MongoDB, progress through extraction and review, and viewing the results inside the app. A second demo path can show QuickBooks-connected operations and how the accounting workspace now behaves more like a real end-to-end system.
+
+### How many of the features are integrated in a way where they can be used together?
+
+A large portion of the important features are now integrated. Authentication, company scoping, permissions, statement upload, cloud storage, MongoDB persistence, background processing, artifact generation, review UI, and QuickBooks-related operations now connect to each other in a usable workflow. Not every part of the system is fully complete yet, but it is no longer just separate modules; several core features now work together as one flow.
 
 ## How Did You Do It
 
-I used a combination of architectural patterns, targeted implementation, and iterative refinement. I did not rely on a single starter template for the final product, but I did follow common patterns from React, Redux Toolkit, Express, Mongoose, Zod, and Vite. For specific features, I studied API documentation and existing examples, especially for OAuth, signed uploads, and QuickBooks request shapes, then adapted those patterns to the structure of this codebase.
+### Did you use any project templates or tutorials?
 
-I did seek help from outside sources in the form of documentation, design references, and conversations with others when architecture or integration details were unclear. That support was most useful when validating approach rather than outsourcing implementation. I also used automated tests and existing repo docs as a form of internal guidance so new work stayed aligned with the project structure.
+I did not use a full project template, but I followed common patterns from React, Express, MongoDB, and TypeScript projects. I also used official documentation and examples for features like authentication, signed uploads, storage configuration, API design, and frontend file handling.
 
-Yes, I used AI/ML/LLMs. I used them as development assistants for code analysis, implementation support, debugging, refactoring, and drafting technical explanations. In this quarter they were especially useful for tracing integration gaps, validating QuickBooks CRUD coverage, identifying the root cause of the Google Cloud Storage CORS issue, and accelerating documentation and reporting. I still verified behavior against the actual codebase and test results before treating any conclusion as complete.
+### Did you seek help from the instructor or other colleagues?
 
-## What Problems Did You Encounter
+I mainly implemented the features independently, but I did use outside input when I needed help thinking through architecture decisions, debugging, or workflow design. Discussions with others and reference material were useful for validating better approaches, especially when dealing with larger structural decisions or integration issues.
 
-My main concern about progress is not lack of functionality, but the increasing complexity of the accounting and integration surface. Features now span authentication, file storage, OCR, asynchronous processing, review workflows, and third-party accounting APIs, which means a bug in one layer can block an entire workflow. That makes testing, observability, and configuration management much more important than they were earlier in the project.
+### Did you use any AI/ML/LLMs?
 
-One concrete issue I encountered was browser upload failures caused by Google Cloud Storage bucket CORS configuration. The app was already using signed upload URLs correctly, but local-origin assumptions were stale, which made the bug appear inconsistent depending on which frontend port was being used. I fixed that by updating the local default origins, improving the user-facing error message so it reflects the actual browser origin, and keeping the local-development documentation aligned with the supported ports.
+Yes, I used AI tools during development. I used them mainly for debugging support, code analysis, implementation ideas, and understanding integration problems faster. However, I still tested and verified everything in the actual project before treating it as complete.
 
-Another issue was QuickBooks support not being fully CRUD-complete for the write entities. The repo already supported create, read, list, and update for manual QuickBooks write transactions, but delete support was missing. I closed that gap by adding delete contracts, service logic, controller handling, routes, client API support, and targeted tests. A remaining limitation is that statement-derived accounting entries still do not route into every possible QuickBooks entity type; that pipeline is intentionally narrower and still uses a different posting model than the manual write screens.
+## What Problmes Did You Encounter
 
-I do still need help in the sense that continued feedback on integration design, accounting expectations, and demo priorities would be valuable. The project is at the stage where the biggest risks are no longer simple coding tasks; they are workflow correctness, polish, and making sure the most important cross-module flows are the ones being improved first.
+### Do you have any concerns about your progress?
 
-Last updated 2026-03-27 13:54:22 -0700
+My main concern is managing complexity as the system grows. The project now includes authentication, permissions, data import, storage, OCR/extraction, background jobs, review UX, and QuickBooks integration. Because of that, I need to keep improving test coverage, observability, and overall project structure so the system remains maintainable and does not become fragile.
+
+### Do you need any help currently?
+
+The most useful help right now would be feedback on workflow design, architecture decisions, and best practices for scaling a larger full-stack application with integrations. Guidance on which workflows should be prioritized next would also be helpful, since the project is now at the stage where integration quality matters as much as individual features.

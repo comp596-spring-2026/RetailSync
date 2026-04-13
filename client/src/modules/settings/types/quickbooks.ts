@@ -59,6 +59,8 @@ export const formatQuickBooksOAuthReason = (reason: string | null | undefined) =
       return 'QuickBooks is not connected';
     case 'quickbooks_secret_missing':
       return 'Stored QuickBooks credentials are missing';
+    case 'quickbooks_secret_unreadable':
+      return 'Stored QuickBooks credentials could not be read';
     case 'quickbooks_refresh_token_missing':
       return 'Refresh token is missing';
     case 'quickbooks_invalid_grant':

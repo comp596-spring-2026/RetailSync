@@ -37,6 +37,7 @@ import {
   QuickBooksWriteTxnType,
   QuickBooksWriteUpdateInput,
   StatementCheck,
+  StatementSuggestionsResponse,
   RequestStatementUploadUrlInput
 } from '@retailsync/shared';
 import { api } from '../../../app/api/client';
@@ -93,6 +94,20 @@ export class AccountingApi {
     }>('/accounting/statements/' + id);
   }
 
+  getStatementArtifactBlob(id: string, path: string) {
+    return api.get<Blob>(`/accounting/statements/${id}/artifact`, {
+      params: { path },
+      responseType: 'blob'
+    });
+  }
+
+  getStatementArtifactText(id: string, path: string) {
+    return api.get<string>(`/accounting/statements/${id}/artifact`, {
+      params: { path },
+      responseType: 'text'
+    });
+  }
+
   getStatementStatus(id: string) {
     return api.get<{
       data: {
@@ -100,6 +115,7 @@ export class AccountingApi {
         status: BankStatementStatus;
         progress: StatementProgressPayload;
         updatedAt: string;
+        artifacts?: BankStatementDetail['artifacts'];
         issues: string[];
       };
     }>('/accounting/statements/' + id + '/status');
@@ -113,6 +129,12 @@ export class AccountingApi {
     }>('/accounting/statements/' + id + '/checks', {
       params: status ? { status } : undefined
     });
+  }
+
+  getStatementSuggestions(id: string) {
+    return api.get<{
+      data: StatementSuggestionsResponse;
+    }>(`/accounting/statements/${id}/suggestions`);
   }
 
   requestUploadUrl(payload: RequestStatementUploadUrlInput) {
@@ -145,6 +167,10 @@ export class AccountingApi {
         } | null;
       };
     }>('/accounting/statements', payload);
+  }
+
+  deleteStatement(id: string) {
+    return api.delete(`/accounting/statements/${id}`);
   }
 
   reprocessStatement(id: string, fromJobType: AccountingJobType = 'statement.extract') {

@@ -8,16 +8,20 @@ import {
   listBankStatementsQuerySchema,
   listChecksQuerySchema,
   reprocessBankStatementSchema,
+  statementSuggestionsResponseSchema,
   requestStatementUploadUrlResponseSchema,
   requestStatementUploadUrlSchema
 } from '@retailsync/shared';
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { env } from '../config/env';
 import { getStorageClient } from '../integrations/google/storage.client';
 import { enqueueAccountingJob } from '../jobs/accountingQueue';
 import { BankStatement } from '../models/BankStatement';
+import { LedgerEntryModel } from '../models/LedgerEntry';
+import { RunModel } from '../models/Run';
 import { StatementTransactionModel } from '../models/StatementTransaction';
 import { StatementCheckModel } from '../models/StatementCheck';
 import {
@@ -41,6 +45,18 @@ type UploadUrlFailure = {
     | 'upload_url_generation_failed';
   clientMessage: string;
   hint: string;
+  errorCode: number | null;
+  errorMessage: string;
+};
+
+type CreateStatementFailure = {
+  reason:
+    | 'statement_pdf_missing'
+    | 'statement_storage_access_denied'
+    | 'statement_hash_failed'
+    | 'statement_queue_failed'
+    | 'statement_create_failed';
+  clientMessage: string;
   errorCode: number | null;
   errorMessage: string;
 };
@@ -149,10 +165,172 @@ const classifyUploadUrlFailure = (error: unknown): UploadUrlFailure => {
   };
 };
 
+const classifyCreateStatementFailure = (error: unknown): CreateStatementFailure => {
+  const errorCode = extractErrorCode(error);
+  const errorMessage = extractErrorMessage(error);
+  const normalized = errorMessage.toLowerCase();
+
+  if (
+    errorCode === 404 ||
+    normalized.includes('no such object') ||
+    normalized.includes('object not found') ||
+    normalized.includes('file not found')
+  ) {
+    return {
+      reason: 'statement_pdf_missing',
+      clientMessage: 'Uploaded statement PDF was not found in secure storage. Please upload the file again.',
+      errorCode,
+      errorMessage
+    };
+  }
+
+  if (
+    errorCode === 403 ||
+    normalized.includes('permission denied') ||
+    normalized.includes('forbidden') ||
+    normalized.includes('access denied')
+  ) {
+    return {
+      reason: 'statement_storage_access_denied',
+      clientMessage: 'The server cannot read the uploaded statement from secure storage.',
+      errorCode,
+      errorMessage
+    };
+  }
+
+  if (normalized.includes('queue dispatch failed')) {
+    return {
+      reason: 'statement_queue_failed',
+      clientMessage: 'The statement was saved, but processing could not be started.',
+      errorCode,
+      errorMessage
+    };
+  }
+
+  if (normalized.includes('sha') || normalized.includes('hash')) {
+    return {
+      reason: 'statement_hash_failed',
+      clientMessage: 'The server could not verify the uploaded statement PDF.',
+      errorCode,
+      errorMessage
+    };
+  }
+
+  return {
+    reason: 'statement_create_failed',
+    clientMessage: 'Failed to create statement',
+    errorCode,
+    errorMessage
+  };
+};
+
+const buildAccountingEnvSnapshot = () => ({
+  nodeEnv: env.nodeEnv,
+  clientUrl: env.clientUrl,
+  gcsBucketConfigured: Boolean(env.gcsBucketName),
+  gcsBucketName: env.gcsBucketName ?? null,
+  gcpProjectId: env.gcpProjectId ?? null,
+  gcpRegion: env.gcpRegion ?? null,
+  tasksMode: env.tasksMode,
+  internalTasksEndpointConfigured: Boolean(env.internalTasksEndpoint),
+  googleCredentialsConfigured: Boolean(env.googleServiceAccountJson),
+  statementOcrProvider: env.statementOcrProvider,
+  statementGeminiConfigured: Boolean(env.statementGeminiApiKey)
+});
+
+const purgeStatementsFromMongo = async (args: {
+  companyId: string;
+  statementIds: string[];
+}) => {
+  const statementIds = Array.from(new Set(args.statementIds.filter(Boolean)));
+  if (statementIds.length === 0) {
+    return;
+  }
+
+  await Promise.all([
+    StatementCheckModel.deleteMany({
+      companyId: args.companyId,
+      statementId: { $in: statementIds }
+    }),
+    StatementTransactionModel.deleteMany({
+      companyId: args.companyId,
+      statementId: { $in: statementIds }
+    }),
+    LedgerEntryModel.deleteMany({
+      companyId: args.companyId,
+      statementId: { $in: statementIds }
+    }),
+    RunModel.deleteMany({
+      companyId: args.companyId,
+      statementId: { $in: statementIds }
+    }),
+    BankStatement.deleteMany({
+      companyId: args.companyId,
+      _id: { $in: statementIds }
+    })
+  ]);
+};
+
+const purgeStatementRelatedRecords = async (args: {
+  companyId: string;
+  statementId: string;
+}) => {
+  await Promise.all([
+    StatementCheckModel.deleteMany({
+      companyId: args.companyId,
+      statementId: args.statementId
+    }),
+    StatementTransactionModel.deleteMany({
+      companyId: args.companyId,
+      statementId: args.statementId
+    }),
+    LedgerEntryModel.deleteMany({
+      companyId: args.companyId,
+      statementId: args.statementId
+    }),
+    RunModel.deleteMany({
+      companyId: args.companyId,
+      statementId: args.statementId
+    })
+  ]);
+};
+
+const purgeStatementStorage = async (bucketName: string, rootPrefix: string) => {
+  try {
+    const bucket = storage.bucket(bucketName) as unknown as {
+      deleteFiles?: (options: { prefix: string; force?: boolean }) => Promise<unknown>;
+    };
+
+    if (typeof bucket.deleteFiles === 'function') {
+      await bucket.deleteFiles({ prefix: `${rootPrefix}/`, force: true });
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn('[accounting.delete-statement.storage] failed', {
+      rootPrefix,
+      bucketName,
+      errorMessage: extractErrorMessage(error)
+    });
+  }
+};
+
 const computeStatementHash = async (bucketName: string, objectPath: string) => {
   const file = storage.bucket(bucketName).file(objectPath);
-  const [buffer] = await file.download();
-  return createHash('sha256').update(buffer).digest('hex');
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const [buffer] = await file.download();
+      return createHash('sha256').update(buffer).digest('hex');
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+  }
+
+  throw lastError;
 };
 
 const nowIso = () => new Date().toISOString();
@@ -165,6 +343,36 @@ const readTextObject = async (objectPath?: string | null) => {
   } catch {
     return null;
   }
+};
+
+const inferArtifactContentType = (objectPath: string) => {
+  const extension = path.extname(objectPath).toLowerCase();
+
+  switch (extension) {
+    case '.pdf':
+      return 'application/pdf';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    case '.txt':
+      return 'text/plain; charset=utf-8';
+    case '.json':
+      return 'application/json; charset=utf-8';
+    default:
+      return 'application/octet-stream';
+  }
+};
+
+const isStatementScopedArtifactPath = (rootPrefix: string, objectPath: string, pdfPath: string) => {
+  if (!objectPath || objectPath.includes('..')) {
+    return false;
+  }
+
+  return objectPath === pdfPath || objectPath.startsWith(`${rootPrefix}/`);
 };
 
 const buildGeminiArtifactPaths = (normalizedPath?: string | null) => {
@@ -240,6 +448,10 @@ const buildStatementArtifacts = (statement: any) => {
       : [],
     ocrPath: artifacts.ocrPath ?? undefined,
     ocrTextPath: artifacts.ocrTextPath ?? undefined,
+    transactionsTablePath: artifacts.transactionsTablePath ?? undefined,
+    checksClearedTablePath: artifacts.checksClearedTablePath ?? undefined,
+    transactionSectionsPath: artifacts.transactionSectionsPath ?? undefined,
+    extractedChecksPath: artifacts.extractedChecksPath ?? undefined,
     geminiPath: artifacts.geminiPath ?? undefined,
     detectionEvidence: artifacts.detectionEvidence ?? undefined,
     detectedStatementMonth: artifacts.detectedStatementMonth ?? undefined,
@@ -275,6 +487,7 @@ const buildCheckArtifacts = (check: any) => {
     cropImagePath: artifacts.cropImagePath ?? undefined,
     ocrTextPath: artifacts.ocrTextPath ?? undefined,
     ocrJsonPath: artifacts.ocrJsonPath ?? undefined,
+    structuredPath: artifacts.structuredPath ?? check?.gcs?.structuredPath ?? undefined,
     geminiPath: artifacts.geminiPath ?? undefined,
     stageTimestamps: {
       queuedAt: artifacts.stageTimestamps?.queuedAt ?? undefined,
@@ -464,6 +677,95 @@ const toDetailItem = async (statement: any) => {
   });
 };
 
+const buildStatementSuggestions = async (statement: any) => {
+  const [transactions, checks] = await Promise.all([
+    StatementTransactionModel.find({
+      statementId: statement._id.toString(),
+      companyId: statement.companyId
+    })
+      .sort({ postDate: 1, createdAt: 1 })
+      .lean(),
+    StatementCheckModel.find({
+      statementId: statement._id.toString(),
+      companyId: statement.companyId
+    })
+      .sort({ createdAt: 1 })
+      .lean()
+  ]);
+
+  const items = [
+    ...transactions.map((txn: any) => ({
+      id: String(txn._id),
+      source: 'transaction' as const,
+      date: txn.postDate ?? undefined,
+      description: String(txn.description ?? txn.merchant ?? 'Statement transaction'),
+      amount: Number(txn.amount ?? 0),
+      direction: txn.type === 'credit' ? 'credit' as const : 'debit' as const,
+      checkNumber: txn.checkNumber ?? undefined,
+      payeeName: txn.proposal?.payeeName ?? txn.merchant ?? undefined,
+      proposedTxnType: txn.proposal?.qbTxnType ?? undefined,
+      proposalConfidence:
+        typeof txn.proposal?.confidence === 'number' ? Number(txn.proposal.confidence) : undefined,
+      reviewStatus: txn.reviewStatus ?? undefined,
+      postingStatus: txn.posting?.status ?? undefined,
+      status: 'structured',
+      reasons: Array.isArray(txn.proposal?.reasons)
+        ? txn.proposal.reasons.map((reason: unknown) => String(reason))
+        : [],
+      linkedCheckId: txn.statementCheckId ? String(txn.statementCheckId) : undefined
+    })),
+    ...checks.map((check: any) => ({
+      id: String(check._id),
+      source: 'check' as const,
+      date: check.extracted?.date ?? check.autoFill?.date ?? undefined,
+      description: String(
+        check.extracted?.payeeName ??
+          check.autoFill?.payeeName ??
+          check.extracted?.memo ??
+          check.autoFill?.memo ??
+          `Check ${check.extracted?.checkNumber ?? check.autoFill?.checkNumber ?? String(check._id).slice(-6)}`
+      ),
+      amount: Number(check.extracted?.amount ?? check.autoFill?.amount ?? 0),
+      direction: 'debit' as const,
+      checkNumber: check.extracted?.checkNumber ?? check.autoFill?.checkNumber ?? undefined,
+      payeeName: check.extracted?.payeeName ?? check.autoFill?.payeeName ?? undefined,
+      proposedTxnType: undefined,
+      proposalConfidence:
+        typeof check.confidence?.overall === 'number' ? Number(check.confidence.overall) : undefined,
+      reviewStatus: undefined,
+      postingStatus: undefined,
+      status: String(check.status ?? 'queued'),
+      reasons: Array.isArray(check.match?.reasons)
+        ? check.match.reasons.map((reason: unknown) => String(reason))
+        : [],
+      linkedCheckId: String(check._id)
+    }))
+  ].sort((left, right) => {
+    const leftDate = left.date ?? '';
+    const rightDate = right.date ?? '';
+    if (leftDate !== rightDate) return leftDate.localeCompare(rightDate);
+    return left.description.localeCompare(right.description);
+  });
+
+  const summary = {
+    totalItems: items.length,
+    checks: items.filter((item) => item.source === 'check').length,
+    deposits: items.filter((item) => item.proposedTxnType === 'Deposit').length,
+    debits: items.filter((item) => item.direction === 'debit').length,
+    credits: items.filter((item) => item.direction === 'credit').length,
+    expenses: items.filter((item) => item.proposedTxnType === 'Expense').length,
+    transfers: items.filter((item) => item.proposedTxnType === 'Transfer').length,
+    checksSuggested: items.filter((item) => item.proposedTxnType === 'Check').length,
+    uncategorized: items.filter((item) => !item.proposedTxnType).length
+  };
+
+  return statementSuggestionsResponseSchema.parse({
+    statementId: statement._id.toString(),
+    summary,
+    items
+  });
+};
+
 export const getUploadUrl = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
   if (!env.gcsBucketName) return fail(res, 'GCS bucket is not configured', 500);
@@ -513,7 +815,13 @@ export const getUploadUrl = async (req: Request, res: Response) => {
       errorMessage: failure.errorMessage,
       stack: error instanceof Error ? error.stack : undefined
     });
-    return fail(res, failure.clientMessage, 500, { reason: failure.reason });
+    const status =
+      failure.reason === 'storage_signing_permission_denied'
+        ? 502
+        : failure.reason === 'storage_signing_not_configured'
+          ? 500
+          : 500;
+    return fail(res, failure.clientMessage, status, { reason: failure.reason });
   }
 };
 
@@ -565,13 +873,110 @@ export const createStatement = async (req: Request, res: Response) => {
   });
   const expectedPdfPath = buildStatementPdfPath(expectedRootPrefix);
 
+  if (env.debugVerboseApi) {
+    // eslint-disable-next-line no-console
+    console.info('[accounting.create-statement.env]', buildAccountingEnvSnapshot());
+  }
+
   if (parsed.data.gcsPath !== expectedPdfPath) {
     return fail(res, 'gcsPath does not match expected company/statement structure', 422, {
       expectedPdfPath
     });
   }
 
+  let statement: any = null;
+  let reusedExistingStatement = false;
+  const sanitizedFileName = sanitizeFileName(parsed.data.fileName);
+  const uploadedProgress = {
+    phase: 'uploaded',
+    totalChecks: 0,
+    checksQueued: 0,
+    checksProcessing: 0,
+    checksReady: 0,
+    checksFailed: 0,
+    completedChecks: 0,
+    remainingChecks: 0
+  };
+
   try {
+    const existing = await BankStatement.findOne({
+      _id: parsed.data.statementId,
+      companyId
+    });
+    const monthConflicts = await BankStatement.find({
+      companyId,
+      statementMonth: parsed.data.statementMonth,
+      _id: { $ne: parsed.data.statementId }
+    })
+      .select('_id status')
+      .lean();
+
+    if (monthConflicts.length > 0) {
+      await purgeStatementsFromMongo({
+        companyId,
+        statementIds: monthConflicts.map((entry) => String(entry._id))
+      });
+    }
+
+    if (existing) {
+      reusedExistingStatement = true;
+      const samePayload =
+        String(existing.statementMonth ?? '') === parsed.data.statementMonth &&
+        String(existing.fileName ?? '') === sanitizedFileName &&
+        String(existing.source ?? '') === parsed.data.source &&
+        String(existing.gcs?.rootPrefix ?? '') === expectedRootPrefix &&
+        String(existing.gcs?.pdfPath ?? '') === parsed.data.gcsPath;
+
+      if (!samePayload) {
+        return fail(res, 'Statement already exists with different metadata', 409);
+      }
+
+      if (!['uploaded', 'failed'].includes(String(existing.status ?? ''))) {
+        return ok(res, { statement: toListItem(existing), queue: null });
+      }
+
+      statement = existing;
+      statement.periodStart = parsed.data.periodStart;
+      statement.periodEnd = parsed.data.periodEnd;
+      statement.status = 'uploaded';
+      statement.hash = undefined;
+      statement.issues = [];
+      statement.progress = uploadedProgress;
+      statement.artifacts = {
+        stageTimestamps: {
+          uploadedAt:
+            typeof existing.artifacts?.stageTimestamps?.uploadedAt === 'string'
+              ? existing.artifacts.stageTimestamps.uploadedAt
+              : nowIso()
+        }
+      };
+      await statement.save();
+    } else {
+      statement = await BankStatement.create({
+        _id: new Types.ObjectId(parsed.data.statementId),
+        companyId,
+        statementMonth: parsed.data.statementMonth,
+        fileName: sanitizedFileName,
+        source: parsed.data.source,
+        status: 'uploaded',
+        periodStart: parsed.data.periodStart,
+        periodEnd: parsed.data.periodEnd,
+        gcs: {
+          rootPrefix: expectedRootPrefix,
+          pdfPath: parsed.data.gcsPath
+        },
+        artifacts: {
+          stageTimestamps: {
+            uploadedAt: nowIso()
+          }
+        },
+        progress: uploadedProgress,
+        hash: undefined,
+        issues: [],
+        createdBy: req.user.id
+      });
+    }
+
     const hash = await computeStatementHash(env.gcsBucketName, parsed.data.gcsPath);
 
     const duplicate = await BankStatement.findOne({
@@ -582,42 +987,11 @@ export const createStatement = async (req: Request, res: Response) => {
       .sort({ createdAt: -1 })
       .select('_id statementMonth fileName');
 
-    const issues = duplicate
+    statement.hash = hash;
+    statement.issues = duplicate
       ? [`Potential duplicate of statement ${duplicate._id.toString()} (${duplicate.statementMonth} ${duplicate.fileName})`]
       : [];
-
-    const statement = await BankStatement.create({
-      _id: new Types.ObjectId(parsed.data.statementId),
-      companyId,
-      statementMonth: parsed.data.statementMonth,
-      fileName: sanitizeFileName(parsed.data.fileName),
-      source: parsed.data.source,
-      status: 'uploaded',
-      periodStart: parsed.data.periodStart,
-      periodEnd: parsed.data.periodEnd,
-      gcs: {
-        rootPrefix: expectedRootPrefix,
-        pdfPath: parsed.data.gcsPath
-      },
-      artifacts: {
-        stageTimestamps: {
-          uploadedAt: nowIso()
-        }
-      },
-      progress: {
-        phase: 'uploaded',
-        totalChecks: 0,
-        checksQueued: 0,
-        checksProcessing: 0,
-        checksReady: 0,
-        checksFailed: 0,
-        completedChecks: 0,
-        remainingChecks: 0
-      },
-      hash,
-      issues,
-      createdBy: req.user.id
-    });
+    await statement.save();
 
     let queueMeta: Awaited<ReturnType<typeof enqueueAccountingJob>> | null = null;
     try {
@@ -646,11 +1020,60 @@ export const createStatement = async (req: Request, res: Response) => {
       return fail(res, 'Failed to reload created statement', 500);
     }
 
-    return ok(res, { statement: toListItem(current), queue: queueMeta }, 201);
+    return ok(res, { statement: toListItem(current), queue: queueMeta }, reusedExistingStatement ? 200 : 201);
   } catch (error) {
+    const failure = classifyCreateStatementFailure(error);
+    const status =
+      failure.reason === 'statement_pdf_missing'
+        ? 409
+        : failure.reason === 'statement_storage_access_denied' ||
+            failure.reason === 'statement_queue_failed'
+          ? 502
+          : 500;
+    if (statement) {
+      statement.status = 'failed';
+      statement.issues = [
+        ...new Set([
+          ...(Array.isArray(statement.issues) ? statement.issues.map((issue: unknown) => String(issue)) : []),
+          failure.clientMessage
+        ])
+      ];
+      statement.progress = {
+        phase: 'failed',
+        totalChecks: Number(statement.progress?.totalChecks ?? 0),
+        checksQueued: Number(statement.progress?.checksQueued ?? 0),
+        checksProcessing: Number(statement.progress?.checksProcessing ?? 0),
+        checksReady: Number(statement.progress?.checksReady ?? 0),
+        checksFailed: Number(statement.progress?.checksFailed ?? 0),
+        completedChecks:
+          Number(statement.progress?.checksReady ?? 0) + Number(statement.progress?.checksFailed ?? 0),
+        remainingChecks: Math.max(
+          Number(statement.progress?.totalChecks ?? 0) -
+            (Number(statement.progress?.checksReady ?? 0) + Number(statement.progress?.checksFailed ?? 0)),
+          0
+        )
+      };
+      statement.artifacts = {
+        ...(statement.artifacts ?? {}),
+        stageTimestamps: {
+          ...(statement.artifacts?.stageTimestamps ?? {}),
+          failedAt: nowIso()
+        }
+      };
+      await statement.save();
+    }
     // eslint-disable-next-line no-console
-    console.error('[accounting.create-statement] failed', error);
-    return fail(res, 'Failed to create statement', 500);
+    console.error('[accounting.create-statement] failed', {
+      bucketName: env.gcsBucketName,
+      reason: failure.reason,
+      errorCode: failure.errorCode,
+      errorMessage: failure.errorMessage,
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    return fail(res, failure.reason, status, {
+      reason: failure.reason,
+      clientMessage: failure.clientMessage
+    });
   }
 };
 
@@ -733,6 +1156,23 @@ export const getStatementStatus = async (req: Request, res: Response) => {
   }
 };
 
+export const getStatementSuggestions = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+
+  try {
+    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    if (!statement) {
+      return fail(res, 'Statement not found', 404);
+    }
+
+    return ok(res, await buildStatementSuggestions(statement));
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.get-statement-suggestions] failed', error);
+    return fail(res, 'Failed to load statement suggestions', 500);
+  }
+};
+
 export const getStatementChecks = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
 
@@ -771,9 +1211,88 @@ export const getStatementChecks = async (req: Request, res: Response) => {
   });
 };
 
+export const getStatementArtifact = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  if (!env.gcsBucketName) return fail(res, 'GCS bucket is not configured', 500);
+
+  const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+  if (!statement) {
+    return fail(res, 'Statement not found', 404);
+  }
+
+  const objectPath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+  if (!objectPath) {
+    return fail(res, 'Artifact path is required', 422);
+  }
+
+  const rootPrefix = String(statement.gcs?.rootPrefix ?? '');
+  const pdfPath = String(statement.gcs?.pdfPath ?? '');
+  if (!rootPrefix || !pdfPath) {
+    return fail(res, 'Statement storage metadata is incomplete', 409);
+  }
+
+  if (!isStatementScopedArtifactPath(rootPrefix, objectPath, pdfPath)) {
+    return fail(res, 'Artifact path is outside this statement scope', 403);
+  }
+
+  try {
+    const [buffer] = await storage.bucket(env.gcsBucketName).file(objectPath).download();
+    const fileName = path.basename(objectPath);
+
+    res.setHeader('Content-Type', inferArtifactContentType(objectPath));
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    return res.status(200).send(buffer);
+  } catch (error) {
+    const failure = classifyCreateStatementFailure(error);
+    const status =
+      failure.reason === 'statement_pdf_missing'
+        ? 404
+        : failure.reason === 'statement_storage_access_denied'
+          ? 502
+          : 500;
+    return fail(res, failure.clientMessage, status, {
+      reason: failure.reason,
+      clientMessage: failure.clientMessage
+    });
+  }
+};
+
+export const deleteStatement = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+
+  try {
+    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    if (!statement) {
+      return fail(res, 'Statement not found', 404);
+    }
+
+    const rootPrefix = String(statement.gcs?.rootPrefix ?? '');
+    await purgeStatementRelatedRecords({
+      companyId: String(req.companyId),
+      statementId: statement._id.toString()
+    });
+    await BankStatement.deleteOne({ _id: statement._id, companyId: req.companyId });
+
+    if (env.gcsBucketName && rootPrefix) {
+      await purgeStatementStorage(env.gcsBucketName, rootPrefix);
+    }
+
+    return ok(res, {
+      statementId: statement._id.toString(),
+      deleted: true
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.delete-statement] failed', error);
+    return fail(res, 'Failed to delete statement', 500);
+  }
+};
+
 export const reprocessStatement = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
   if (!req.user?.id) return fail(res, 'Unauthorized', 401);
+  const companyId = String(req.companyId);
 
   const parsed = reprocessBankStatementSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -781,10 +1300,15 @@ export const reprocessStatement = async (req: Request, res: Response) => {
   }
 
   try {
-    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    const statement = await BankStatement.findOne({ _id: req.params.id, companyId });
     if (!statement) {
       return fail(res, 'Statement not found', 404);
     }
+
+    await purgeStatementRelatedRecords({
+      companyId,
+      statementId: statement._id.toString()
+    });
 
     statement.status = 'uploaded' as any;
     statement.progress = {
@@ -803,26 +1327,44 @@ export const reprocessStatement = async (req: Request, res: Response) => {
       }
     } as any;
     statement.issues = [] as any;
+    statement.hash = undefined;
     await statement.save();
 
-    await StatementCheckModel.deleteMany({ companyId: req.companyId, statementId: statement._id.toString() });
-
     const queue = await enqueueAccountingJob({
-      companyId: req.companyId,
+      companyId,
       statementId: statement._id.toString(),
       jobType: parsed.data.fromJobType,
       meta: { requestedBy: req.user.id, reason: 'manual-reprocess' }
     });
 
-    const refreshed = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    if (queue.mode !== 'inline') {
+      statement.status = 'extracting' as any;
+      await statement.save();
+    }
+
+    const refreshed = await BankStatement.findOne({ _id: req.params.id, companyId });
     if (!refreshed) {
       return fail(res, 'Statement not found after reprocess', 404);
     }
     return ok(res, { statement: toListItem(refreshed), queue });
   } catch (error) {
+    const failure = classifyCreateStatementFailure(error);
     // eslint-disable-next-line no-console
-    console.error('[accounting.reprocess] failed', error);
-    return fail(res, 'Failed to reprocess statement', 500);
+    console.error('[accounting.reprocess] failed', {
+      statementId: req.params.id,
+      companyId,
+      reason: failure.reason,
+      errorCode: failure.errorCode,
+      errorMessage: failure.errorMessage,
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    return fail(res, failure.reason, 500, {
+      reason: failure.reason,
+      clientMessage:
+        failure.reason === 'statement_queue_failed'
+          ? 'RetailSync could not restart statement processing. Check the internal task runner configuration and retry.'
+          : failure.clientMessage
+    });
   }
 };
 

@@ -29,6 +29,7 @@ const artifactsSchema = new Schema(
     cropImagePath: { type: String, required: false },
     ocrTextPath: { type: String, required: false },
     ocrJsonPath: { type: String, required: false },
+    structuredPath: { type: String, required: false },
     geminiPath: { type: String, required: false },
     stageTimestamps: { type: stageTimestampsSchema, default: () => ({}) }
   },
