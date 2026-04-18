@@ -2,9 +2,12 @@ import { Router } from 'express';
 import multer from 'multer';
 import {
   createStatement,
+  deleteStatement,
   detectStatementMonth,
+  getStatementArtifact,
   getStatementById,
   getStatementChecks,
+  getStatementSuggestions,
   getStatementStatus,
   getStatementStream,
   getUploadUrl,
@@ -33,9 +36,12 @@ router.get('/statements', requirePermission('bankStatements', 'view'), listState
 router.get('/statements/:id', requirePermission('bankStatements', 'view'), getStatementById);
 router.get('/statements/:id/status', requirePermission('bankStatements', 'view'), getStatementStatus);
 router.get('/statements/:id/checks', requirePermission('bankStatements', 'view'), getStatementChecks);
+router.get('/statements/:id/suggestions', requirePermission('bankStatements', 'view'), getStatementSuggestions);
+router.get('/statements/:id/artifact', requirePermission('bankStatements', 'view'), getStatementArtifact);
 router.get('/statements/:id/stream', requirePermission('bankStatements', 'view'), getStatementStream);
 router.post('/statements/upload-url', requirePermission('bankStatements', 'create'), getUploadUrl);
 router.post('/statements', requirePermission('bankStatements', 'create'), createStatement);
+router.delete('/statements/:id', requirePermission('bankStatements', 'delete'), deleteStatement);
 router.post('/statements/:id/reprocess', requirePermission('bankStatements', 'edit'), reprocessStatement);
 router.post('/statements/:id/checks/:checkId/retry', requirePermission('bankStatements', 'edit'), retryStatementCheck);
 router.get('/observability/summary', requirePermission('accounting', 'view'), getAccountingObservabilitySummary);

@@ -1,4 +1,9 @@
 export { LoginPage } from './LoginPage';
+export { RegisterPage } from './RegisterPage';
+export { AcceptInvitePage } from './AcceptInvitePage';
+export { ForgotPasswordPage } from './ForgotPasswordPage';
+export { ResetPasswordPage } from './ResetPasswordPage';
+export { VerifyEmailPage } from './VerifyEmailPage';
 export { GoogleAuthSuccessPage } from './GoogleAuthSuccessPage';
 export { OnboardingPage } from './OnboardingPage';
 export { CreateCompanyPage } from './CreateCompanyPage';

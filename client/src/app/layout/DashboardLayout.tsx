@@ -5,6 +5,7 @@ import {
   CssBaseline,
   Divider,
   Drawer,
+  IconButton,
   ListItemIcon,
   List,
   ListItemButton,
@@ -15,23 +16,24 @@ import {
   Toolbar,
   Typography
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import DashboardIcon from '@mui/icons-material/Dashboard';
+import MenuIcon from '@mui/icons-material/Menu';
 import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
-import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
-import SyncAltIcon from '@mui/icons-material/SyncAlt';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
-import InventoryIcon from '@mui/icons-material/Inventory';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import CalculateOutlinedIcon from '@mui/icons-material/CalculateOutlined';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logoutThunk } from '../../modules/auth/state';
 import { hasPermission } from '../../utils/permissions';
 import { LogoHorizontal } from '../../components';
 import { useMemo, useState } from 'react';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 const drawerWidth = 260;
 
@@ -46,29 +48,23 @@ export const DashboardLayout = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const permissions = useAppSelector((state) => state.auth.permissions);
   const user = useAppSelector((state) => state.auth.user);
   const role = useAppSelector((state) => state.auth.role);
   const company = useAppSelector((state) => state.company.company);
   const [profileAnchorEl, setProfileAnchorEl] = useState<null | HTMLElement>(null);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const profileMenuOpen = Boolean(profileAnchorEl);
 
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const isDevelopment = import.meta.env.DEV;
   const userDisplayName = user ? `${user.firstName} ${user.lastName}` : 'User';
   const canViewAccountingStatements = hasPermission(permissions, 'bankStatements', 'view');
-  const canViewAccountingLedger = hasPermission(permissions, 'ledger', 'view');
-  const canViewAccountingObservability = hasPermission(permissions, 'accounting', 'view');
   const canViewQuickbooksHome = hasPermission(permissions, 'quickbooks', 'view');
-  const canViewQuickbooksOperations = hasPermission(permissions, 'ledger', 'view');
-  const canViewAccountingQuickbooks = canViewQuickbooksHome || canViewQuickbooksOperations;
-  const accountingEntryPath = canViewAccountingStatements
-    ? '/dashboard/accounting/statements'
-    : canViewAccountingLedger
-      ? '/dashboard/accounting/ledger'
-      : '/dashboard/accounting/observability';
-  const quickbooksEntryPath = canViewQuickbooksHome ? '/dashboard/quickbooks' : '/dashboard/quickbooks/operations';
-  const canViewAccounting = canViewAccountingStatements || canViewAccountingLedger || canViewAccountingObservability;
+  const canViewAccounting = canViewAccountingStatements;
+  const closeMobileDrawer = () => setMobileDrawerOpen(false);
 
   const onLogout = async () => {
     await dispatch(logoutThunk()).unwrap();
@@ -96,6 +92,7 @@ export const DashboardLayout = () => {
         component={Link}
         to={item.path}
         selected={isSelected}
+        onClick={closeMobileDrawer}
         sx={{ borderRadius: 2, mb: 0.5 }}
       >
         <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
@@ -114,36 +111,25 @@ export const DashboardLayout = () => {
     ...(canViewAccounting
       ? [{
           label: 'Accounting',
-          path: accountingEntryPath,
+          path: '/dashboard/accounting',
           matchPrefix: '/dashboard/accounting',
           icon: <AccountBalanceIcon fontSize="small" />
         }]
       : []),
-    ...(canViewAccountingQuickbooks
+    ...(canViewQuickbooksHome
       ? [{
           label: 'QuickBooks',
-          path: quickbooksEntryPath,
+          path: '/dashboard/quickbooks',
           matchPrefix: '/dashboard/quickbooks',
-          icon: <SyncAltIcon fontSize="small" />
+          icon: <CalculateOutlinedIcon fontSize="small" />
         }]
       : []),
     { label: 'Settings', path: '/dashboard/settings', icon: <SettingsOutlinedIcon fontSize="small" /> }
   ];
 
   const hubLinks: NavItem[] = [
-    ...(hasPermission(permissions, 'items', 'view') ||
-      hasPermission(permissions, 'inventory', 'view') ||
-      hasPermission(permissions, 'locations', 'view')
-      ? [{ label: 'Inventory', path: '/dashboard/operations', icon: <InventoryIcon fontSize="small" /> }]
-      : []),
-    ...(hasPermission(permissions, 'invoices', 'view') || hasPermission(permissions, 'suppliers', 'view')
-      ? [{ label: 'Procurement', path: '/dashboard/procurement', icon: <ReceiptLongIcon fontSize="small" /> }]
-      : []),
     ...(hasPermission(permissions, 'users', 'view') || hasPermission(permissions, 'rolesSettings', 'view')
-      ? [{ label: 'Access', path: '/dashboard/access', icon: <AdminPanelSettingsIcon fontSize="small" /> }]
-      : []),
-    ...(hasPermission(permissions, 'reconciliation', 'view') || hasPermission(permissions, 'bankStatements', 'view')
-      ? [{ label: 'Finance', path: '/dashboard/reconciliation', icon: <SyncAltIcon fontSize="small" /> }]
+      ? [{ label: 'Access', path: '/dashboard/access/users', matchPrefix: '/dashboard/access', icon: <AdminPanelSettingsIcon fontSize="small" /> }]
       : [])
   ];
 
@@ -162,18 +148,42 @@ export const DashboardLayout = () => {
           boxShadow: '0 2px 10px rgba(15, 23, 42, 0.06)'
         }}
       >
-        <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Box sx={{ px: 0, py: 0 }} component={Link} to="/dashboard" aria-label="Go to dashboard home">
-              <LogoHorizontal height={80} />
+        <Toolbar sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, minHeight: { xs: 64, md: 72 } }}>
+          <Stack direction="row" spacing={1.25} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+            <IconButton
+              aria-label="Open navigation"
+              edge="start"
+              onClick={() => setMobileDrawerOpen(true)}
+              sx={{ display: { xs: 'inline-flex', md: 'none' } }}
+            >
+              <MenuIcon />
+            </IconButton>
+            <Box sx={{ display: { xs: 'none', md: 'block' } }} component={Link} to="/dashboard" aria-label="Go to dashboard home">
+              <LogoHorizontal height={isMobile ? 56 : 80} />
             </Box>
-            <Divider orientation="vertical" flexItem />
-            <Typography variant="subtitle1" sx={{ fontWeight: 800, letterSpacing: 0.2, color: '#0f172a' }}>
-              {company?.name ?? 'No Company'}
-            </Typography>
+            <Box sx={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.25 }}>
+              <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+                <LogoHorizontal height={44} />
+              </Box>
+              <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', md: 'block' } }} />
+              <Typography
+                variant="subtitle1"
+                noWrap
+                sx={{
+                  minWidth: 0,
+                  maxWidth: { xs: 140, sm: 220, md: 280 },
+                  fontWeight: 800,
+                  letterSpacing: 0.2,
+                  color: '#0f172a',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
+                {company?.name ?? 'No Company'}
+              </Typography>
+            </Box>
           </Stack>
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Divider orientation="vertical" flexItem />
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexShrink: 0 }}>
             <Button
               color="inherit"
               onClick={onOpenProfileMenu}
@@ -183,10 +193,14 @@ export const DashboardLayout = () => {
                 textTransform: 'none',
                 fontWeight: 700,
                 px: 0.5,
-                py: 0.5
+                py: 0.5,
+                maxWidth: { xs: 140, sm: 220 },
+                overflow: 'hidden'
               }}
             >
-              {userDisplayName}
+              <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {userDisplayName}
+              </Box>
             </Button>
           </Stack>
         </Toolbar>
@@ -270,46 +284,91 @@ export const DashboardLayout = () => {
           <ListItemText>Logout</ListItemText>
         </MenuItem>
       </Menu>
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: drawerWidth,
-          flexShrink: 0,
-          [`& .MuiDrawer-paper`]: { width: drawerWidth, boxSizing: 'border-box' }
-        }}
-      >
-        <Toolbar />
-        <Box sx={{ overflow: 'auto', p: 1.5 }}>
-          <List>
-            {coreLinks.length > 0 && (
-              <Box sx={{ mb: 1 }}>
-                <Typography
-                  variant="overline"
-                  color="text.secondary"
-                  sx={{ display: 'block', px: 1.5, pb: 0.5, lineHeight: 1.8 }}
-                >
-                  Core
-                </Typography>
-                {coreLinks.map(renderNavLink)}
-                <Divider sx={{ my: 0.5 }} />
-              </Box>
-            )}
-            {hubLinks.length > 0 && (
-              <Box sx={{ mt: 0.5 }}>
-                <Typography
-                  variant="overline"
-                  color="text.secondary"
-                  sx={{ display: 'block', px: 1.5, pb: 0.5, lineHeight: 1.8 }}
-                >
-                  Workspaces
-                </Typography>
-                {hubLinks.map(renderNavLink)}
-              </Box>
-            )}
-          </List>
-        </Box>
-      </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
+      <Box component="nav" sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}>
+        <Drawer
+          variant="temporary"
+          open={mobileDrawerOpen}
+          onClose={closeMobileDrawer}
+          ModalProps={{ keepMounted: true }}
+          sx={{
+            display: { xs: 'block', md: 'none' },
+            [`& .MuiDrawer-paper`]: { width: drawerWidth, boxSizing: 'border-box' }
+          }}
+        >
+          <Toolbar />
+          <Box sx={{ overflow: 'auto', p: 1.5 }}>
+            <List>
+              {coreLinks.length > 0 && (
+                <Box sx={{ mb: 1 }}>
+                  <Typography
+                    variant="overline"
+                    color="text.secondary"
+                    sx={{ display: 'block', px: 1.5, pb: 0.5, lineHeight: 1.8 }}
+                  >
+                    Core
+                  </Typography>
+                  {coreLinks.map(renderNavLink)}
+                  <Divider sx={{ my: 0.5 }} />
+                </Box>
+              )}
+              {hubLinks.length > 0 && (
+                <Box sx={{ mt: 0.5 }}>
+                  <Typography
+                    variant="overline"
+                    color="text.secondary"
+                    sx={{ display: 'block', px: 1.5, pb: 0.5, lineHeight: 1.8 }}
+                  >
+                    Workspaces
+                  </Typography>
+                  {hubLinks.map(renderNavLink)}
+                </Box>
+              )}
+            </List>
+          </Box>
+        </Drawer>
+        <Drawer
+          variant="permanent"
+          sx={{
+            display: { xs: 'none', md: 'block' },
+            width: drawerWidth,
+            flexShrink: 0,
+            [`& .MuiDrawer-paper`]: { width: drawerWidth, boxSizing: 'border-box' }
+          }}
+          open
+        >
+          <Toolbar />
+          <Box sx={{ overflow: 'auto', p: 1.5 }}>
+            <List>
+              {coreLinks.length > 0 && (
+                <Box sx={{ mb: 1 }}>
+                  <Typography
+                    variant="overline"
+                    color="text.secondary"
+                    sx={{ display: 'block', px: 1.5, pb: 0.5, lineHeight: 1.8 }}
+                  >
+                    Core
+                  </Typography>
+                  {coreLinks.map(renderNavLink)}
+                  <Divider sx={{ my: 0.5 }} />
+                </Box>
+              )}
+              {hubLinks.length > 0 && (
+                <Box sx={{ mt: 0.5 }}>
+                  <Typography
+                    variant="overline"
+                    color="text.secondary"
+                    sx={{ display: 'block', px: 1.5, pb: 0.5, lineHeight: 1.8 }}
+                  >
+                    Workspaces
+                  </Typography>
+                  {hubLinks.map(renderNavLink)}
+                </Box>
+              )}
+            </List>
+          </Box>
+        </Drawer>
+      </Box>
+      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 }, minWidth: 0 }}>
         <Toolbar />
         <Outlet />
       </Box>

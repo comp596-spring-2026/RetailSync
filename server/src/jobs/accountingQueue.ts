@@ -42,13 +42,16 @@ const resolveQueueName = (jobType: AccountingJobType) => {
   return env.tasksQueuePipeline;
 };
 
-const resolveEndpoint = (jobType: AccountingJobType) => {
+const normalizeTaskEndpointBase = (endpoint: string) =>
+  endpoint.replace(/\/api\/internal\/tasks\/run\/?$/, '/api/tasks');
+
+export const resolveAccountingTaskEndpoint = (jobType: AccountingJobType) => {
   if (!env.internalTasksEndpoint) {
     throw new Error('INTERNAL_TASKS_ENDPOINT is required when TASKS_MODE=cloud');
   }
 
   const isSync = syncJobTypes.includes(jobType);
-  const endpoint = env.internalTasksEndpoint.replace(/\/+$/, '');
+  const endpoint = normalizeTaskEndpointBase(env.internalTasksEndpoint.replace(/\/+$/, ''));
 
   if (endpoint.endsWith('/api/tasks/pipeline')) {
     return endpoint;
@@ -80,7 +83,7 @@ const buildTaskPayload = (args: EnqueueAccountingJobArgs, taskId: string) => ({
 
 const dispatchTaskViaHttp = async (args: EnqueueAccountingJobArgs, taskId: string) => {
   const queueName = resolveQueueName(args.jobType);
-  const endpoint = resolveEndpoint(args.jobType);
+  const endpoint = resolveAccountingTaskEndpoint(args.jobType);
   const payload = buildTaskPayload(args, taskId);
 
   const headers: Record<string, string> = {
@@ -118,7 +121,7 @@ const dispatchTaskViaCloudTasksApi = async (args: EnqueueAccountingJobArgs, task
   }
 
   const queueName = resolveQueueName(args.jobType);
-  const endpoint = resolveEndpoint(args.jobType);
+  const endpoint = resolveAccountingTaskEndpoint(args.jobType);
   const payload = buildTaskPayload(args, taskId);
   const parent = `projects/${env.gcpProjectId}/locations/${env.gcpRegion}/queues/${queueName}`;
   const taskName = `${parent}/tasks/${taskId}`;
@@ -191,6 +194,10 @@ const dispatchTaskViaCloudTasksApi = async (args: EnqueueAccountingJobArgs, task
 const shouldUseCloudTasksApi = () =>
   Boolean(env.gcpProjectId && env.gcpRegion && env.tasksOidcServiceAccountEmail);
 
+const isMissingDefaultCredentialsError = (error: unknown) =>
+  error instanceof Error &&
+  error.message.toLowerCase().includes('could not load the default credentials');
+
 const runInlineTaskChain = async (args: EnqueueAccountingJobArgs) => {
   const firstTaskId = makeTaskId(args.jobType);
   let nextPayload: {
@@ -236,7 +243,18 @@ const runInlineTaskChain = async (args: EnqueueAccountingJobArgs) => {
 
 const dispatchCloudTask = async (args: EnqueueAccountingJobArgs, taskId: string) => {
   if (shouldUseCloudTasksApi()) {
-    return dispatchTaskViaCloudTasksApi(args, taskId);
+    try {
+      return await dispatchTaskViaCloudTasksApi(args, taskId);
+    } catch (error) {
+      if (isMissingDefaultCredentialsError(error)) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[accounting.queue] cloud tasks credentials unavailable, falling back to internal HTTP dispatch'
+        );
+        return dispatchTaskViaHttp(args, taskId);
+      }
+      throw error;
+    }
   }
   return dispatchTaskViaHttp(args, taskId);
 };

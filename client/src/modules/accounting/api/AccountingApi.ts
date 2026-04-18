@@ -14,6 +14,13 @@ import {
   QuickBooksLiveTransactionsResponse,
   QuickBooksJournalAdjustmentInput,
   QuickBooksJournalAdjustmentResult,
+  QuickBooksContactCreateInput,
+  QuickBooksContactDetail,
+  QuickBooksContactUpdateInput,
+  QuickBooksMoneyCreateInput,
+  QuickBooksMoneyDeleteResult,
+  QuickBooksMoneyTxnType,
+  QuickBooksMoneyUpdateInput,
   QuickBooksRecoverPaymentInput,
   QuickBooksRecoverPaymentResult,
   ListBankStatementsQuery,
@@ -37,6 +44,7 @@ import {
   QuickBooksWriteTxnType,
   QuickBooksWriteUpdateInput,
   StatementCheck,
+  StatementSuggestionsResponse,
   RequestStatementUploadUrlInput
 } from '@retailsync/shared';
 import { api } from '../../../app/api/client';
@@ -93,6 +101,20 @@ export class AccountingApi {
     }>('/accounting/statements/' + id);
   }
 
+  getStatementArtifactBlob(id: string, path: string) {
+    return api.get<Blob>(`/accounting/statements/${id}/artifact`, {
+      params: { path },
+      responseType: 'blob'
+    });
+  }
+
+  getStatementArtifactText(id: string, path: string) {
+    return api.get<string>(`/accounting/statements/${id}/artifact`, {
+      params: { path },
+      responseType: 'text'
+    });
+  }
+
   getStatementStatus(id: string) {
     return api.get<{
       data: {
@@ -100,6 +122,7 @@ export class AccountingApi {
         status: BankStatementStatus;
         progress: StatementProgressPayload;
         updatedAt: string;
+        artifacts?: BankStatementDetail['artifacts'];
         issues: string[];
       };
     }>('/accounting/statements/' + id + '/status');
@@ -113,6 +136,12 @@ export class AccountingApi {
     }>('/accounting/statements/' + id + '/checks', {
       params: status ? { status } : undefined
     });
+  }
+
+  getStatementSuggestions(id: string) {
+    return api.get<{
+      data: StatementSuggestionsResponse;
+    }>(`/accounting/statements/${id}/suggestions`);
   }
 
   requestUploadUrl(payload: RequestStatementUploadUrlInput) {
@@ -145,6 +174,10 @@ export class AccountingApi {
         } | null;
       };
     }>('/accounting/statements', payload);
+  }
+
+  deleteStatement(id: string) {
+    return api.delete(`/accounting/statements/${id}`);
   }
 
   reprocessStatement(id: string, fromJobType: AccountingJobType = 'statement.extract') {
@@ -205,7 +238,7 @@ export class AccountingApi {
     return api.put('/integrations/quickbooks/settings', payload);
   }
 
-  getQuickbooksConnectUrl(returnTo = '/dashboard/quickbooks') {
+  getQuickbooksConnectUrl(returnTo = '/dashboard/accounting/quickbooks') {
     return api.get<{
       data: {
         url: string;
@@ -253,6 +286,40 @@ export class AccountingApi {
     });
   }
 
+  getQuickbooksContact(entityType: Exclude<QuickBooksHubEntityType, 'employee'>, qbId: string) {
+    return api.get<{
+      data: QuickBooksContactDetail;
+    }>(`/integrations/quickbooks/contacts/${entityType}/${qbId}`);
+  }
+
+  postQuickbooksContact(
+    entityType: Exclude<QuickBooksHubEntityType, 'employee'>,
+    payload: QuickBooksContactCreateInput
+  ) {
+    return api.post<{
+      data: QuickBooksContactDetail;
+    }>(`/integrations/quickbooks/contacts/${entityType}`, payload);
+  }
+
+  patchQuickbooksContact(
+    entityType: Exclude<QuickBooksHubEntityType, 'employee'>,
+    qbId: string,
+    payload: QuickBooksContactUpdateInput
+  ) {
+    return api.patch<{
+      data: QuickBooksContactDetail;
+    }>(`/integrations/quickbooks/contacts/${entityType}/${qbId}`, payload);
+  }
+
+  deleteQuickbooksContact(entityType: Exclude<QuickBooksHubEntityType, 'employee'>, qbId: string) {
+    return api.delete<{
+      data: {
+        qbId: string;
+        deleted: true;
+      };
+    }>(`/integrations/quickbooks/contacts/${entityType}/${qbId}`);
+  }
+
   getQuickbooksHubOperations(params?: QuickBooksHubOperationsParams) {
     return this.listQuickBooksHub<QuickBooksHubOperationsPayload>(
       '/integrations/quickbooks/hub/operations',
@@ -281,6 +348,31 @@ export class AccountingApi {
     }>(`/integrations/quickbooks/live/transaction/${qbTxnId}`, {
       params: { type }
     });
+  }
+
+  postQuickbooksMoneyTransaction(
+    txnType: QuickBooksMoneyTxnType,
+    payload: QuickBooksMoneyCreateInput
+  ) {
+    return api.post<{
+      data: QuickBooksTransactionDetail;
+    }>(`/integrations/quickbooks/money/${txnType}`, payload);
+  }
+
+  patchQuickbooksMoneyTransaction(
+    txnType: QuickBooksMoneyTxnType,
+    qbTxnId: string,
+    payload: QuickBooksMoneyUpdateInput
+  ) {
+    return api.patch<{
+      data: QuickBooksTransactionDetail;
+    }>(`/integrations/quickbooks/money/${txnType}/${qbTxnId}`, payload);
+  }
+
+  deleteQuickbooksMoneyTransaction(txnType: QuickBooksMoneyTxnType, qbTxnId: string) {
+    return api.delete<{
+      data: QuickBooksMoneyDeleteResult;
+    }>(`/integrations/quickbooks/money/${txnType}/${qbTxnId}`);
   }
 
   getQuickbooksWriteTransactions(txnType: QuickBooksWriteTxnType, params: QuickBooksWriteListQuery) {

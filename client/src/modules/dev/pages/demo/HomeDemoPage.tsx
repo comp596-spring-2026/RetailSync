@@ -1,7 +1,6 @@
 import LaunchIcon from '@mui/icons-material/Launch';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
-import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import SecurityOutlinedIcon from '@mui/icons-material/SecurityOutlined';
 import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined';
 import VpnKeyOutlinedIcon from '@mui/icons-material/VpnKeyOutlined';
@@ -40,8 +39,8 @@ export const HomeDemoPage = () => {
               RetailSync
             </Typography>
             <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 900 }}>
-              RetailSync is a multi-tenant retail operations platform that unifies inventory, POS ingestion, permissions, and reporting into
-              one secure workflow.
+              RetailSync is a multi-tenant retail operations platform that unifies authentication, POS ingestion, permissions, and reporting
+              into one secure workflow.
             </Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
               <Button
@@ -82,8 +81,8 @@ export const HomeDemoPage = () => {
           <Stack spacing={1.5}>
             <Typography variant="h5">Problem Statement</Typography>
             <Typography variant="body1" color="text.secondary">
-              Retail teams often experience inventory drift from spreadsheet-based updates, weak permission enforcement that exposes critical
-              actions, limited audit history for stock movements, and fragmented POS import workflows that slow operations and reporting.
+              Retail teams often struggle with fragmented sign-in flows, weak permission enforcement that exposes critical actions, limited
+              audit history for operational changes, and disconnected POS import workflows that slow reporting.
             </Typography>
           </Stack>
 
@@ -91,8 +90,7 @@ export const HomeDemoPage = () => {
             <Typography variant="h5">Solution Overview</Typography>
             <Typography variant="body1" color="text.secondary">
               RetailSync enforces tenant boundaries with company-scoped data access, applies server-side RBAC checks on protected endpoints,
-              records immutable inventory movements through the InventoryLedger, streamlines POS ingestion workflows, and exposes reporting views
-              for operational visibility.
+              streamlines POS ingestion workflows, and exposes reporting views for operational visibility.
             </Typography>
           </Stack>
 
@@ -119,11 +117,11 @@ export const HomeDemoPage = () => {
                   <CardContent>
                     <Stack spacing={1}>
                       <Stack direction="row" spacing={1} alignItems="center">
-                        <Inventory2OutlinedIcon color="primary" />
-                        <Typography variant="h6">Inventory Management</Typography>
+                        <SecurityOutlinedIcon color="primary" />
+                        <Typography variant="h6">Access Control</Typography>
                       </Stack>
                       <Typography variant="body2" color="text.secondary">
-                        Tenant-scoped item, location, and stock workflows backed by immutable ledger entries for traceability.
+                        Tenant-scoped roles, permissions, and invite handling for traceable workspace access.
                       </Typography>
                     </Stack>
                   </CardContent>
@@ -138,7 +136,7 @@ export const HomeDemoPage = () => {
                         <Typography variant="h6">POS Import & Reporting</Typography>
                       </Stack>
                       <Typography variant="body2" color="text.secondary">
-                        Structured POS ingestion and reporting dashboards that turn raw sales data into actionable inventory and revenue views.
+                        Structured POS ingestion and reporting dashboards that turn raw sales data into actionable revenue and reconciliation views.
                       </Typography>
                     </Stack>
                   </CardContent>

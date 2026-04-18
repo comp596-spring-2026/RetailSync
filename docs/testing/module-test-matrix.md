@@ -1,34 +1,33 @@
 # Module Test Matrix
 
-Date: 2026-03-01
+Date: 2026-04-17
 
 ## Client Modules
 
 | Module | Automated Tests | Primary Assertions |
 | --- | --- | --- |
-| auth | `modules/auth/pages/LoginPage.test.tsx`, `CreateCompanyPage.test.tsx`, `JoinCompanyPage.test.tsx`, `modules/auth/api/AuthApi.test.ts`, `app/auth/fetchMeAndSync.test.ts`, guards tests | login entry renders, onboarding forms render, auth API endpoints are called, refresh/bootstrapping behavior works |
-| inventory | `modules/inventory/tests/itemsSlice.test.ts`, `modules/inventory/tests/locationsSlice.test.ts`, `components/common/SearchableCrudTable.test.tsx` | item/location thunks update state, delete behavior updates cache, table behavior remains stable |
-| pos | `modules/pos/tests/posSlice.test.ts`, `MatchingWizard.test.tsx`, `TotalSalesLine.test.tsx`, `components/ImportPOSDataModal.test.tsx` | overview/daily thunks populate state, mapping wizard UX is stable, chart renders from typed series |
-| procurement | `modules/procurement/pages/ProcurementHubPage.test.tsx` | tab navigation works and shell modules render |
-| users | `modules/users/tests/companySlice.test.ts` | company set/clear state transitions |
-| rbac | `modules/rbac/tests/rbacSlice.test.ts` | modules, roles, selected role state transitions |
-| settings | `modules/settings/tests/settingsSlice.test.ts`, `modules/settings/components/googleSheets/debugOutcomeGuide.test.ts` | settings fetch/OAuth state updates and debug outcome helper mappings |
-| accounting | `modules/accounting/pages/*` (coverage expanding), API contract via `AccountingApi.ts` and backend integration suite | statements/ledger/quickbooks/observability tabs map to the unified accounting endpoints and states |
-| dev | `modules/dev/pages/demo/HomeDemoPage.test.tsx` | legal/navigation links and demo landing content render |
+| auth | `modules/auth/pages/LoginPage.test.tsx`, `RegisterPage.test.tsx`, `AcceptInvitePage.test.tsx`, `ForgotPasswordPage.test.tsx`, `ResetPasswordPage.test.tsx`, `VerifyEmailPage.test.tsx`, `CreateCompanyPage.test.tsx`, `modules/auth/api/AuthApi.test.ts`, `app/auth/fetchMeAndSync.test.ts` | public auth pages render, auth API requests are shaped correctly, session bootstrap and redirects work |
+| pos | POS tests under `modules/pos` plus import and AI page coverage | imports, table/analytics transitions, and POS presentation stay stable |
+| access | `modules/rbac/tests/rbacSlice.test.ts`, `components/PermissionGate.test.tsx`, access page tests | role state and permission-based rendering work |
+| settings | settings slice and Google Sheets component tests | integration state, source config, and helper logic stay stable |
+| accounting | statements page tests and API contract tests | statements routes and detail flows stay wired |
+| quickbooks | `QuickBooksChartOfAccountsPage.test.tsx`, `QuickBooksLiveReadPages.test.tsx`, `QuickBooksMoneyPages.test.tsx`, `QuickBooksWritePages.test.tsx`, QuickBooks page tests under `modules/quickbooks` | hub/page routing, account reads, contact workflows, money CRUD, invoice/payment CRUD |
+| procurement | `modules/procurement/pages/ProcurementHubPage.test.tsx` | hidden/placeholder procurement UI stays isolated and does not break app structure |
+| app shell | architecture boundary tests, dashboard layout tests, API client tests | top-level app composition and route ownership stay consistent |
 
-## Server Modules / Domains
+## Server Domains
 
 | Domain | Automated Tests | Primary Assertions |
 | --- | --- | --- |
-| auth/session | `server/src/auth.refresh.test.ts` | refresh rotation, token reuse rejection |
-| tenancy | `server/src/tenantIsolation.test.ts` | cross-tenant data isolation |
-| inventory | `server/src/inventoryLedger.immutability.test.ts` | immutable inventory ledger semantics |
-| pos/reports | `server/src/posAndReports.test.ts` | baseline POS/report API behavior for empty and scoped queries |
-| accounting | `server/src/accounting.e2e.test.ts` | upload/create/reprocess/retry, ledger approval actions, post-approved queue path |
-| platform | `server/src/app.test.ts` | app/health route contract |
+| auth/session | `auth.refresh.test.ts`, `authController.test.ts`, `auth.google.test.ts`, `auth.email.test.ts` | refresh rotation, password flows, Google auth, invite/email flows |
+| company/onboarding | `companyController.test.ts` | create company and QuickBooks onboarding behavior |
+| pos/reports | `posAndReports.test.ts` | POS import/report behavior and scoped access |
+| accounting/statements | accounting integration/e2e suites | upload, status, retries, detail, processing pipeline |
+| quickbooks services | `quickbooksContactCrudService.test.ts`, `quickbooksMoneyService.test.ts`, other QuickBooks service tests | customer/vendor CRUD and money transaction CRUD service behavior |
+| platform | `app.test.ts` and route-level smoke tests | health and core server boot behavior |
 
-## Gaps (Next)
+## Current Gaps
 
-1. Add browser E2E automation (Playwright/Cypress) for module workflows in `module-e2e-cases.md`.
-2. Add inventory/procurement page interaction tests beyond smoke level.
-3. Add settings integration tests for Google Sheets sync/delete-source flows with mocked API responses.
+1. No browser E2E harness is checked in yet.
+2. Release validation is still assembled from focused suites rather than one mandatory full journey suite.
+3. Hidden/legacy route alias behavior should continue to be watched when QuickBooks/accounting routing changes.

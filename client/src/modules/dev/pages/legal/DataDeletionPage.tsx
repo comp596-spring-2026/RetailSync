@@ -29,8 +29,8 @@ export const DataDeletionPage = () => {
         </Typography>
         <Typography variant="h6">What can be deleted</Typography>
         <Typography variant="body2">
-          We can delete account profile data, workspace membership, inventory and POS import records, roles, and application settings
-          associated with your workspace.
+          We can delete account profile data, workspace membership, POS import records, roles, and application settings associated with your
+          workspace.
         </Typography>
         <Typography variant="h6">What may be retained</Typography>
         <Typography variant="body2">

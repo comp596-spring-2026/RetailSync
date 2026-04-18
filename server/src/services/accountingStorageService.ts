@@ -29,6 +29,21 @@ export const buildOcrPath = (rootPrefix: string, fileName = 'docai.json') =>
 export const buildStatementOcrTextPath = (rootPrefix: string, fileName = 'text.txt') =>
   buildDerivedPath(rootPrefix, `ocr/${fileName}`);
 
+export const buildStatementJsonPath = (rootPrefix: string, relativePath: string) =>
+  buildDerivedPath(rootPrefix, `ocr/json/${relativePath.replace(/^\/+/, '')}`);
+
+export const buildStatementTransactionsTablePath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/transactions.json');
+
+export const buildStatementChecksClearedTablePath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/checks-cleared.json');
+
+export const buildStatementTransactionSectionsPath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/transaction-sections.json');
+
+export const buildStatementExtractedChecksPath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/extracted-checks.json');
+
 export const buildGeminiPath = (rootPrefix: string, fileName = 'normalized.v1.json') =>
   buildDerivedPath(rootPrefix, `gemini/${fileName}`);
 

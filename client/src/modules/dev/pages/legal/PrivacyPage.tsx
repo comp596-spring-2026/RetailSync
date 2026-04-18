@@ -16,13 +16,13 @@ export const PrivacyPage = () => {
           Last updated: February 25, 2026
         </Typography>
         <Typography variant="body2">
-          RetailSync collects account profile data, authentication identifiers, and operational records such as inventory, POS imports,
-          locations, and role permissions required to run your workspace.
+          RetailSync collects account profile data, authentication identifiers, and operational records such as POS imports, workspace
+          settings, and role permissions required to run your workspace.
         </Typography>
         <Typography variant="h6">How we use data</Typography>
         <Typography variant="body2">
-          Data is used to authenticate users, enforce access permissions, maintain inventory and reporting features, and provide account
-          recovery and security notices.
+          Data is used to authenticate users, enforce access permissions, maintain reporting features, and provide account recovery and
+          security notices.
         </Typography>
         <Typography variant="h6">Google API data</Typography>
         <Typography variant="body2">

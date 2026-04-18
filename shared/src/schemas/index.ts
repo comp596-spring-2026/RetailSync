@@ -6,6 +6,49 @@ import {
 } from "../permissions/permissions";
 
 export const emailSchema = z.string().trim().toLowerCase().email();
+export const passwordSchema = z.string().min(8).max(128);
+
+export const authRegisterSchema = z.object({
+  firstName: z.string().trim().min(1),
+  lastName: z.string().trim().min(1),
+  email: emailSchema,
+  password: passwordSchema
+});
+
+export const authInviteLookupSchema = z.object({
+  email: emailSchema,
+  inviteCode: z.string().trim().min(6)
+});
+
+export const authInviteAcceptSchema = z.object({
+  firstName: z.string().trim().min(1),
+  lastName: z.string().trim().min(1),
+  email: emailSchema,
+  inviteCode: z.string().trim().min(6),
+  password: passwordSchema
+});
+
+export const authLoginSchema = z.object({
+  email: emailSchema,
+  password: z.string().min(1)
+});
+
+export const forgotPasswordSchema = z.object({
+  email: emailSchema
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().trim().min(1),
+  password: passwordSchema
+});
+
+export const verifyEmailRequestSchema = z.object({
+  email: emailSchema
+});
+
+export const verifyEmailConfirmSchema = z.object({
+  token: z.string().trim().min(1)
+});
 
 export const companyCreateSchema = z.object({
   name: z.string().trim().min(2),
@@ -102,53 +145,6 @@ export const dateRangeSummaryQuerySchema = z
     path: ["to"],
   });
 
-export const itemCreateSchema = z.object({
-  upc: z.string().trim().min(1),
-  modifier: z.string().trim().default(""),
-  description: z.string().trim().min(1),
-  department: z.string().trim().min(1),
-  price: z.number().min(0),
-  sku: z.string().trim().optional(),
-  defaultLocationCode: z.string().trim().optional(),
-});
-
-export const itemUpdateSchema = itemCreateSchema
-  .partial()
-  .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field is required",
-  });
-
-export const locationTypeSchema = z.enum([
-  "shelf",
-  "fridge",
-  "freezer",
-  "backroom",
-]);
-
-export const locationCreateSchema = z.object({
-  code: z.string().trim().min(1),
-  type: locationTypeSchema,
-  label: z.string().trim().min(1),
-});
-
-export const locationUpdateSchema = locationCreateSchema
-  .partial()
-  .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field is required",
-  });
-
-export const inventoryMoveSchema = z.object({
-  itemId: z.string().trim().min(1),
-  fromLocationCode: z.string().trim().min(1),
-  toLocationCode: z.string().trim().min(1),
-  qty: z.number().positive(),
-  notes: z.string().trim().optional(),
-});
-
-export const barcodeSearchSchema = z.object({
-  barcode: z.string().trim().min(1),
-});
-
 export const modulePermissionInputSchema = z.record(
   z.enum(moduleKeys),
   permissionSetSchema,
@@ -156,6 +152,14 @@ export const modulePermissionInputSchema = z.record(
 
 export type CompanyCreateInput = z.infer<typeof companyCreateSchema>;
 export type CompanyJoinInput = z.infer<typeof companyJoinSchema>;
+export type AuthRegisterInput = z.infer<typeof authRegisterSchema>;
+export type AuthInviteLookupInput = z.infer<typeof authInviteLookupSchema>;
+export type AuthInviteAcceptInput = z.infer<typeof authInviteAcceptSchema>;
+export type AuthLoginInput = z.infer<typeof authLoginSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type VerifyEmailRequestInput = z.infer<typeof verifyEmailRequestSchema>;
+export type VerifyEmailConfirmInput = z.infer<typeof verifyEmailConfirmSchema>;
 export type RoleInput = z.infer<typeof roleSchema>;
 export type RoleCreateInput = z.infer<typeof roleCreateSchema>;
 export type InviteCreateInput = z.infer<typeof inviteCreateSchema>;
@@ -168,8 +172,3 @@ export type MonthlySummaryQueryInput = z.infer<
 export type DateRangeSummaryQueryInput = z.infer<
   typeof dateRangeSummaryQuerySchema
 >;
-export type ItemCreateInput = z.infer<typeof itemCreateSchema>;
-export type ItemUpdateInput = z.infer<typeof itemUpdateSchema>;
-export type LocationCreateInput = z.infer<typeof locationCreateSchema>;
-export type LocationUpdateInput = z.infer<typeof locationUpdateSchema>;
-export type InventoryMoveInput = z.infer<typeof inventoryMoveSchema>;

@@ -1,4 +1,4 @@
-export type ConnectorKey = 'pos_daily' | 'inventory_items' | (string & {});
+export type ConnectorKey = 'pos_daily' | (string & {});
 
 export type ConnectorDefinition = {
   key: ConnectorKey;
@@ -22,12 +22,6 @@ export const CONNECTORS: Record<string, ConnectorDefinition> = {
       'cashExpenses'
     ]
   },
-  // First version importer supports pos_daily only. This registry entry proves multi-connector config support.
-  inventory_items: {
-    key: 'inventory_items',
-    label: 'Inventory Items',
-    requiredTargets: ['sku', 'description']
-  }
 };
 
 export const DEFAULT_CONNECTOR_KEY: ConnectorKey = 'pos_daily';

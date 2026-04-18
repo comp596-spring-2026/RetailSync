@@ -3,6 +3,11 @@ import path from 'node:path';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vitest';
+import { BankStatement } from './models/BankStatement';
+import { LedgerEntryModel } from './models/LedgerEntry';
+import { RunModel } from './models/Run';
+import { StatementCheckModel } from './models/StatementCheck';
+import { StatementTransactionModel } from './models/StatementTransaction';
 import { clearTestDb, registerAndCreateCompany, setupTestEnv } from './test/testUtils';
 import { detectStatementMonthFromPdf } from './services/accountingPdfAnalysisService';
 
@@ -170,11 +175,31 @@ maybeDescribe('accounting upload flow with bundled PDF', () => {
     expect(detailResponse.body.data.progress.phase).toBe(detailResponse.body.data.status);
     expect(typeof detailResponse.body.data.progress.completedChecks).toBe('number');
     expect(typeof detailResponse.body.data.progress.remainingChecks).toBe('number');
+    expect(detailResponse.body.data.artifacts.transactionsTablePath).toBe(
+      `${rootPrefix}/derived/ocr/json/tables/transactions.json`
+    );
+    expect(detailResponse.body.data.artifacts.checksClearedTablePath).toBe(
+      `${rootPrefix}/derived/ocr/json/tables/checks-cleared.json`
+    );
+    expect(detailResponse.body.data.artifacts.transactionSectionsPath).toBe(
+      `${rootPrefix}/derived/ocr/json/tables/transaction-sections.json`
+    );
+    expect(detailResponse.body.data.artifacts.extractedChecksPath).toBe(
+      `${rootPrefix}/derived/ocr/json/tables/extracted-checks.json`
+    );
 
     const ocrTextPath = `${rootPrefix}/derived/ocr/text.txt`;
     const normalizedPath = `${rootPrefix}/derived/gemini/normalized.v1.json`;
+    const transactionsTablePath = `${rootPrefix}/derived/ocr/json/tables/transactions.json`;
+    const checksClearedTablePath = `${rootPrefix}/derived/ocr/json/tables/checks-cleared.json`;
+    const transactionSectionsPath = `${rootPrefix}/derived/ocr/json/tables/transaction-sections.json`;
+    const extractedChecksPath = `${rootPrefix}/derived/ocr/json/tables/extracted-checks.json`;
     expect(storageObjects.has(makeStorageKey(bucketName, ocrTextPath))).toBe(true);
     expect(storageObjects.has(makeStorageKey(bucketName, normalizedPath))).toBe(true);
+    expect(storageObjects.has(makeStorageKey(bucketName, transactionsTablePath))).toBe(true);
+    expect(storageObjects.has(makeStorageKey(bucketName, checksClearedTablePath))).toBe(true);
+    expect(storageObjects.has(makeStorageKey(bucketName, transactionSectionsPath))).toBe(true);
+    expect(storageObjects.has(makeStorageKey(bucketName, extractedChecksPath))).toBe(true);
 
     const normalizedBuffer = storageObjects.get(makeStorageKey(bucketName, normalizedPath));
     expect(normalizedBuffer).toBeTruthy();
@@ -183,5 +208,230 @@ maybeDescribe('accounting upload flow with bundled PDF', () => {
     expect(normalized.statementId).toBe(statementId);
     expect(typeof normalized.transactionCount).toBe('number');
     expect(Array.isArray(normalized.transactions)).toBe(true);
+
+    const pdfArtifactResponse = await request(app)
+      .get(`/api/accounting/statements/${statementId}/artifact`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .query({ path: gcsPath })
+      .expect(200);
+
+    expect(pdfArtifactResponse.headers['content-type']).toContain('application/pdf');
+    expect(Buffer.from(pdfArtifactResponse.body).length).toBeGreaterThan(0);
+
+    const textArtifactResponse = await request(app)
+      .get(`/api/accounting/statements/${statementId}/artifact`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .query({ path: ocrTextPath })
+      .expect(200);
+
+    expect(textArtifactResponse.headers['content-type']).toContain('text/plain');
+    expect(textArtifactResponse.text.length).toBeGreaterThan(0);
+  });
+
+  it('persists a failed statement row when the uploaded PDF cannot be read back from storage', async () => {
+    const pdfPath = path.resolve(process.cwd(), '../shared/src/accounting/testStatmentPDF.pdf');
+    const pdfBuffer = fs.readFileSync(pdfPath);
+    const { accessToken } = await registerAndCreateCompany(app, 'AcctFixtureMissingObject');
+    const statementMonth = '2025-12';
+
+    const uploadResponse = await request(app)
+      .post('/api/accounting/statements/upload-url')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        fileName: 'missing.pdf',
+        statementMonth,
+        contentType: 'application/pdf'
+      })
+      .expect(200);
+
+    const { statementId, gcsPath, rootPrefix } = uploadResponse.body.data as {
+      statementId: string;
+      gcsPath: string;
+      rootPrefix: string;
+    };
+
+    const createResponse = await request(app)
+      .post('/api/accounting/statements')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        statementId,
+        fileName: 'missing.pdf',
+        statementMonth,
+        gcsPath
+      })
+      .expect(409);
+
+    expect(createResponse.body.message).toBe('statement_pdf_missing');
+    expect(createResponse.body.details.reason).toBe('statement_pdf_missing');
+
+    const statusResponse = await request(app)
+      .get(`/api/accounting/statements/${statementId}/status`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    expect(statusResponse.body.data.status).toBe('failed');
+    expect(statusResponse.body.data.issues).toContain(
+      'Uploaded statement PDF was not found in secure storage. Please upload the file again.'
+    );
+
+    const detailResponse = await request(app)
+      .get(`/api/accounting/statements/${statementId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    expect(detailResponse.body.data.gcs.rootPrefix).toBe(rootPrefix);
+    expect(detailResponse.body.data.gcs.pdfPath).toBe(gcsPath);
+    expect(detailResponse.body.data.status).toBe('failed');
+
+    storageObjects.set(makeStorageKey(bucketName, gcsPath), pdfBuffer);
+
+    const retryResponse = await request(app)
+      .post('/api/accounting/statements')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        statementId,
+        fileName: 'missing.pdf',
+        statementMonth,
+        gcsPath
+      })
+      .expect(200);
+
+    expect(['checks_queued', 'ready_for_review']).toContain(
+      retryResponse.body.data.statement.status
+    );
+  });
+
+  it('keeps only one statement per company month and removes superseded mongo records', async () => {
+    const pdfPath = path.resolve(process.cwd(), '../shared/src/accounting/testStatmentPDF.pdf');
+    const pdfBuffer = fs.readFileSync(pdfPath);
+    const { accessToken } = await registerAndCreateCompany(app, 'AcctFixtureSingleMonth');
+    const statementMonth = '2025-12';
+
+    const firstUpload = await request(app)
+      .post('/api/accounting/statements/upload-url')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        fileName: 'first.pdf',
+        statementMonth,
+        contentType: 'application/pdf'
+      })
+      .expect(200);
+
+    const {
+      statementId: firstStatementId,
+      gcsPath: firstGcsPath
+    } = firstUpload.body.data as {
+      statementId: string;
+      gcsPath: string;
+      rootPrefix: string;
+    };
+
+    storageObjects.set(makeStorageKey(bucketName, firstGcsPath), pdfBuffer);
+
+    await request(app)
+      .post('/api/accounting/statements')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        statementId: firstStatementId,
+        fileName: 'first.pdf',
+        statementMonth,
+        gcsPath: firstGcsPath
+      })
+      .expect(201);
+
+    const firstStatement = await BankStatement.findById(firstStatementId).lean();
+    const companyId = String(firstStatement?.companyId ?? '');
+    expect(companyId).not.toBe('');
+
+    await Promise.all([
+      RunModel.create({
+        companyId,
+        statementId: firstStatementId,
+        runType: 'pipeline',
+        job: 'statement.extract',
+        status: 'failed',
+        errors: ['seeded run']
+      }),
+      StatementTransactionModel.create({
+        companyId,
+        statementId: firstStatementId,
+        postDate: '2025-12-31',
+        description: 'Seeded txn',
+        amount: 10,
+        type: 'debit',
+        proposal: { status: 'proposed' },
+        posting: { status: 'not_posted' }
+      }),
+      StatementCheckModel.create({
+        statementId: firstStatementId,
+        companyId,
+        status: 'failed',
+        gcs: { frontPath: 'seed/front.png' }
+      })
+    ]);
+
+    const seededTxn = await StatementTransactionModel.findOne({
+      companyId,
+      statementId: firstStatementId
+    }).lean();
+
+    expect(seededTxn?._id).toBeTruthy();
+
+    await LedgerEntryModel.create({
+      companyId,
+      statementId: firstStatementId,
+      statementTransactionId: String(seededTxn?._id),
+      date: '2025-12-31',
+      description: 'Seeded ledger',
+      amount: 10,
+      type: 'debit',
+      proposal: { status: 'proposed' },
+      posting: { status: 'not_posted' }
+    });
+
+    const secondUpload = await request(app)
+      .post('/api/accounting/statements/upload-url')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        fileName: 'second.pdf',
+        statementMonth,
+        contentType: 'application/pdf'
+      })
+      .expect(200);
+
+    const {
+      statementId: secondStatementId,
+      gcsPath: secondGcsPath
+    } = secondUpload.body.data as {
+      statementId: string;
+      gcsPath: string;
+      rootPrefix: string;
+    };
+
+    storageObjects.set(makeStorageKey(bucketName, secondGcsPath), pdfBuffer);
+
+    await request(app)
+      .post('/api/accounting/statements')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        statementId: secondStatementId,
+        fileName: 'second.pdf',
+        statementMonth,
+        gcsPath: secondGcsPath
+      })
+      .expect(201);
+
+    expect(
+      await BankStatement.countDocuments({
+        companyId,
+        statementMonth
+      })
+    ).toBe(1);
+    expect(await BankStatement.exists({ _id: firstStatementId, companyId })).toBeNull();
+    expect(await StatementTransactionModel.exists({ statementId: firstStatementId, companyId })).toBeNull();
+    expect(await StatementCheckModel.exists({ statementId: firstStatementId, companyId })).toBeNull();
+    expect(await LedgerEntryModel.exists({ statementId: firstStatementId, companyId })).toBeNull();
+    expect(await RunModel.exists({ statementId: firstStatementId, companyId })).toBeNull();
+    expect(await BankStatement.exists({ _id: secondStatementId, companyId })).not.toBeNull();
   });
 });

@@ -3,16 +3,17 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Request, Response } from 'express';
 import { google } from 'googleapis';
 import { env } from '../config/env';
+import { AUTH_COOKIE_NAMES, AUTH_SESSION_DEFAULTS } from '../constants/config';
 import { fail } from '../utils/apiResponse';
 import { UserModel } from '../models/User';
 import { RefreshTokenModel } from '../models/RefreshToken';
 import { signAccessToken, signRefreshToken } from '../utils/jwt';
 
-const stateCookieName = 'googleOAuthState';
-const refreshCookieName = 'refreshToken';
+const stateCookieName = AUTH_COOKIE_NAMES.googleOAuthState;
+const refreshCookieName = AUTH_COOKIE_NAMES.refreshToken;
 
 const hashTokenId = (value: string) => createHash('sha256').update(value).digest('hex');
-const refreshExpiryDate = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+const refreshExpiryDate = () => new Date(Date.now() + AUTH_SESSION_DEFAULTS.refreshTokenTtlMs);
 
 const getOAuthClient = () => {
   if (!env.googleOAuthClientId || !env.googleOAuthClientSecret || !env.googleAuthRedirectUri) {
@@ -31,7 +32,7 @@ const setRefreshCookie = (res: Response, token: string) => {
     httpOnly: true,
     sameSite: 'lax',
     secure: env.nodeEnv === 'production',
-    maxAge: 7 * 24 * 60 * 60 * 1000
+    maxAge: AUTH_SESSION_DEFAULTS.refreshTokenTtlMs
   });
 };
 
@@ -40,7 +41,7 @@ const setStateCookie = (res: Response, state: string) => {
     httpOnly: true,
     sameSite: 'lax',
     secure: env.nodeEnv === 'production',
-    maxAge: 10 * 60 * 1000
+    maxAge: AUTH_SESSION_DEFAULTS.googleOAuthStateTtlMs
   });
 };
 

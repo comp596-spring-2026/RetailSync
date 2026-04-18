@@ -2,6 +2,7 @@
 
 ## Authentication
 
+- Email/password register, verify, login, forgot password, and reset password endpoints are available alongside Google OAuth.
 - Access token (JWT): 15 minutes
 - Refresh token (JWT): 7 days
 - Refresh token stored in cookie:
@@ -41,7 +42,7 @@ Server middleware: `requirePermission(module, action)`
 Created per company on company creation:
 
 - `Admin`: full CRUD + `actions: ["*"]` on all modules
-- `Member`: operational defaults (POS/items/inventory enabled)
+- `Member`: operational defaults for active product modules
 - `Viewer`: read-only defaults
 
 ## Modules and Custom Actions
@@ -54,15 +55,10 @@ mindmap
     pos
       import
       recalculate
-    items
-      import
     invoices
       confirm
       reprocess_ocr
       export
-    inventory
-      move
-      adjust
     bankStatements
       import
       parse_pdf

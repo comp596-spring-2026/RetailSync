@@ -51,7 +51,7 @@ Redux state is feature-owned under `modules/<feature>/state`.
 - `modules/users/state` — company reducer/actions.
 - `modules/rbac/state` — rbac reducer/actions.
 - `app/store/uiSlice.ts` — global UI reducer/actions.
-- `modules/inventory/state`, `modules/settings/state`, `modules/pos/state`.
+- `modules/settings/state`, `modules/pos/state`.
 - Each feature exposes a public state API via `modules/<feature>/state/index.ts`.
 
 **When to use thunks vs helpers**
@@ -80,7 +80,7 @@ They should not become the permanent home for:
 - cross-module integration glue
 
 - **Error pages** (`pages/errors/`) — `UnauthorizedPage` (401), `ForbiddenPage` (403), `NotFoundPage` (404), `ServerErrorPage` (500). Shared `ErrorPageLayout` with logo, message, and primary/secondary actions. Used so users can navigate back when something goes wrong.
-- **Flow:** No token on protected route → `/401` → “Sign in” → `/login`. Unknown path → `/404`. After failed refresh (e.g. expired session), API client redirects to `/401`. You can `navigate('/403')` or `navigate('/500')` from components when handling API errors.
+- **Flow:** No token on protected route → `/401` → “Sign in” → `/login`. Unknown path → `/404`. After failed refresh (e.g. expired session), API client redirects to `/401`. Public auth pages cover `/register`, `/forgot-password`, `/reset-password`, and `/verify-email`. You can `navigate('/403')` or `navigate('/500')` from components when handling API errors.
 
 ---
 

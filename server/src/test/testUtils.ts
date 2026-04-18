@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import request from 'supertest';
 import { randomUUID, createHash } from 'node:crypto';
+import { DEFAULT_CURRENCY_CODE, DEV_VITE_CLIENT_ORIGIN } from '@retailsync/shared';
+import { AUTH_SESSION_DEFAULTS, SERVER_RUNTIME_DEFAULTS, TEST_ENV_DEFAULTS } from '../constants/config';
 import { UserModel } from '../models/User';
 import { RefreshTokenModel } from '../models/RefreshToken';
 import { signAccessToken, signRefreshToken } from '../utils/jwt';
@@ -9,17 +11,28 @@ import { signAccessToken, signRefreshToken } from '../utils/jwt';
 let mongo: MongoMemoryServer | null = null;
 
 export const setupTestEnv = () => {
-  process.env.PORT = process.env.PORT ?? '4000';
-  process.env.MONGO_URI = process.env.MONGO_URI ?? 'mongodb://127.0.0.1:27017/retailsync-test';
+  process.env.PORT = process.env.PORT ?? String(SERVER_RUNTIME_DEFAULTS.port);
+  process.env.MONGO_URI = process.env.MONGO_URI ?? SERVER_RUNTIME_DEFAULTS.testMongoUri;
   process.env.ENCRYPTION_KEY =
     process.env.ENCRYPTION_KEY ??
     Buffer.from('12345678901234567890123456789012').toString('base64');
-  process.env.CLIENT_URL = process.env.CLIENT_URL ?? 'http://localhost:5173';
+  process.env.CLIENT_URL = process.env.CLIENT_URL ?? DEV_VITE_CLIENT_ORIGIN;
+  process.env.SMTP_HOST = process.env.SMTP_HOST ?? TEST_ENV_DEFAULTS.smtpHost;
+  process.env.SMTP_PORT = process.env.SMTP_PORT ?? TEST_ENV_DEFAULTS.smtpPort;
+  process.env.SMTP_FROM = process.env.SMTP_FROM ?? TEST_ENV_DEFAULTS.smtpFrom;
+  process.env.SMTP_FROM_NAME = process.env.SMTP_FROM_NAME ?? SERVER_RUNTIME_DEFAULTS.smtpFromName;
+  process.env.SMTP_SECURE = process.env.SMTP_SECURE ?? TEST_ENV_DEFAULTS.smtpSecure;
   process.env.NODE_ENV = 'test';
 };
 
 export const connectTestDb = async () => {
-  mongo = await MongoMemoryServer.create();
+  const port = 27000 + (process.pid % 10000);
+  mongo = await MongoMemoryServer.create({
+    instance: {
+      ip: '127.0.0.1',
+      port
+    }
+  });
   const uri = mongo.getUri();
   process.env.MONGO_URI = uri;
   await mongoose.connect(uri);
@@ -55,7 +68,7 @@ export const registerAndCreateCompany = async (app: any, userSeed: string) => {
       phone: '1234567890',
       email: `company.${userSeed}@example.com`,
       timezone: 'America/New_York',
-      currency: 'USD'
+      currency: DEFAULT_CURRENCY_CODE
     })
     .expect(201);
 
@@ -87,7 +100,7 @@ export const createGoogleAuthSession = async (userSeed: string) => {
   await RefreshTokenModel.create({
     userId: user._id,
     jtiHash,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    expiresAt: new Date(Date.now() + AUTH_SESSION_DEFAULTS.refreshTokenTtlMs)
   });
 
   return {

@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import { env } from "../../config/env";
 import { IntegrationSecretModel } from "../../models/IntegrationSecret";
+import { QuickBooksOnboardingModel } from "../../models/QuickBooksOnboarding";
 import { enqueueAccountingJob } from "../../jobs/accountingQueue";
 import {
   markQuickBooksSyncFailure,
@@ -33,6 +34,8 @@ import {
   getOrCreateLegacySettings,
   toSafeSettings,
 } from "../googleSheets/settingsService";
+import { decryptJson, encryptJson } from "../../utils/encryption";
+import { createCompanyFromQuickBooksOnboarding } from "../companyOnboardingService";
 
 export const quickbooksOauthStateCookie = "quickbooksOAuthState";
 export const defaultQuickBooksReturnTo = "/dashboard/accounting/quickbooks";
@@ -77,11 +80,17 @@ type SettingsWithQuickBooks = {
 type QuickBooksOAuthStatePayload = {
   nonce: string;
   userId: string;
-  companyId: string;
   environment: QuickBooksEnvironment;
   returnTo: string;
-  purpose: "quickbooks_connect";
-};
+} & (
+  | {
+      companyId: string;
+      purpose: "quickbooks_connect";
+    }
+  | {
+      purpose: "quickbooks_onboarding";
+    }
+);
 
 type QuickBooksOAuthHealthStatus = {
   status: "healthy" | "degraded";
@@ -300,7 +309,7 @@ export const normalizeQuickBooksReturnTo = (
 ) => {
   if (!raw) return fallback;
   const value = raw.trim();
-  if (!value.startsWith("/dashboard")) return fallback;
+  if (!value.startsWith("/dashboard") && !value.startsWith("/onboarding")) return fallback;
   return value;
 };
 
@@ -309,6 +318,12 @@ export const extractQuickBooksCallbackReason = (error: unknown) => {
   const normalized = message.toLowerCase();
   if (normalized.includes("missing encryption_key")) return "encryption_key_missing";
   if (normalized.includes("encryption_key must be base64")) return "encryption_key_invalid";
+  if (
+    normalized.includes("unsupported state") ||
+    normalized.includes("unable to authenticate data")
+  ) {
+    return "quickbooks_secret_unreadable";
+  }
   if (normalized.includes("quickbooks_oauth_not_configured"))
     return "quickbooks_oauth_not_configured";
   if (normalized.includes("access_token_missing")) return "access_token_missing";
@@ -357,6 +372,90 @@ export const buildQuickBooksConnectUrl = async (params: {
   };
 };
 
+const savePendingQuickBooksOnboardingSecret = async (params: {
+  userId: string;
+  environment: QuickBooksEnvironment;
+  realmId: string;
+  companyName: string | null;
+  payload: QuickBooksSecretPayload;
+}) => {
+  await QuickBooksOnboardingModel.findOneAndUpdate(
+    { userId: params.userId },
+    {
+      $set: {
+        environment: params.environment,
+        realmId: params.realmId,
+        companyName: params.companyName,
+        encryptedPayload: encryptJson(params.payload, env.encryptionKey),
+      }
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+};
+
+const loadPendingQuickBooksOnboardingSecret = async (userId: string) => {
+  const record = await QuickBooksOnboardingModel.findOne({ userId }).select('+encryptedPayload');
+  if (!record?.encryptedPayload) {
+    return null;
+  }
+
+  return {
+    environment: record.environment as QuickBooksEnvironment,
+    realmId: record.realmId,
+    companyName: record.companyName ?? null,
+    payload: decryptJson<QuickBooksSecretPayload>(record.encryptedPayload, env.encryptionKey)
+  };
+};
+
+export const clearPendingQuickBooksOnboarding = async (userId: string) => {
+  await QuickBooksOnboardingModel.deleteOne({ userId });
+};
+
+export const getPendingQuickBooksOnboarding = async (userId: string) => {
+  const record = await QuickBooksOnboardingModel.findOne({ userId }).lean();
+  if (!record) {
+    return null;
+  }
+
+  return {
+    connected: true,
+    environment: record.environment as QuickBooksEnvironment,
+    realmId: record.realmId,
+    companyName: record.companyName ?? null
+  };
+};
+
+export const buildQuickBooksOnboardingConnectUrl = async (params: {
+  userId: string;
+  returnToPath?: string;
+  environment?: QuickBooksEnvironment;
+}) => {
+  const environment: QuickBooksEnvironment =
+    params.environment === "production" ? "production" : "sandbox";
+  const returnTo = normalizeQuickBooksReturnTo(
+    params.returnToPath,
+    "/onboarding/create-company",
+  );
+  const statePayload: QuickBooksOAuthStatePayload = {
+    nonce: randomBytes(12).toString("hex"),
+    userId: params.userId,
+    environment,
+    returnTo,
+    purpose: "quickbooks_onboarding",
+  };
+  const signedState = jwt.sign(statePayload, env.accessSecret, {
+    algorithm: "HS256",
+    expiresIn: quickbooksOauthStateTtlJwt,
+  });
+  const url = buildQuickBooksAuthorizationUrl(signedState);
+
+  return {
+    url,
+    nonce: statePayload.nonce,
+    environment,
+  };
+};
+
 export const handleQuickBooksCallback = async (params: {
   code?: string;
   state?: string;
@@ -385,7 +484,10 @@ export const handleQuickBooksCallback = async (params: {
     parsedState.returnTo,
     defaultQuickBooksReturnTo,
   );
-  if (parsedState.purpose !== "quickbooks_connect") {
+  if (
+    parsedState.purpose !== "quickbooks_connect" &&
+    parsedState.purpose !== "quickbooks_onboarding"
+  ) {
     return { returnTo, status: "error" as const, reason: "invalid_oauth_state" };
   }
 
@@ -421,7 +523,12 @@ export const handleQuickBooksCallback = async (params: {
 
   try {
     const tokenResponse = await exchangeQuickBooksAuthorizationCode(code);
-    const existing = await loadQuickBooksSecret(parsedState.companyId);
+    const existing =
+      parsedState.purpose === "quickbooks_connect"
+        ? await loadQuickBooksSecret(parsedState.companyId)
+        : await loadPendingQuickBooksOnboardingSecret(parsedState.userId).then(
+            (entry) => entry?.payload ?? null,
+          );
     const quickbooksSecret = toQuickBooksSecretPayload({
       tokenResponse,
       environment: parsedState.environment,
@@ -434,19 +541,41 @@ export const handleQuickBooksCallback = async (params: {
       accessToken: quickbooksSecret.accessToken,
     });
     quickbooksSecret.companyName = companyName ?? quickbooksSecret.companyName;
-    await saveQuickBooksSecret(parsedState.companyId, quickbooksSecret);
+    if (parsedState.purpose === "quickbooks_connect") {
+      await saveQuickBooksSecret(parsedState.companyId, quickbooksSecret);
 
-    const settings = await getOrCreateSettings(
-      parsedState.companyId,
-      parsedState.userId,
-    );
-    const quickbooks = ensureQuickbooksShape(settings);
-    quickbooks.connected = true;
-    quickbooks.environment = parsedState.environment;
-    quickbooks.realmId = realmId;
-    quickbooks.companyName = companyName ?? quickbooks.companyName ?? null;
-    quickbooks.updatedAt = new Date();
-    await settings.save();
+      const settings = await getOrCreateSettings(
+        parsedState.companyId,
+        parsedState.userId,
+      );
+      const quickbooks = ensureQuickbooksShape(settings);
+      quickbooks.connected = true;
+      quickbooks.environment = parsedState.environment;
+      quickbooks.realmId = realmId;
+      quickbooks.companyName = companyName ?? quickbooks.companyName ?? null;
+      quickbooks.updatedAt = new Date();
+      await settings.save();
+    } else {
+      await savePendingQuickBooksOnboardingSecret({
+        userId: parsedState.userId,
+        environment: parsedState.environment,
+        realmId,
+        companyName: companyName ?? null,
+        payload: quickbooksSecret
+      });
+
+      const provisioned = await createCompanyFromQuickBooksOnboarding({
+        userId: parsedState.userId,
+        companyName: companyName ?? null
+      });
+
+      await claimPendingQuickBooksOnboarding({
+        userId: parsedState.userId,
+        companyId: provisioned.companyId
+      });
+
+      return { returnTo: "/dashboard", status: "connected" as const };
+    }
 
     return { returnTo, status: "connected" as const };
   } catch (error) {
@@ -456,6 +585,34 @@ export const handleQuickBooksCallback = async (params: {
       reason: extractQuickBooksCallbackReason(error),
     };
   }
+};
+
+export const claimPendingQuickBooksOnboarding = async (params: {
+  userId: string;
+  companyId: string;
+}) => {
+  const pending = await loadPendingQuickBooksOnboardingSecret(params.userId);
+  if (!pending) {
+    return null;
+  }
+
+  await saveQuickBooksSecret(params.companyId, pending.payload);
+  const settings = await getOrCreateSettings(params.companyId, params.userId);
+  const quickbooks = ensureQuickbooksShape(settings);
+  quickbooks.connected = true;
+  quickbooks.environment = pending.environment;
+  quickbooks.realmId = pending.realmId;
+  quickbooks.companyName = pending.companyName;
+  quickbooks.updatedAt = new Date();
+  await settings.save();
+  await clearPendingQuickBooksOnboarding(params.userId);
+
+  return {
+    connected: true,
+    environment: pending.environment,
+    realmId: pending.realmId,
+    companyName: pending.companyName
+  };
 };
 
 export const getQuickBooksOAuthStatus = async (
@@ -517,7 +674,12 @@ export const getQuickBooksOAuthStatus = async (
       health,
     });
   } catch (error) {
-    const secret = quickbooks.connected ? await loadQuickBooksSecret(companyId) : null;
+    let secret = null;
+    try {
+      secret = quickbooks.connected ? await loadQuickBooksSecret(companyId) : null;
+    } catch {
+      secret = null;
+    }
     const health = getQuickBooksSecretHealth(secret);
 
     return buildQuickBooksOAuthStatus({

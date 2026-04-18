@@ -19,7 +19,7 @@ export const AuthShell = ({
   subtitle,
   icon,
   width = 460,
-  logoHeight = 62,
+  logoHeight = 124,
   hideHeader = false,
   paperPadding = 4,
   children

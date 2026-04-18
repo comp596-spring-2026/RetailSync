@@ -5,15 +5,11 @@ import {
   MenuItem,
   Paper,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
   TextField,
   Typography
 } from '@mui/material';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { BankStatementStatus } from '@retailsync/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -24,7 +20,7 @@ import { formatDate } from '../../../utils/date';
 import { hasPermission } from '../../../utils/permissions';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { accountingApi } from '../api';
-import { AccountingTabs, UploadStatementDialog } from '../components';
+import { UploadStatementDialog } from '../components';
 
 type StatementItem = {
   id: string;
@@ -67,6 +63,45 @@ const formatProgressLabel = (progress: StatementItem['progress']) => {
   return `${progress.completedChecks} done • ${progress.remainingChecks} left`;
 };
 
+const formatStatusLabel = (status: BankStatementStatus) =>
+  status.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+
+const getStageSummary = (row: StatementItem) => {
+  if (row.status === 'failed') {
+    return row.issuesCount > 0
+      ? `${row.issuesCount} issue${row.issuesCount === 1 ? '' : 's'} need attention`
+      : 'Processing stopped and needs attention';
+  }
+
+  if (row.status === 'ready_for_review') {
+    return row.progress.totalChecks > 0
+      ? `${row.progress.checksReady} checks ready for review`
+      : 'Artifacts are ready for review';
+  }
+
+  if (row.progress.totalChecks > 0) {
+    return `${formatProgressLabel(row.progress)} across ${row.progress.totalChecks} checks`;
+  }
+
+  if (row.status === 'uploaded') {
+    return 'Saved and waiting to start background processing';
+  }
+
+  if (row.status === 'extracting') {
+    return 'Extracting text and page data from the PDF';
+  }
+
+  if (row.status === 'structuring') {
+    return 'Structuring transactions and statement sections';
+  }
+
+  if (row.status === 'checks_queued') {
+    return 'Preparing check review items';
+  }
+
+  return 'In progress';
+};
+
 export const StatementsPage = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -75,6 +110,7 @@ export const StatementsPage = () => {
   const canView = hasPermission(permissions, 'bankStatements', 'view');
   const canCreate = hasPermission(permissions, 'bankStatements', 'create');
   const canEdit = hasPermission(permissions, 'bankStatements', 'edit');
+  const canDelete = hasPermission(permissions, 'bankStatements', 'delete');
 
   const [rows, setRows] = useState<StatementItem[]>([]);
   const [month, setMonth] = useState('');
@@ -106,23 +142,6 @@ export const StatementsPage = () => {
     void load();
   }, [canView]);
 
-  useEffect(() => {
-    if (!canView) return;
-
-    const hasActive = rows.some((row) =>
-      row.status === 'extracting' || row.status === 'structuring' || row.status === 'checks_queued'
-    );
-    if (!hasActive) return;
-
-    const interval = window.setInterval(() => {
-      void load();
-    }, 3000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [canView, rows]);
-
   const reprocess = async (id: string) => {
     try {
       await accountingApi.reprocessStatement(id);
@@ -132,6 +151,26 @@ export const StatementsPage = () => {
       dispatch(
         showSnackbar({
           message: extractApiErrorMessage(apiError, 'Failed to reprocess statement'),
+          severity: 'error'
+        })
+      );
+    }
+  };
+
+  const deleteStatement = async (id: string, fileName: string) => {
+    const confirmed = window.confirm(
+      `Delete ${fileName}? This removes the statement and its extracted processing records.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await accountingApi.deleteStatement(id);
+      dispatch(showSnackbar({ message: 'Statement deleted', severity: 'success' }));
+      await load();
+    } catch (apiError) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Failed to delete statement'),
           severity: 'error'
         })
       );
@@ -149,6 +188,40 @@ export const StatementsPage = () => {
   };
 
   const hasRows = useMemo(() => rows.length > 0, [rows]);
+  const summary = useMemo(() => {
+    const failed = rows.filter((row) => row.status === 'failed').length;
+    const active = rows.filter((row) =>
+      row.status === 'extracting' || row.status === 'structuring' || row.status === 'checks_queued'
+    ).length;
+    const ready = rows.filter((row) => row.status === 'ready_for_review').length;
+    return { failed, active, ready };
+  }, [rows]);
+
+  const sections = useMemo(
+    () => [
+      {
+        title: 'Processing now',
+        subtitle: 'Statements actively moving through extraction, structuring, or check processing.',
+        rows: rows.filter((row) =>
+          row.status === 'uploaded' ||
+          row.status === 'extracting' ||
+          row.status === 'structuring' ||
+          row.status === 'checks_queued'
+        )
+      },
+      {
+        title: 'Needs attention',
+        subtitle: 'Statements that failed and need reprocess or cleanup.',
+        rows: rows.filter((row) => row.status === 'failed')
+      },
+      {
+        title: 'Ready for review',
+        subtitle: 'Statements with extracted outputs ready for suggestions and ledger review.',
+        rows: rows.filter((row) => row.status === 'ready_for_review')
+      }
+    ],
+    [rows]
+  );
 
   if (!canView) {
     return <NoAccess />;
@@ -161,7 +234,6 @@ export const StatementsPage = () => {
         subtitle="Upload statements and monitor extraction/check processing before ledger approval."
         icon={<AccountBalanceIcon />}
       />
-      <AccountingTabs />
       {error && <Alert severity="error">{error}</Alert>}
 
       <Paper sx={{ p: 2 }}>
@@ -204,13 +276,34 @@ export const StatementsPage = () => {
             sx={{ flexGrow: 1 }}
           />
           <Button variant="outlined" onClick={() => void load()}>
-            Apply
+            Refresh
           </Button>
           <Button variant="contained" onClick={() => setUploadOpen(true)} disabled={!canCreate}>
             Upload PDF
           </Button>
         </Stack>
       </Paper>
+
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+        <Paper variant="outlined" sx={{ p: 1.5, flex: 1 }}>
+          <Typography variant="caption" color="text.secondary">
+            Active processing
+          </Typography>
+          <Typography variant="h5">{summary.active}</Typography>
+        </Paper>
+        <Paper variant="outlined" sx={{ p: 1.5, flex: 1 }}>
+          <Typography variant="caption" color="text.secondary">
+            Ready for review
+          </Typography>
+          <Typography variant="h5">{summary.ready}</Typography>
+        </Paper>
+        <Paper variant="outlined" sx={{ p: 1.5, flex: 1 }}>
+          <Typography variant="caption" color="text.secondary">
+            Failed statements
+          </Typography>
+          <Typography variant="h5">{summary.failed}</Typography>
+        </Paper>
+      </Stack>
 
       <LoadingEmptyStateWrapper
         loading={loading}
@@ -219,94 +312,119 @@ export const StatementsPage = () => {
         emptyMessage="No statements uploaded yet"
         emptySecondary="Upload a PDF to start extraction."
       >
-        <Paper sx={{ p: 2 }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Month</TableCell>
-                <TableCell>File</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Checks Progress</TableCell>
-                <TableCell>Updated</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell>{row.statementMonth}</TableCell>
-                  <TableCell>
-                    <Stack spacing={0.25}>
-                      <Typography variant="body2">{row.fileName}</Typography>
-                      {row.issuesCount > 0 && (
-                        <Typography variant="caption" color="warning.main">
-                          {row.issuesCount} issue(s)
-                        </Typography>
-                      )}
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      size="small"
-                      label={row.status.replace(/_/g, ' ')}
-                      color={statusColor(row.status)}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Stack spacing={0.5}>
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={`Phase: ${row.progress.phase.replace(/_/g, ' ')}`}
-                        sx={{ alignSelf: 'flex-start' }}
-                      />
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        {formatProgressLabel(row.progress)}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        total {row.progress.totalChecks}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        queued {row.progress.checksQueued} • processing {row.progress.checksProcessing}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        ready {row.progress.checksReady} • failed {row.progress.checksFailed}
-                      </Typography>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>{formatDate(row.updatedAt, 'short')}</TableCell>
-                  <TableCell align="right">
-                    <Stack direction="row" spacing={1} justifyContent="flex-end">
-                      <Button
-                        size="small"
-                        onClick={() => navigate(`/dashboard/accounting/statements/${row.id}`)}
-                      >
-                        Open
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => navigate('/dashboard/accounting/ledger')}
-                        disabled={row.status !== 'ready_for_review'}
-                      >
-                        Open Ledger
-                      </Button>
-                      {canEdit && (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => void reprocess(row.id)}
-                        >
-                          Reprocess
-                        </Button>
-                      )}
-                    </Stack>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Paper>
+        <Stack spacing={2}>
+          {sections.map((section) => (
+            <Paper key={section.title} sx={{ p: 2 }}>
+              <Stack spacing={1.5}>
+                <Stack spacing={0.25}>
+                  <Typography variant="subtitle1">{section.title}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {section.subtitle}
+                  </Typography>
+                </Stack>
+
+                {section.rows.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No statements in this stage right now.
+                  </Typography>
+                ) : (
+                  <Stack spacing={1.25}>
+                    {section.rows.map((row) => (
+                      <Paper key={row.id} variant="outlined" sx={{ p: 1.5, bgcolor: 'background.default' }}>
+                        <Stack spacing={1.25}>
+                          <Stack
+                            direction={{ xs: 'column', md: 'row' }}
+                            spacing={1}
+                            justifyContent="space-between"
+                            alignItems={{ md: 'center' }}
+                          >
+                            <Stack spacing={0.35}>
+                              <Typography variant="subtitle2">{row.fileName}</Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Month {row.statementMonth} • Updated {formatDate(row.updatedAt, 'short')}
+                              </Typography>
+                              <Typography variant="body2">{getStageSummary(row)}</Typography>
+                            </Stack>
+                            <Chip
+                              size="small"
+                              label={formatStatusLabel(row.status)}
+                              color={statusColor(row.status)}
+                            />
+                          </Stack>
+
+                          {row.progress.totalChecks > 0 || row.issuesCount > 0 ? (
+                            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                              {row.progress.totalChecks > 0 ? (
+                                <Chip
+                                  size="small"
+                                  variant="outlined"
+                                  label={`${row.progress.totalChecks} checks`}
+                                />
+                              ) : null}
+                              {row.progress.totalChecks > 0 ? (
+                                <Chip
+                                  size="small"
+                                  variant="outlined"
+                                  label={formatProgressLabel(row.progress)}
+                                />
+                              ) : null}
+                              {row.issuesCount > 0 ? (
+                                <Chip
+                                  size="small"
+                                  color="warning"
+                                  variant="outlined"
+                                  label={`${row.issuesCount} issue${row.issuesCount === 1 ? '' : 's'}`}
+                                />
+                              ) : null}
+                            </Stack>
+                          ) : null}
+
+                          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                            <Button
+                              size="small"
+                              variant="contained"
+                              onClick={() => navigate(`/dashboard/accounting/statements/${row.id}`)}
+                            >
+                              Open workspace
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => navigate('/dashboard/accounting/ledger')}
+                              disabled={row.status !== 'ready_for_review'}
+                            >
+                              Open ledger
+                            </Button>
+                            {canEdit ? (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => void reprocess(row.id)}
+                              >
+                                Reprocess
+                              </Button>
+                            ) : null}
+                            {canDelete ? (
+                              <Button
+                                size="small"
+                                color="error"
+                                variant="outlined"
+                                startIcon={<DeleteOutlineIcon />}
+                                onClick={() => void deleteStatement(row.id, row.fileName)}
+                              >
+                                Delete
+                              </Button>
+                            ) : null}
+                          </Stack>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Stack>
+                )}
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
       </LoadingEmptyStateWrapper>
 
       <UploadStatementDialog

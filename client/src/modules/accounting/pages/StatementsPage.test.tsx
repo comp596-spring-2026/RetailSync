@@ -151,9 +151,54 @@ describe('StatementsPage', () => {
       </Provider>
     );
 
-    expect(await screen.findByText(/Phase: checks queued/i)).toBeInTheDocument();
-    expect(screen.getByText(/2 done • 3 left/i)).toBeInTheDocument();
-    expect(screen.getByText(/queued 2 • processing 1/i)).toBeInTheDocument();
-    expect(screen.getByText(/ready 2 • failed 0/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Processing now/i)).toBeInTheDocument();
+    expect(screen.getByText(/Open workspace/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 done • 3 left across 5 checks/i)).toBeInTheDocument();
+    expect(screen.getByText(/^5 checks$/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/2 done • 3 left/i).length).toBeGreaterThan(0);
   });
+
+  it('does not auto-poll the statements list every 3 seconds', async () => {
+    listStatementsMock.mockResolvedValue({
+      data: {
+        data: {
+          statements: [
+            {
+              id: 'statement-1',
+              statementMonth: '2026-03',
+              fileName: 'march-statement.pdf',
+              source: 'upload',
+              status: 'extracting',
+              progress: {
+                phase: 'extracting',
+                totalChecks: 0,
+                checksQueued: 0,
+                checksProcessing: 0,
+                checksReady: 0,
+                checksFailed: 0,
+                completedChecks: 0,
+                remainingChecks: 0
+              },
+              issuesCount: 0,
+              updatedAt: '2026-03-18T18:51:49.113Z',
+              createdAt: '2026-03-18T18:51:49.113Z'
+            }
+          ]
+        }
+      }
+    });
+
+    render(
+      <Provider store={createStore({ accountingView: false, bankStatementsView: true })}>
+        <MemoryRouter>
+          <StatementsPage />
+        </MemoryRouter>
+      </Provider>
+    );
+
+    await screen.findByText(/march-statement.pdf/i);
+    expect(listStatementsMock).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 3200));
+    expect(listStatementsMock).toHaveBeenCalledTimes(1);
+  }, 7000);
 });

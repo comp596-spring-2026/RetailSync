@@ -123,16 +123,6 @@ describe('Google Sheets integration e2e (connector architecture)', () => {
       }
     };
 
-    mockSheetsData['sheet-oauth-inventory'] = {
-      title: 'OAuth Inventory',
-      tabs: {
-        Items: {
-          header: ['SKU', 'Description', 'Qty'],
-          rows: [['ABC-1', 'Sample Item', '10']]
-        }
-      }
-    };
-
     mockSheetsData['sheet-shared-pos'] = {
       title: 'Shared POS',
       tabs: {
@@ -148,7 +138,7 @@ describe('Google Sheets integration e2e (connector architecture)', () => {
     await disconnectTestDb();
   });
 
-  it('creates oauth source, supports second connector, activates pos_daily, imports, and keeps connector state isolated', async () => {
+  it('creates oauth source, activates pos_daily, imports, and keeps connector state isolated', async () => {
     const { accessToken } = await registerAndCreateCompany(app, 'ConnectorOAuth');
 
     const createSource = await request(app)
@@ -173,22 +163,6 @@ describe('Google Sheets integration e2e (connector architecture)', () => {
     const sourceId = createSource.body.data.source.id as string;
 
     await request(app)
-      .put(`/api/settings/google-sheets/oauth/sources/${sourceId}/connectors/inventory_items`)
-      .set('Authorization', `Bearer ${accessToken}`)
-      .send({
-        label: 'Inventory Items',
-        enabled: true,
-        spreadsheetId: 'sheet-oauth-inventory',
-        sheetName: 'Items',
-        headerRow: 1,
-        mapping: {
-          SKU: 'sku',
-          Description: 'description'
-        }
-      })
-      .expect(200);
-
-    await request(app)
       .post('/api/settings/google-sheets/activate')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
@@ -207,12 +181,6 @@ describe('Google Sheets integration e2e (connector architecture)', () => {
     expect(commit.body.data.result.imported).toBe(2);
     expect(commit.body.data.result.connectorKey).toBe('pos_daily');
 
-    await request(app)
-      .post('/api/integrations/google-sheets/oauth/debug')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .send({ sourceId, connectorKey: 'inventory_items' })
-      .expect(200);
-
     const settings = await request(app)
       .get('/api/settings')
       .set('Authorization', `Bearer ${accessToken}`)
@@ -230,9 +198,7 @@ describe('Google Sheets integration e2e (connector architecture)', () => {
     const source = oauth.sources.find((entry) => entry.id === sourceId);
     expect(source).toBeTruthy();
     const posConnector = source?.connectors.find((entry) => entry.key === 'pos_daily');
-    const inventoryConnector = source?.connectors.find((entry) => entry.key === 'inventory_items');
     expect(posConnector?.lastImportAt).toBeTruthy();
-    expect(inventoryConnector?.lastDebugResult?.ok).toBe(true);
 
     const daily = await request(app)
       .get('/api/pos/daily')

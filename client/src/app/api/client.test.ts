@@ -66,7 +66,7 @@ describe('api client refresh interceptor', () => {
       auth: {
         accessToken: 'stale-access-token',
         permissions: {
-          items: { view: true, create: false, edit: false, delete: false, actions: [] }
+          suppliers: { view: true, create: false, edit: false, delete: false, actions: [] }
         }
       }
     });

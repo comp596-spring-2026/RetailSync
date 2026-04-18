@@ -29,29 +29,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared
-        run: pnpm --filter @retailsync/shared build
-
-      - name: Build server
-        working-directory: ./server
-        run: pnpm build
-
-      - name: Build client
-        working-directory: ./client
+      - name: Build workspace
         run: pnpm build
 
       - name: Run server tests
         working-directory: ./server
         run: pnpm test
 
+      - name: Run server auth regression tests
+        working-directory: ./server
+        run: pnpm exec vitest run src/authController.test.ts src/auth.google.test.ts src/auth.email.test.ts
+
       - name: Run client tests
         working-directory: ./client
         run: pnpm test
 
-      - name: Lint and typecheck
-        run: |
-          pnpm lint
-          pnpm typecheck
+      - name: Run client auth regression tests
+        working-directory: ./client
+        run: pnpm exec vitest run src/modules/auth/api/AuthApi.test.ts src/modules/auth/pages/LoginPage.test.tsx src/modules/auth/pages/RegisterPage.test.tsx src/modules/auth/pages/ForgotPasswordPage.test.tsx src/modules/auth/pages/ResetPasswordPage.test.tsx src/modules/auth/pages/VerifyEmailPage.test.tsx src/architectureBoundaries.test.ts
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
 
       - name: Ensure no JSON key env fallback
         run: |

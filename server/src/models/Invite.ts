@@ -7,7 +7,11 @@ const inviteSchema = new Schema(
     code: { type: String, required: true, unique: true },
     roleId: { type: Schema.Types.ObjectId, ref: 'Role', required: true },
     expiresAt: { type: Date, required: true },
-    acceptedAt: { type: Date, default: null }
+    acceptedAt: { type: Date, default: null },
+    emailStatus: { type: String, enum: ['pending', 'sent', 'failed'], default: 'pending' },
+    emailSentAt: { type: Date, default: null },
+    emailLastAttemptAt: { type: Date, default: null },
+    emailLastError: { type: String, default: null }
   },
   { timestamps: true }
 );
