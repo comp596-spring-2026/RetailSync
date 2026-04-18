@@ -377,33 +377,6 @@ const getStepChipLabel = (state: StepState) => {
   return 'Waiting';
 };
 
-const getDefaultStatementViewerTab = (
-  statement: BankStatementDetail | null,
-  artifacts: Array<ArtifactDescriptor<StatementViewerTab>>
-) => {
-  if (!statement || artifacts.length === 0) return 'pdf' as StatementViewerTab;
-
-  const preferredOrder: StatementViewerTab[] = [
-    'transactions',
-    'extractedChecks',
-    'checksCleared',
-    'sections',
-    'normalized',
-    'ocrText',
-    'ocrJson',
-    'pdf'
-  ];
-
-  const availableKeys = new Set(artifacts.map((artifact) => artifact.key));
-  for (const key of preferredOrder) {
-    if (availableKeys.has(key)) {
-      return key;
-    }
-  }
-
-  return artifacts[0].key;
-};
-
 const getSelectedCheckPathItems = (check: StatementCheck | null) => {
   if (!check) return [];
 

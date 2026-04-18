@@ -145,6 +145,30 @@ vi.mock('../models/BankStatement', () => ({
       stores.statements.push(statement);
       return statement;
     }),
+    updateOne: vi.fn(async (query: Record<string, unknown>, update: Record<string, any>) => {
+      const id = getId(query._id, '');
+      const companyId = String(query.companyId ?? '');
+      const statement = stores.statements.find(
+        (entry) => entry._id === id && entry.companyId === companyId
+      );
+      if (!statement) {
+        return { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
+      }
+
+      if (update.$set) {
+        Object.entries(update.$set).forEach(([key, value]) => {
+          const segments = key.split('.');
+          let cursor: Record<string, any> = statement;
+          segments.slice(0, -1).forEach((segment) => {
+            cursor[segment] = cursor[segment] ?? {};
+            cursor = cursor[segment];
+          });
+          cursor[segments.at(-1) as string] = value;
+        });
+      }
+
+      return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+    }),
     countDocuments: vi.fn(async () => stores.statements.length)
   }
 }));

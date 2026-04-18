@@ -99,12 +99,6 @@ const getDetectionMessage = (
   return detection.summary || `This looks like a ${monthLabel} statement.`;
 };
 
-const getDetectionEvidencePreview = (evidence: string) => {
-  const trimmed = evidence.trim();
-  if (trimmed.length <= 140) return trimmed;
-  return `${trimmed.slice(0, 137).trimEnd()}...`;
-};
-
 const getStorageUploadFailureMessage = (requestUrl: string) => {
   const isStorageUploadFailure =
     typeof requestUrl === 'string' && requestUrl.includes('storage.googleapis.com');

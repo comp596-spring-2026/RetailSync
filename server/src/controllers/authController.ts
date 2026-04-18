@@ -321,7 +321,7 @@ export const login = async (req: Request, res: Response) => {
 };
 
 export const forgotPassword = async (req: Request, res: Response) => {
-  const parsed = verifyEmailRequestSchema.safeParse(req.body);
+  const parsed = forgotPasswordSchema.safeParse(req.body);
   if (!parsed.success) {
     return fail(res, 'Validation failed', 422, parsed.error.flatten());
   }

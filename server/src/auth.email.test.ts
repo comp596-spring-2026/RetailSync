@@ -59,7 +59,12 @@ describe('email/password auth flows', () => {
     await request(app)
       .post('/api/auth/login')
       .send({ email: 'ada@example.com', password: 'Stronger123!' })
-      .expect(403);
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.accessToken).toBeNull();
+        expect(body.data.requiresVerification).toBe(true);
+        expect(body.data.email).toBe('ada@example.com');
+      });
 
     const verificationToken = mailMocks.sendVerificationEmailMock.mock.calls.at(-1)?.[0]
       ?.verificationToken as string;
