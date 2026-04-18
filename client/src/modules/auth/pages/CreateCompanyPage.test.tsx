@@ -12,10 +12,14 @@ import { CreateCompanyPage } from './CreateCompanyPage';
 const mockNavigate = vi.fn();
 const mockCreate = vi.fn();
 const mockMe = vi.fn();
+const mockGetQuickBooksOnboardingStatus = vi.fn();
+const mockStartQuickBooksOnboarding = vi.fn();
 
 vi.mock('../../users/api', () => ({
   companyApi: {
-    create: (...args: unknown[]) => mockCreate(...args)
+    create: (...args: unknown[]) => mockCreate(...args),
+    getQuickBooksOnboardingStatus: (...args: unknown[]) => mockGetQuickBooksOnboardingStatus(...args),
+    startQuickBooksOnboarding: (...args: unknown[]) => mockStartQuickBooksOnboarding(...args)
   }
 }));
 
@@ -47,6 +51,21 @@ describe('CreateCompanyPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreate.mockResolvedValue({});
+    mockGetQuickBooksOnboardingStatus.mockResolvedValue({
+      data: {
+        data: {
+          quickbooks: null
+        }
+      }
+    });
+    mockStartQuickBooksOnboarding.mockResolvedValue({
+      data: {
+        data: {
+          url: 'https://appcenter.intuit.com/connect/oauth2',
+          environment: 'sandbox'
+        }
+      }
+    });
     mockMe.mockResolvedValue({
       data: {
         data: {
@@ -63,7 +82,7 @@ describe('CreateCompanyPage', () => {
     cleanup();
   });
 
-  it('submits company creation with timezone/currency dropdown values', async () => {
+  it('submits company creation with inferred timezone and currency values', async () => {
     render(
       <Provider store={createStore()}>
         <MemoryRouter>
@@ -78,11 +97,7 @@ describe('CreateCompanyPage', () => {
     fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '5551234567' } });
     fireEvent.change(screen.getByLabelText('Company Email'), { target: { value: 'owner@retailsync.com' } });
 
-    const currencyInput = screen.getByLabelText('Currency');
-    fireEvent.change(currencyInput, { target: { value: 'Dollar' } });
-    expect(await screen.findByText('USD ($) - US Dollar')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Create Company' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create company' }));
 
     await waitFor(() => expect(mockCreate).toHaveBeenCalled());
     expect(mockCreate).toHaveBeenCalledWith(
@@ -92,5 +107,34 @@ describe('CreateCompanyPage', () => {
       })
     );
     expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true });
+  });
+
+  it('starts QuickBooks onboarding directly from the connect button', async () => {
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { href: '' }
+    });
+
+    render(
+      <Provider store={createStore()}>
+        <MemoryRouter>
+          <CreateCompanyPage />
+        </MemoryRouter>
+      </Provider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect company' }));
+
+    await waitFor(() =>
+      expect(mockStartQuickBooksOnboarding).toHaveBeenCalledWith('/onboarding/create-company')
+    );
+    expect(window.location.href).toBe('https://appcenter.intuit.com/connect/oauth2');
+    expect(mockCreate).not.toHaveBeenCalled();
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: originalLocation
+    });
   });
 });

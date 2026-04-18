@@ -1,23 +1,19 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
+import { APP_NAME } from "@retailsync/shared";
 import { env } from "./config/env";
 import authRoutes from "./routes/authRoutes";
 import companyRoutes from "./routes/companyRoutes";
 import roleRoutes from "./routes/roleRoutes";
 import inviteRoutes from "./routes/inviteRoutes";
 import userRoutes from "./routes/userRoutes";
-import moduleRoutes from "./routes/moduleRoutes";
 import posRoutes from "./routes/posRoutes";
 import reportRoutes from "./routes/reportRoutes";
-import itemRoutes from "./routes/itemRoutes";
-import locationRoutes from "./routes/locationRoutes";
-import inventoryRoutes from "./routes/inventoryRoutes";
 import sheetsRoutes from "./routes/sheetsRoutes";
 import googleRoutes from "./routes/googleRoutes";
 import settingsRoutes from "./routes/settingsRoutes";
 import cronRoutes from "./routes/cronRoutes";
-import debugSheetsRoutes from "./routes/debug.sheets.routes";
 import integrationGoogleSheetsRoutes from "./routes/integrationGoogleSheetsRoutes";
 import integrationsSheetsRoutes from "./routes/integrationsSheetsRoutes";
 import googleSheetsIntegrationRoutes from "./routes/googleSheetsIntegrationRoutes";
@@ -50,7 +46,7 @@ export const createApp = () => {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RetailSync API</title>
+  <title>${APP_NAME} API</title>
   <style>
     body { font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; line-height: 1.45; color: #0f172a; }
     .card { max-width: 760px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.25rem 1.5rem; background: #ffffff; }
@@ -65,7 +61,7 @@ export const createApp = () => {
 </head>
 <body>
   <div class="card">
-    <h1>RetailSync API</h1>
+    <h1>${APP_NAME} API</h1>
     <p class="muted">Welcome page for the deployed backend service.</p>
     <p><strong>Environment:</strong> <code>${env.nodeEnv}</code></p>
     <p><strong>Health endpoint:</strong> <a href="/health"><code>/health</code></a></p>
@@ -74,9 +70,6 @@ export const createApp = () => {
     <ul>
       <li>Auth: <code>/api/auth</code></li>
       <li>Company: <code>/api/company</code></li>
-      <li>Inventory Items: <code>/api/inventory/items</code></li>
-      <li>Inventory Locations: <code>/api/inventory/locations</code></li>
-      <li>Inventory Actions: <code>/api/inventory</code></li>
     </ul>
   </div>
   <script>
@@ -121,6 +114,9 @@ export const createApp = () => {
       QUICKBOOKS_CLIENT_ID: Boolean(env.quickbooksClientId),
       QUICKBOOKS_CLIENT_SECRET: Boolean(env.quickbooksClientSecret),
       QUICKBOOKS_INTEGRATION_REDIRECT_URI: Boolean(env.quickbooksIntegrationRedirectUri),
+      SMTP_HOST: Boolean(env.smtpHost),
+      SMTP_PORT: Boolean(env.smtpPort),
+      SMTP_FROM: Boolean(env.smtpFrom),
       API_SERVICE_NAME: Boolean(env.apiServiceName),
       DEBUG_VERBOSE_API: env.debugVerboseApi,
     };
@@ -142,22 +138,17 @@ export const createApp = () => {
   app.use("/api/users", userRoutes);
   app.use("/api/pos", posRoutes);
   app.use("/api/reports", reportRoutes);
-  app.use("/api/inventory/items", itemRoutes);
-  app.use("/api/inventory/locations", locationRoutes);
-  app.use("/api/inventory", inventoryRoutes);
   app.use("/api/sheets", sheetsRoutes);
   app.use("/api/google", googleRoutes);
   app.use("/api/integrations/google/sheets", integrationGoogleSheetsRoutes);
   app.use("/api/integrations/quickbooks", quickbooksIntegrationRoutes);
   app.use("/api/integrations/google-sheets", googleSheetsIntegrationRoutes);
   app.use("/api/integrations/sheets", integrationsSheetsRoutes);
-  app.use("/api/debug/sheets", debugSheetsRoutes);
   app.use("/api/settings", settingsRoutes);
   app.use("/api/cron", cronRoutes);
   app.use("/api/accounting", accountingRoutes);
   app.use("/api/accounting/ledger", ledgerRoutes);
   app.use("/api/tasks", taskRoutes);
-  app.use("/api", moduleRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

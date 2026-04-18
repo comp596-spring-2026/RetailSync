@@ -229,6 +229,8 @@ export type QuickBooksTransactionDetail = {
   type: QuickBooksLiveTransactionType;
   txnDate: string | null;
   docNum: string | null;
+  syncToken: string | null;
+  payeeId: string | null;
   payeeName: string | null;
   memo: string | null;
   amount: number | null;
@@ -1233,6 +1235,12 @@ export const getQuickBooksTransactionDetail = async (args: {
     type: args.type,
     txnDate: toNullableString(raw.TxnDate),
     docNum: toNullableString(raw.DocNumber) ?? toNullableString(raw.DocNum),
+    syncToken: toNullableString(raw.SyncToken),
+    payeeId:
+      refValue(raw.EntityRef) ??
+      refValue(raw.CustomerRef) ??
+      refValue(raw.VendorRef) ??
+      null,
     payeeName:
       refName(raw.EntityRef) ??
       refName(raw.CustomerRef) ??

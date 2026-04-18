@@ -37,7 +37,7 @@ import {
   QuickBooksWriteUpdateInput
 } from '@retailsync/shared';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import { NoAccess, PageHeader, SmartTable } from '../../../components';
@@ -89,21 +89,21 @@ const txnTypeMeta: Record<
   'sales-receipt': {
     label: 'Sales Receipts',
     singular: 'Sales Receipt',
-    path: '/dashboard/quickbooks/write/sales-receipt',
+    path: '/dashboard/quickbooks/transactions/sales-receipt',
     title: 'QuickBooks Sales Receipts',
     description: 'Browse and create QuickBooks sales receipts with stateless live-write flows.'
   },
   invoice: {
     label: 'Invoices',
     singular: 'Invoice',
-    path: '/dashboard/quickbooks/write/invoice',
+    path: '/dashboard/quickbooks/sales/invoices',
     title: 'QuickBooks Invoices',
     description: 'Browse and create QuickBooks invoices with stateless live-write flows.'
   },
   payment: {
     label: 'Payments',
     singular: 'Payment',
-    path: '/dashboard/quickbooks/write/payment',
+    path: '/dashboard/quickbooks/sales/payments',
     title: 'QuickBooks Payments',
     description: 'Browse and create QuickBooks payments with stateless live-write flows.'
   }
@@ -112,9 +112,41 @@ const txnTypeMeta: Record<
 const isWriteTxnType = (value: string | undefined): value is QuickBooksWriteTxnType =>
   value === 'sales-receipt' || value === 'invoice' || value === 'payment';
 
-const writeRootPath = '/dashboard/quickbooks/write';
+const inferWriteTxnTypeFromPath = (pathname: string): QuickBooksWriteTxnType | null => {
+  if (
+    pathname.includes('/sales/invoices') ||
+    pathname.includes('/transactions/invoice') ||
+    pathname.includes('/write/invoice')
+  ) {
+    return 'invoice';
+  }
 
-const writeListPath = (txnType: QuickBooksWriteTxnType) => `${writeRootPath}/${txnType}`;
+  if (
+    pathname.includes('/sales/payments') ||
+    pathname.includes('/transactions/payment') ||
+    pathname.includes('/write/payment')
+  ) {
+    return 'payment';
+  }
+
+  if (
+    pathname.includes('/sales/sales-receipt') ||
+    pathname.includes('/transactions/sales-receipt') ||
+    pathname.includes('/write/sales-receipt')
+  ) {
+    return 'sales-receipt';
+  }
+
+  return null;
+};
+
+const visibleWriteTxnTypes: QuickBooksWriteTxnType[] = ['invoice', 'payment'];
+
+const writeListPath = (txnType: QuickBooksWriteTxnType) => {
+  if (txnType === 'invoice') return '/dashboard/quickbooks/sales/invoices';
+  if (txnType === 'payment') return '/dashboard/quickbooks/sales/payments';
+  return `/dashboard/quickbooks/sales/${txnType}`;
+};
 const writeCreatePath = (txnType: QuickBooksWriteTxnType) => `${writeListPath(txnType)}/new`;
 const writeDetailPath = (txnType: QuickBooksWriteTxnType, qbTxnId: string) =>
   `${writeListPath(txnType)}/${qbTxnId}`;
@@ -401,15 +433,17 @@ const WriteTxnTypeTabs = ({ txnType }: { txnType: QuickBooksWriteTxnType }) => {
         spacing={1}
         sx={{ p: 1 }}
       >
-        {Object.entries(txnTypeMeta).map(([value, meta]) => (
+        {visibleWriteTxnTypes.map((value) => {
+          const meta = txnTypeMeta[value];
+          return (
           <Button
             key={value}
             variant={txnType === value ? 'contained' : 'text'}
-            onClick={() => navigate(writeListPath(value as QuickBooksWriteTxnType))}
+            onClick={() => navigate(writeListPath(value))}
           >
             {meta.label}
           </Button>
-        ))}
+        )})}
       </Stack>
     </Paper>
   );
@@ -431,9 +465,12 @@ const useWriteWorkspace = (enabled: boolean) => {
 };
 
 export const QuickBooksWriteListPage = () => {
+  const location = useLocation();
   const navigate = useNavigate();
   const { txnType: rawTxnType } = useParams<{ txnType: string }>();
-  const txnType = isWriteTxnType(rawTxnType) ? rawTxnType : null;
+  const txnType = isWriteTxnType(rawTxnType)
+    ? rawTxnType
+    : inferWriteTxnTypeFromPath(location.pathname);
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
   const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
@@ -1085,9 +1122,12 @@ const QuickBooksWriteDetailSections = ({
 };
 
 const QuickBooksWriteEditorPage = ({ mode }: { mode: WriteMode }) => {
+  const location = useLocation();
   const navigate = useNavigate();
   const { txnType: rawTxnType, qbTxnId } = useParams<{ txnType: string; qbTxnId?: string }>();
-  const txnType = isWriteTxnType(rawTxnType) ? rawTxnType : null;
+  const txnType = isWriteTxnType(rawTxnType)
+    ? rawTxnType
+    : inferWriteTxnTypeFromPath(location.pathname);
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
   const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
@@ -1209,8 +1249,13 @@ const QuickBooksWriteEditorPage = ({ mode }: { mode: WriteMode }) => {
 };
 
 export const QuickBooksWriteDetailPage = () => {
+  const location = useLocation();
   const { txnType: rawTxnType, qbTxnId } = useParams<{ txnType: string; qbTxnId: string }>();
-  if (!isWriteTxnType(rawTxnType) || !qbTxnId) {
+  const txnType = isWriteTxnType(rawTxnType)
+    ? rawTxnType
+    : inferWriteTxnTypeFromPath(location.pathname);
+
+  if (!txnType || !qbTxnId) {
     return <Navigate to="/404" replace />;
   }
 
@@ -1231,14 +1276,14 @@ export const QuickBooksWriteDetailPage = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await accountingApi.getQuickbooksWriteTransactionDetail(rawTxnType, qbTxnId);
+      const response = await accountingApi.getQuickbooksWriteTransactionDetail(txnType, qbTxnId);
       setDetail(response.data.data);
     } catch (apiError) {
       setError(extractApiErrorMessage(apiError, 'Failed to load QuickBooks write detail'));
     } finally {
       setLoading(false);
     }
-  }, [qbTxnId, rawTxnType]);
+  }, [qbTxnId, txnType]);
 
   useEffect(() => {
     if (!canView || !isConnected) return;
@@ -1252,30 +1297,30 @@ export const QuickBooksWriteDetailPage = () => {
     }
 
     const confirmed = window.confirm(
-      `Delete this ${txnTypeMeta[rawTxnType].singular.toLowerCase()} in QuickBooks? This cannot be undone.`
+      `Delete this ${txnTypeMeta[txnType].singular.toLowerCase()} in QuickBooks? This cannot be undone.`
     );
     if (!confirmed) return;
 
     setDeleting(true);
     setError(null);
     try {
-      await accountingApi.deleteQuickbooksWriteTransaction(rawTxnType, qbTxnId, {
-        txnType: rawTxnType,
+      await accountingApi.deleteQuickbooksWriteTransaction(txnType, qbTxnId, {
+        txnType,
         syncToken: detail.syncToken
       });
       dispatch(
         showSnackbar({
-          message: `${txnTypeMeta[rawTxnType].singular} deleted in QuickBooks.`,
+          message: `${txnTypeMeta[txnType].singular} deleted in QuickBooks.`,
           severity: 'success'
         })
       );
-      navigate(writeListPath(rawTxnType));
+      navigate(writeListPath(txnType));
     } catch (apiError) {
       setError(extractApiErrorMessage(apiError, 'Failed to delete QuickBooks write detail'));
     } finally {
       setDeleting(false);
     }
-  }, [detail?.syncToken, dispatch, navigate, qbTxnId, rawTxnType]);
+  }, [detail?.syncToken, dispatch, navigate, qbTxnId, txnType]);
 
   if (!canView) {
     return <NoAccess />;
@@ -1284,12 +1329,12 @@ export const QuickBooksWriteDetailPage = () => {
   return (
     <Stack spacing={2}>
       <PageHeader
-        title={`${txnTypeMeta[rawTxnType].singular} Detail`}
+        title={`${txnTypeMeta[txnType].singular} Detail`}
         subtitle="Inspect the live QuickBooks write payload before editing or reloading."
         icon={<ReceiptLongIcon />}
       />
       <QuickBooksTabs />
-      <WriteTxnTypeTabs txnType={rawTxnType} />
+      <WriteTxnTypeTabs txnType={txnType} />
       <RequireQuickBooksConnection
         loading={workspaceLoading}
         isConnected={isConnected}
@@ -1297,7 +1342,7 @@ export const QuickBooksWriteDetailPage = () => {
         warning={workspaceWarning}
       >
         <Stack direction="row" spacing={1} justifyContent="flex-end">
-          <Button variant="outlined" onClick={() => navigate(writeListPath(rawTxnType))}>
+          <Button variant="outlined" onClick={() => navigate(writeListPath(txnType))}>
             Back to list
           </Button>
           {canPost ? (
@@ -1312,7 +1357,7 @@ export const QuickBooksWriteDetailPage = () => {
             </Button>
           ) : null}
           {canPost ? (
-            <Button variant="contained" startIcon={<EditIcon />} onClick={() => navigate(writeEditPath(rawTxnType, qbTxnId))}>
+            <Button variant="contained" startIcon={<EditIcon />} onClick={() => navigate(writeEditPath(txnType, qbTxnId))}>
               Edit
             </Button>
           ) : null}
@@ -1322,15 +1367,19 @@ export const QuickBooksWriteDetailPage = () => {
         </Stack>
         {loading ? <Alert severity="info">Loading write detail...</Alert> : null}
         {error ? <Alert severity="error">{error}</Alert> : null}
-        {detail ? <QuickBooksWriteDetailSections txnType={rawTxnType} detail={detail} /> : null}
+        {detail ? <QuickBooksWriteDetailSections txnType={txnType} detail={detail} /> : null}
       </RequireQuickBooksConnection>
     </Stack>
   );
 };
 
 export const QuickBooksWriteCreatePage = () => {
+  const location = useLocation();
   const { txnType: rawTxnType } = useParams<{ txnType: string }>();
-  if (!isWriteTxnType(rawTxnType)) {
+  const txnType = isWriteTxnType(rawTxnType)
+    ? rawTxnType
+    : inferWriteTxnTypeFromPath(location.pathname);
+  if (!txnType) {
     return <Navigate to="/404" replace />;
   }
 
@@ -1346,8 +1395,12 @@ export const QuickBooksWriteCreatePage = () => {
 };
 
 export const QuickBooksWriteEditPage = () => {
+  const location = useLocation();
   const { txnType: rawTxnType } = useParams<{ txnType: string }>();
-  if (!isWriteTxnType(rawTxnType)) {
+  const txnType = isWriteTxnType(rawTxnType)
+    ? rawTxnType
+    : inferWriteTxnTypeFromPath(location.pathname);
+  if (!txnType) {
     return <Navigate to="/404" replace />;
   }
 

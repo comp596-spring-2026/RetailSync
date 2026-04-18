@@ -1,4 +1,5 @@
 import { env } from '../config/env';
+import { STORAGE_SCRIPT_DEFAULTS } from '../constants/config';
 import { getStorageClient } from '../integrations/google/storage.client';
 
 type ScriptOptions = {
@@ -9,13 +10,6 @@ type ScriptOptions = {
   origins: string[];
   maxAgeSeconds: number;
 };
-
-const DEFAULT_LOCAL_ORIGINS = [
-  'http://localhost:4630',
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:8080'
-];
 
 const normalizeOrigin = (value: string) => value.trim().replace(/\/+$/, '');
 
@@ -47,14 +41,14 @@ const parseArgs = (): ScriptOptions => {
     new Set(
       [
         env.clientUrl,
-        ...(env.nodeEnv === 'production' ? [] : DEFAULT_LOCAL_ORIGINS),
+        ...(env.nodeEnv === 'production' ? [] : STORAGE_SCRIPT_DEFAULTS.localOrigins),
       ]
         .map(normalizeOrigin)
         .filter(Boolean),
     ),
   );
 
-  const parsedMaxAge = Number(maxAgeValue ?? 3600);
+  const parsedMaxAge = Number(maxAgeValue ?? STORAGE_SCRIPT_DEFAULTS.maxAgeSeconds);
 
   return {
     apply,
@@ -63,7 +57,9 @@ const parseArgs = (): ScriptOptions => {
     bucketName: bucketValue?.trim() || env.gcsBucketName || '',
     origins: originArgs.length > 0 ? Array.from(new Set(originArgs)) : defaultOrigins,
     maxAgeSeconds:
-      Number.isFinite(parsedMaxAge) && parsedMaxAge > 0 ? Math.floor(parsedMaxAge) : 3600,
+      Number.isFinite(parsedMaxAge) && parsedMaxAge > 0
+        ? Math.floor(parsedMaxAge)
+        : STORAGE_SCRIPT_DEFAULTS.maxAgeSeconds,
   };
 };
 

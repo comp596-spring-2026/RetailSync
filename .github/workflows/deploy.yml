@@ -17,6 +17,17 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    env:
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_SECURE: "false"
+      SMTP_FROM: retailsync.dev@gmail.com
+      SMTP_FROM_NAME: RetailSync
+      SMTP_TIMEOUT_MS: "10000"
+      TASKS_QUEUE_MAX_ATTEMPTS: "8"
+      TASKS_QUEUE_MAX_RETRY_DURATION: "3600s"
+      TASKS_QUEUE_MIN_BACKOFF: "5s"
+      TASKS_QUEUE_MAX_BACKOFF: "120s"
 
     steps:
       - name: Checkout
@@ -66,6 +77,13 @@ jobs:
             missing=1
           fi
 
+          for name in SMTP_USER SMTP_PASS; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required GitHub Actions secret: $name"
+              missing=1
+            fi
+          done
+
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
@@ -85,8 +103,16 @@ jobs:
           GCS_BUCKET_NAME: ${{ vars.GCS_BUCKET_NAME }}
           TASKS_QUEUE_PIPELINE: ${{ vars.TASKS_QUEUE_PIPELINE }}
           TASKS_QUEUE_SYNC: ${{ vars.TASKS_QUEUE_SYNC }}
+          SMTP_HOST: ${{ env.SMTP_HOST }}
+          SMTP_PORT: ${{ env.SMTP_PORT }}
+          SMTP_SECURE: ${{ env.SMTP_SECURE }}
+          SMTP_FROM: ${{ env.SMTP_FROM }}
+          SMTP_FROM_NAME: ${{ env.SMTP_FROM_NAME }}
+          SMTP_TIMEOUT_MS: ${{ env.SMTP_TIMEOUT_MS }}
           # Secrets
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
 
       - name: Authenticate to GCP (OIDC)
         uses: google-github-actions/auth@v2
@@ -121,17 +147,17 @@ jobs:
             if gcloud tasks queues describe "$queue" --location "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
               gcloud tasks queues update "$queue" \
                 --location "${{ vars.GCP_REGION }}" \
-                --max-attempts=8 \
-                --max-retry-duration=3600s \
-                --min-backoff=5s \
-                --max-backoff=120s
+                --max-attempts="${{ env.TASKS_QUEUE_MAX_ATTEMPTS }}" \
+                --max-retry-duration="${{ env.TASKS_QUEUE_MAX_RETRY_DURATION }}" \
+                --min-backoff="${{ env.TASKS_QUEUE_MIN_BACKOFF }}" \
+                --max-backoff="${{ env.TASKS_QUEUE_MAX_BACKOFF }}"
             else
               gcloud tasks queues create "$queue" \
                 --location "${{ vars.GCP_REGION }}" \
-                --max-attempts=8 \
-                --max-retry-duration=3600s \
-                --min-backoff=5s \
-                --max-backoff=120s
+                --max-attempts="${{ env.TASKS_QUEUE_MAX_ATTEMPTS }}" \
+                --max-retry-duration="${{ env.TASKS_QUEUE_MAX_RETRY_DURATION }}" \
+                --min-backoff="${{ env.TASKS_QUEUE_MIN_BACKOFF }}" \
+                --max-backoff="${{ env.TASKS_QUEUE_MAX_BACKOFF }}"
             fi
           done
 
@@ -148,7 +174,7 @@ jobs:
             --platform managed \
             --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
             --set-secrets "$secrets_list" \
-            --set-env-vars "NODE_ENV=production,CLIENT_URL=${{ vars.CLIENT_URL }},TASKS_MODE=${{ vars.TASKS_MODE }},INTERNAL_TASKS_ENDPOINT=${{ vars.INTERNAL_TASKS_ENDPOINT }},GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }},GCP_REGION=${{ vars.GCP_REGION }},GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }},TASKS_QUEUE_PIPELINE=${{ vars.TASKS_QUEUE_PIPELINE }},TASKS_QUEUE_SYNC=${{ vars.TASKS_QUEUE_SYNC }},TASKS_OIDC_SERVICE_ACCOUNT_EMAIL=${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }},API_SERVICE_NAME=${{ vars.CLOUD_RUN_SERVICE }}" \
+            --set-env-vars "NODE_ENV=production,CLIENT_URL=${{ vars.CLIENT_URL }},TASKS_MODE=${{ vars.TASKS_MODE }},INTERNAL_TASKS_ENDPOINT=${{ vars.INTERNAL_TASKS_ENDPOINT }},GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }},GCP_REGION=${{ vars.GCP_REGION }},GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }},TASKS_QUEUE_PIPELINE=${{ vars.TASKS_QUEUE_PIPELINE }},TASKS_QUEUE_SYNC=${{ vars.TASKS_QUEUE_SYNC }},TASKS_OIDC_SERVICE_ACCOUNT_EMAIL=${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }},API_SERVICE_NAME=${{ vars.CLOUD_RUN_SERVICE }},SMTP_HOST=${{ env.SMTP_HOST }},SMTP_PORT=${{ env.SMTP_PORT }},SMTP_SECURE=${{ env.SMTP_SECURE }},SMTP_FROM=${{ env.SMTP_FROM }},SMTP_FROM_NAME=${{ env.SMTP_FROM_NAME }},SMTP_TIMEOUT_MS=${{ env.SMTP_TIMEOUT_MS }},SMTP_USER=${{ secrets.SMTP_USER }},SMTP_PASS=${{ secrets.SMTP_PASS }}" \
             --allow-unauthenticated
 
           API_URL="$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" --region "${{ vars.GCP_REGION }}" --format='value(status.url)')"

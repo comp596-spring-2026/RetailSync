@@ -2,10 +2,16 @@ import { Request, Response } from 'express';
 import {
   quickBooksAccountRegisterQuerySchema,
   quickBooksHubChartOfAccountsQuerySchema,
+  quickBooksContactCreateInputSchema,
+  quickBooksContactUpdateInputSchema,
   quickBooksHubEntitiesQuerySchema,
+  quickBooksHubEntityTypeSchema,
   quickBooksHubOperationsQuerySchema,
   quickBooksJournalAdjustmentInputSchema,
   quickBooksLiveTransactionsQuerySchema,
+  quickBooksMoneyCreateInputSchema,
+  quickBooksMoneyTxnTypeSchema,
+  quickBooksMoneyUpdateInputSchema,
   quickBooksRecoverPaymentInputSchema,
   quickBooksTaxLedgerQuerySchema,
   quickBooksTaxPaymentsQuerySchema,
@@ -18,6 +24,12 @@ import {
   quickBooksWriteTxnTypeSchema,
   quickBooksWriteUpdateInputSchema
 } from '@retailsync/shared';
+import {
+  createQuickBooksContact,
+  deleteQuickBooksContact,
+  getQuickBooksContactDetail,
+  updateQuickBooksContact
+} from '../services/quickbooksContactCrudService';
 import {
   createQuickBooksJournalAdjustment,
   fetchQuickBooksTaxOverview,
@@ -40,6 +52,11 @@ import {
   listQuickBooksWriteTransactions,
   updateQuickBooksWriteTransaction
 } from '../services/quickbooksWriteService';
+import {
+  createQuickBooksMoneyTransaction,
+  deleteQuickBooksMoneyTransaction,
+  updateQuickBooksMoneyTransaction
+} from '../services/quickbooksMoneyService';
 import { fail, ok } from '../utils/apiResponse';
 
 const toIsoDate = (value: Date) => value.toISOString().slice(0, 10);
@@ -226,6 +243,126 @@ export const getQuickBooksHubEntities = async (req: Request, res: Response) => {
   }
 };
 
+export const getQuickBooksContactById = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const entityTypeParsed = quickBooksHubEntityTypeSchema.safeParse(req.params.entityType);
+  if (!entityTypeParsed.success) {
+    return fail(res, 'Validation failed', 422, entityTypeParsed.error.flatten());
+  }
+
+  const qbId = typeof req.params.qbId === 'string' ? req.params.qbId.trim() : '';
+  if (!qbId) {
+    return fail(res, 'Validation failed', 422, {
+      fieldErrors: { qbId: ['qbId is required'] }
+    });
+  }
+
+  try {
+    const data = await getQuickBooksContactDetail({
+      companyId,
+      entityType: entityTypeParsed.data,
+      qbId
+    });
+    return ok(res, data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks contact fetch failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const postQuickBooksContact = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const entityTypeParsed = quickBooksHubEntityTypeSchema.safeParse(req.params.entityType);
+  if (!entityTypeParsed.success) {
+    return fail(res, 'Validation failed', 422, entityTypeParsed.error.flatten());
+  }
+
+  const parsed = quickBooksContactCreateInputSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  try {
+    const data = await createQuickBooksContact({
+      companyId,
+      entityType: entityTypeParsed.data,
+      input: parsed.data
+    });
+    return ok(res, data, 201);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks contact create failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const patchQuickBooksContact = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const entityTypeParsed = quickBooksHubEntityTypeSchema.safeParse(req.params.entityType);
+  if (!entityTypeParsed.success) {
+    return fail(res, 'Validation failed', 422, entityTypeParsed.error.flatten());
+  }
+
+  const qbId = typeof req.params.qbId === 'string' ? req.params.qbId.trim() : '';
+  if (!qbId) {
+    return fail(res, 'Validation failed', 422, {
+      fieldErrors: { qbId: ['qbId is required'] }
+    });
+  }
+
+  const parsed = quickBooksContactUpdateInputSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  try {
+    const data = await updateQuickBooksContact({
+      companyId,
+      entityType: entityTypeParsed.data,
+      qbId,
+      input: parsed.data
+    });
+    return ok(res, data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks contact update failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const deleteQuickBooksContactById = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const entityTypeParsed = quickBooksHubEntityTypeSchema.safeParse(req.params.entityType);
+  if (!entityTypeParsed.success) {
+    return fail(res, 'Validation failed', 422, entityTypeParsed.error.flatten());
+  }
+
+  const qbId = typeof req.params.qbId === 'string' ? req.params.qbId.trim() : '';
+  if (!qbId) {
+    return fail(res, 'Validation failed', 422, {
+      fieldErrors: { qbId: ['qbId is required'] }
+    });
+  }
+
+  try {
+    const data = await deleteQuickBooksContact({
+      companyId,
+      entityType: entityTypeParsed.data,
+      qbId
+    });
+    return ok(res, data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks contact delete failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
 export const getQuickBooksHubOperations = async (req: Request, res: Response) => {
   const companyId = withCompanyId(req, res);
   if (!companyId) return;
@@ -330,6 +467,104 @@ export const getQuickBooksLiveTransactionsByType = async (req: Request, res: Res
     return ok(res, data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'QuickBooks live transactions failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const postQuickBooksMoneyTransaction = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const typeParsed = quickBooksMoneyTxnTypeSchema.safeParse(req.params.txnType);
+  if (!typeParsed.success) {
+    return fail(res, 'Validation failed', 422, typeParsed.error.flatten());
+  }
+
+  const parsed = quickBooksMoneyCreateInputSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  if (parsed.data.txnType !== typeParsed.data) {
+    return fail(res, 'quickbooks_write_type_mismatch', 422);
+  }
+
+  try {
+    const data = await createQuickBooksMoneyTransaction({
+      companyId,
+      input: parsed.data
+    });
+    return ok(res, data, 201);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks money create failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const patchQuickBooksMoneyTransaction = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const typeParsed = quickBooksMoneyTxnTypeSchema.safeParse(req.params.txnType);
+  if (!typeParsed.success) {
+    return fail(res, 'Validation failed', 422, typeParsed.error.flatten());
+  }
+
+  const qbTxnId = typeof req.params.qbTxnId === 'string' ? req.params.qbTxnId.trim() : '';
+  if (!qbTxnId) {
+    return fail(res, 'Validation failed', 422, {
+      fieldErrors: { qbTxnId: ['qbTxnId is required'] }
+    });
+  }
+
+  const parsed = quickBooksMoneyUpdateInputSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  if (parsed.data.txnType !== typeParsed.data) {
+    return fail(res, 'quickbooks_write_type_mismatch', 422);
+  }
+
+  try {
+    const data = await updateQuickBooksMoneyTransaction({
+      companyId,
+      txnType: typeParsed.data,
+      qbTxnId,
+      input: parsed.data
+    });
+    return ok(res, data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks money update failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const deleteQuickBooksMoneyTransactionById = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const typeParsed = quickBooksMoneyTxnTypeSchema.safeParse(req.params.txnType);
+  if (!typeParsed.success) {
+    return fail(res, 'Validation failed', 422, typeParsed.error.flatten());
+  }
+
+  const qbTxnId = typeof req.params.qbTxnId === 'string' ? req.params.qbTxnId.trim() : '';
+  if (!qbTxnId) {
+    return fail(res, 'Validation failed', 422, {
+      fieldErrors: { qbTxnId: ['qbTxnId is required'] }
+    });
+  }
+
+  try {
+    const data = await deleteQuickBooksMoneyTransaction({
+      companyId,
+      txnType: typeParsed.data,
+      qbTxnId
+    });
+    return ok(res, data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks money delete failed';
     return fail(res, message, mapQuickBooksTaxErrorStatus(message));
   }
 };

@@ -1,18 +1,36 @@
 # RetailSync Execution Status
 
-Last updated: 2026-02-27
+Last updated: 2026-04-17
 
-This file tracks end-to-end implementation status by phase and module.
+This file tracks the current implementation state of the live product surfaces, backend workflows, and validation posture.
 
-**Workflows and usage:** See [docs/architecture/workflows-and-usage.md](architecture/workflows-and-usage.md) for detailed login, onboarding, POS import sources, no-POS-data behavior, reports, and RBAC flows.
-
-**Usage flow (summary):** Unauthenticated → `/login` → Google OAuth → `/auth/google/success` → `GET /api/auth/me` → if no company → `/onboarding` (create or join company); if company → `/dashboard`. POS/reports require company; when no POS data, daily list returns `[]` and monthly summary returns zeroed totals; client shows empty state and optional hints.
+Primary companion docs:
+- [docs/architecture/workflows-and-usage.md](/Users/trupal/Projects/RetailSync/docs/architecture/workflows-and-usage.md)
+- [docs/frontend/routing-and-permission-gates.md](/Users/trupal/Projects/RetailSync/docs/frontend/routing-and-permission-gates.md)
+- [docs/backend/api-reference.md](/Users/trupal/Projects/RetailSync/docs/backend/api-reference.md)
+- [docs/testing/module-test-matrix.md](/Users/trupal/Projects/RetailSync/docs/testing/module-test-matrix.md)
+- [docs/wireframes](/Users/trupal/Projects/RetailSync/docs/wireframes)
 
 Status legend:
-- `DONE`: implemented and integrated
-- `PARTIAL`: implemented but needs hardening/tests/polish
-- `TODO`: not started
-- `REITERATED`: implemented, then revised/reworked after feedback or verification
+- `DONE`: implemented and active in the product
+- `PARTIAL`: implemented but still needs hardening, broader tests, or UX cleanup
+- `HIDDEN`: code or routes still exist, but the area is intentionally not part of the active product surface
+- `PLANNED`: documented target state, not implemented yet
+
+---
+
+## Product Summary
+
+RetailSync is currently centered on:
+- email/password auth plus Google auth
+- onboarding with create-company, join-company, and invite acceptance
+- RBAC-driven dashboard navigation
+- POS import and reporting
+- accounting statements workflow
+- a standalone QuickBooks workspace for operational accounting tasks
+- Google Sheets and QuickBooks integration management in Settings
+
+Inventory has been removed from the active product and is no longer part of the supported user flow.
 
 ---
 
@@ -20,249 +38,178 @@ Status legend:
 
 | Phase | Scope | Status | Notes |
 |---|---|---|---|
-| Phase 0 | Foundation (auth + onboarding + RBAC + shell) | `DONE` | Running architecture baseline in place |
-| Phase 1 | POS import + monthly reporting | `DONE` | Server APIs + client pages complete |
-| Phase 2 | Items + locations + inventory ledger + inventory workspace | `REITERATED` | CRUD/import/move/aggregate complete; new workspace + API paths |
-| Phase 3 | Invoice OCR + confirm flow | `TODO` | Next major build |
-| Phase 4 | Bank statements + reconciliation + payments allocation | `TODO` | Planned after Phase 3 |
-| DevOps | Docker + CI/CD + docs | `PARTIAL` | CI quality/tests/build gates active; Docker publishing is manual-only |
+| Phase 0 | Foundation, auth, onboarding, shell, RBAC | `DONE` | Current auth/onboarding model is live |
+| Phase 1 | POS imports and reporting | `DONE` | Daily and monthly POS flows are active |
+| Phase 2 | Email auth hardening, reset, verify, invites, SMTP | `DONE` | Password flows and invite-based access are active |
+| Phase 3 | Statements workflow and QuickBooks operational workspace | `DONE` | Statements are the visible accounting surface; QuickBooks is a separate workspace |
+| Phase 4 | Procurement, invoice OCR, reconciliation expansion | `PLANNED` | Not active as a production-ready module yet |
+| DevOps | CI/CD, Docker, release flow, docs | `PARTIAL` | CI and deploy workflows exist; full green release verification still depends on runner/tooling state |
 
 ---
 
-## Phase 0: Foundation
+## Active User Flow
 
-### Auth
-- Register/login/refresh/logout/me endpoints: `DONE`
-- Access token (15m): `DONE`
-- Refresh cookie (7d, HttpOnly, SameSite=Lax): `DONE`
-- Axios 401 refresh retry: `DONE`
-- Forced logout on refresh fail: `DONE`
+### Authentication
+- `/login`: `DONE`
+- `/register`: `DONE`
+- `/accept-invite`: `DONE`
+- `/forgot-password`: `DONE`
+- `/reset-password`: `DONE`
+- `/verify-email`: `DONE`
+- Google OAuth sign-in: `DONE`
 
-### Onboarding / Company
-- Create company flow: `DONE`
-- Join company flow (companyCode + inviteCode + email): `DONE`
-- User starts with `companyId = null`: `DONE`
-- Company code generation (`RS-XXXXXX`): `DONE`
+### Onboarding
+- `/onboarding`: `DONE`
+- `/onboarding/create-company`: `DONE`
+- `/onboarding/join-company`: `DONE`
+- Invite acceptance directly provisions the user into the invited company role: `DONE`
+- QuickBooks-first company onboarding path: `DONE`
+  - User can start company creation by connecting QuickBooks
+  - Successful QuickBooks onboarding can auto-create the company and attach the integration
 
-### RBAC / Multi-tenant
-- Role model permission map: `DONE`
-- Default roles (Admin/Member/Viewer): `DONE`
-- Server `requirePermission(module, action)`: `DONE`
-- Client `hasPermission` + `PermissionGate`: `DONE`
-- `req.companyId` attach in auth middleware: `DONE`
-- Tenant filtering in protected controllers: `PARTIAL`
-  - Core implemented
-  - Needs additional future enforcement audits as new modules are added
+### Dashboard Navigation
+Visible top-level workspaces:
+- Dashboard
+- POS
+- Accounting
+- QuickBooks
+- Settings
+- Access
 
-### Dashboard shell
-- Protected routes: `DONE`
-- Sidebar module visibility by `view` permission: `DONE`
-- No-access guard screen path: `DONE`
-
----
-
-## Phase 1: POS + Reports
-
-### Server
-- `POSDailySummary` model: `DONE`
-- `POST /api/pos/import` CSV upload + parse + validate + upsert: `DONE`
-- `GET /api/pos/daily`: `DONE`
-- `GET /api/reports/monthly-summary`: `DONE`
-- Permission gating (`pos:create + pos:import`, `pos:view`, `reports:view`): `DONE`
-
-### Client
-- `/dashboard/pos` upload + table: `DONE`
-- `/dashboard/reports` monthly cards: `DONE`
-- Permission-based action rendering: `DONE`
-
-### Data and tooling
-- Sample POS CSV dataset: `DONE`
-- POS seed script: `DONE`
+Hidden or redirected legacy entry points:
+- Procurement-related aliases still exist in routing for compatibility, but are not part of the intended active nav
+- Legacy accounting QuickBooks routes redirect into the standalone QuickBooks workspace
 
 ---
 
-## Phase 2: Items + Locations + Inventory Ledger + Workspace
-
-### Server models
-- `Item`: `DONE`
-- `Location`: `DONE`
-- `InventoryLedger` (event sourcing): `DONE`
-
-### Server endpoints
-- Items CRUD + import under inventory namespace: `DONE`
-  - `GET/POST /api/inventory/items`
-  - `PUT/DELETE /api/inventory/items/:id`
-  - `POST /api/inventory/items/import`
-- Locations CRUD under inventory namespace: `DONE`
-  - `GET/POST /api/inventory/locations`
-  - `PUT/DELETE /api/inventory/locations/:id`
-- Inventory move endpoint: `DONE`
-  - `POST /api/inventory/move`
-- Inventory by location aggregate: `DONE`
-  - `GET /api/inventory/location/:code`
-- Permission checks on all above: `DONE`
-- Tenant isolation tests updated to use new inventory paths: `DONE`
-
-### Client pages
-- Inventory workspace (`/dashboard/operations`): `DONE`
-  - Items table section (`ItemsTableSection` with Redux `itemsSlice`): `DONE`
-  - Inventory sections (search by barcode, view by location, move inventory): `DONE`
-  - Store layout viewer (`StoreLayoutViewer`, `LocationCarousel`, `LocationGrid`, `SlotDetailsDrawer`): `DONE`
-- Legacy `/dashboard/items` and `/dashboard/locations` kept as shells but underlying logic now reusable via shared components: `REITERATED`
-
-### Validation behavior
-- Zod request validation across new endpoints: `DONE`
-- Standard response shape adherence: `DONE`
-
----
-
-## Phase 3: Invoices OCR (Planned)
-
-### Target server work
-- Supplier invoice models: `TODO`
-- Upload storage pipeline (multer + metadata): `TODO`
-- OCR provider abstraction + stub parser: `TODO`
-- Preview endpoint: `TODO`
-- Confirm endpoint -> purchase ledger events: `TODO`
-
-### Target client work
-- `/dashboard/invoices` upload + preview + confirm UI: `TODO`
-- Item mapping UX (UPC + fuzzy suggestions): `TODO`
-
-### Target tests
-- Upload validation tests: `TODO`
-- Confirm idempotency tests: `TODO`
-
----
-
-## Phase 4: Bank + Reconciliation (Planned)
-
-### Target server work
-- `BankTransaction` model: `TODO`
-- Bank file upload + parser stub: `TODO`
-- Reconciliation suggestions API: `TODO`
-- Match confirm/unmatch APIs: `TODO`
-- Payment allocation API: `TODO`
-
-### Target client work
-- `/dashboard/bank`: `TODO`
-- `/dashboard/reconciliation`: `TODO`
-- `/dashboard/payments`: `TODO`
-
-### Target algorithm work
-- Deposit matching windows/tolerance: `TODO`
-- EFT mapping `(creditCard - gas)`: `TODO`
-- Vendor payment allocation heuristics: `TODO`
-
----
-
-## Module-by-Module Status
+## Module Status
 
 | Module | Backend | Frontend | Permissions | Tests | Status |
 |---|---|---|---|---|---|
-| dashboard | Shell only | Home cards/shell | `DONE` | `PARTIAL` | `PARTIAL` |
-| pos | Import + daily APIs | POS page + Import modal | `DONE` | `PARTIAL` | `DONE` |
-| reports | Monthly summary API | Reports page | `DONE` | `PARTIAL` | `DONE` |
-| items | CRUD + import APIs (inventory namespace) | Items table + workspace section | `DONE` | `PARTIAL` | `DONE` |
-| locations | CRUD APIs (inventory namespace) | Locations + layout viewer | `DONE` | `PARTIAL` | `DONE` |
-| inventory | Move + location aggregate APIs | Inventory workspace sections | `DONE` | `PARTIAL` | `DONE` |
-| users | List + assign role | Users page | `DONE` | `PARTIAL` | `PARTIAL` |
-| rolesSettings | Role CRUD + module catalog | Roles page | `DONE` | `PARTIAL` | `PARTIAL` |
-| invoices | Placeholder shell only | Placeholder shell | `PARTIAL` | `TODO` | `TODO` |
-| bankStatements | Placeholder shell only | Placeholder shell | `PARTIAL` | `TODO` | `TODO` |
-| reconciliation | Placeholder shell only | Placeholder shell | `PARTIAL` | `TODO` | `TODO` |
-| suppliers | Placeholder shell only | Placeholder shell | `PARTIAL` | `TODO` | `TODO` |
+| dashboard | Shell/read context | Dashboard home | `DONE` | `PARTIAL` | `DONE` |
+| auth | Register/login/verify/reset/refresh/logout/me | All auth pages active | `DONE` | `PARTIAL` | `DONE` |
+| onboarding/company | Create company, join company, onboarding status, QuickBooks onboarding | Active onboarding pages | `DONE` | `PARTIAL` | `DONE` |
+| access/users | User listing, role assignment, invite lifecycle | Access hub + users | `DONE` | `PARTIAL` | `DONE` |
+| rolesSettings | Role CRUD + permission matrix | Access hub + roles | `DONE` | `PARTIAL` | `DONE` |
+| pos | Import, daily tables, analytics, AI view | Active POS workspace | `DONE` | `PARTIAL` | `DONE` |
+| reports | Summary/report endpoints | Reports surface still reachable through product flows and exports | `DONE` | `PARTIAL` | `DONE` |
+| accounting/statements | Statement upload, status, detail, retries, processing | Active accounting workspace | `DONE` | `PARTIAL` | `DONE` |
+| quickbooks | Hub, accounts, contacts, sales, money, operations, reports, tax | Active standalone workspace | `DONE` | `PARTIAL` | `DONE` |
+| settings | Google Sheets + QuickBooks integration management | Active settings workspace | `DONE` | `PARTIAL` | `DONE` |
+| procurement | Placeholder/partial routing only | Hidden from active nav | `PARTIAL` | `TODO` | `HIDDEN` |
+| inventory | Removed from active application | Removed from active application | n/a | legacy tests removed | `HIDDEN` |
 
 ---
 
-## Reiterations / Rework Log
+## Accounting and QuickBooks State
 
-| Item | Why it was reiterated | Outcome |
-|---|---|---|
-| Permission/action catalog | Needed core-module action alignment | Updated shared module actions |
-| POS import validation path | Needed stronger row-level failure handling | Added explicit validation error reporting |
-| Sidebar links behavior | Duplicate/mis-gated users link path | Simplified to permission-driven links + roles shortcut |
-| TS path resolution (server/client) | Typecheck failures for shared package imports | Added TS path mapping fixes |
-| Docker build lockfile strategy | Lockfile mismatch blocked image build | Dockerfiles switched to `--no-frozen-lockfile` |
-| Client permissions test strictness | TS strict null checks in container build | Updated tests with explicit non-null assertions |
-| Inventory domain (items/locations/inventory) | Needed unified namespace + workspace | Moved to `/api/inventory/*` and added workspace UI |
+### Accounting
+Visible accounting is intentionally narrowed to statements:
+- statement list
+- statement detail
+- processing lifecycle
+- retry/reprocess controls
 
----
+The previous broader accounting tab model is no longer the intended primary UX. Legacy routes for ledger and observability redirect away from the visible accounting flow.
 
-## Test Status
+### QuickBooks
+QuickBooks is now a standalone workspace with:
+- hub dashboard
+- accounts / chart of accounts
+- contacts
+- sales
+- money
+- operations
+- reports
+- tax
 
-### Implemented tests
-- Server: health endpoint smoke test: `DONE`
-- Server: auth refresh rotation (including old refresh token reuse rejection): `DONE`
-- Server: tenant isolation read/write protections and aggregate scoping: `DONE`
-- Server: inventory ledger immutability: `DONE`
-- Server: inventory/items/locations route tests under `/api/inventory/*`: `DONE`
-- Client: permission utility tests: `DONE`
-- Client: `PermissionGate` render behavior tests: `DONE`
-- Client: `ImportPOSDataModal` multi-source flow tests: `DONE`
+Implemented QuickBooks workflows include:
+- invoices: create, list, detail, edit, delete
+- payments: create, list, detail, edit, delete
+- checks: create, list/detail via live views, edit, delete
+- expenses: create, list/detail via live views, edit, delete
+- deposits: create, list/detail via live views, edit, delete
+- transfers: create, list/detail via live views, edit, delete
+- customers: create, edit, deactivate
+- vendors: create, edit, deactivate
 
-### Needed test expansion
-- Onboarding edge-case tests (invite mismatch/expired paths): `TODO`
-- RBAC middleware route coverage across all module/action combinations: `TODO`
-- POS import parser failure paths and idempotency tests: `TODO`
-- Items/locations CRUD negative paths and validation matrix: `TODO`
-- End-to-end happy-path smoke flows (Playwright/Cypress): `TODO`
-- Coverage threshold gate in CI (line/branch/function targets): `TODO`
-
----
-
-## DevOps / Production Readiness Status
-
-### Done
-- Docker artifacts (server/client/compose): `DONE`
-- CI gate workflow (quality/tests/build): `DONE`
-- Release image workflow to GHCR (manual dispatch): `DONE`
-- Detailed docs + runbooks + architecture diagrams: `DONE`
-- PR template (production-grade): `DONE`
-
-### Pending hardening
-- Full CI execution confirmation in hosted runner after mongodb-memory-server lock hardening: `IN_PROGRESS`
-- Branch protection rules activation: `TODO`
-- Secrets/env governance finalization: `TODO`
-- Coverage reporting and threshold policy in CI: `TODO`
+Known product nuance:
+- several pages still reuse accounting-layer components internally, but the active route and UX model is QuickBooks-first
 
 ---
 
-## Current Blockers Observed
+## Auth and Email State
 
-- GitHub runner occasionally hit `mongodb-memory-server` binary lock contention in test setup.
-- CI now isolates Mongo binary cache per job and clears stale lock files before running tests, but this still needs one confirmed green run on hosted CI.
+Implemented:
+- SMTP-backed verification email delivery
+- forgot password flow
+- reset password flow
+- invite email delivery
+- invite acceptance route
+- Google auth success continuation
+- cookie-based refresh rotation
 
-No confirmed application-code design blocker is currently open.
+Environment/config readiness required for production:
+- `CLIENT_URL`
+- `MONGO_URI`
+- `ENCRYPTION_KEY`
+- Google OAuth env
+- QuickBooks OAuth env
+- SMTP credentials
 
 ---
 
-## Next Recommended Execution Order
+## Testing Status
 
-1. Phase 3 invoice OCR server scaffolding + client flow.
-2. Add integration tests for Phase 0/1/2 critical paths.
-3. Phase 4 bank/reconciliation core APIs.
-4. Introduce E2E regression suite and require it in CI.
-5. Final production hardening pass (error budgets, observability, rollback drills).
+### Current automated coverage areas
+- client auth page tests
+- client QuickBooks page tests
+- client POS/procurement/access/settings slice and page tests
+- server auth controller and Google auth tests
+- server email/invite flow tests
+- server QuickBooks CRUD service tests
+- shared schema/type build validation
+
+### Current validation confidence
+- focused module/unit coverage is substantial
+- broader release confidence is still `PARTIAL` because a full green end-to-end release gate depends on local/CI runtime availability for Node, Mongo memory server, and hosted runner execution
+
+### Current gaps
+- browser E2E remains planned, not required yet
+- release verification across all active modules is still assembled from focused suites rather than one single mandatory end-to-end job
+- hidden/redirected legacy routes still exist and should continue to be watched during refactors
 
 ---
 
-## Sprint Planning Linkage
+## Known Drift / Cleanup Still Worth Doing
 
-Canonical sprint planning files:
+- Some docs outside the core status set still reference inventory or earlier accounting layouts.
+- Some QuickBooks implementation still lives under accounting-layer files even though the UX is now a dedicated workspace.
+- Procurement remains intentionally hidden rather than fully deleted from every historical reference.
+- The release path should eventually include a stricter hosted green-run requirement before merging to `production`.
 
-- `docs/roadmap/sprints/README.md`
-- `docs/roadmap/sprints/sprint-plan.md`
-- `docs/roadmap/sprints/sprint-commit-policy.md`
+---
 
-Current sprint execution status:
+## Recommended Near-Term Priorities
 
-| Sprint | Primary Scope | Current Status |
-|---|---|---|
-| Sprint 1 | Tenant/security hardening | `IN_PROGRESS` |
-| Sprint 2 | Tests + CI + Docker reliability | `IN_PROGRESS` |
-| Sprint 3 | Invoice OCR scaffolding | `TODO` |
-| Sprint 4 | Invoice hardening | `TODO` |
-| Sprint 5 | Bank ingestion | `TODO` |
-| Sprint 6 | Reconciliation + payments | `TODO` |
+1. Keep the active product surface tight: auth, POS, statements, QuickBooks, settings, access.
+2. Continue reducing route and doc drift from older accounting and inventory concepts.
+3. Add stronger release validation for active user journeys before broadening module scope again.
+4. Treat procurement/reconciliation/invoice OCR as explicit future initiatives, not implied production-complete surfaces.
 
+---
+
+## Release Readiness Summary
+
+Current release candidate themes:
+- auth/onboarding overhaul
+- inventory removal
+- QuickBooks workspace restructuring
+- docs and wireframe refresh
+- deploy workflow environment consolidation
+
+Overall release posture:
+- product direction: `READY`
+- codebase scope: `SUBSTANTIAL`
+- validation posture: `PARTIAL`
+- recommended merge model: PR into `production` only after command-level validation is re-run in a working Node environment and reviewed

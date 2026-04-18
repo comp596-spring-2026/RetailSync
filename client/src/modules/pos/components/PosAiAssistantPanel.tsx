@@ -429,6 +429,17 @@ export const PosAiAssistantPanel = ({ loading, snapshot, primaryAction }: PosAiA
   }, [snapshot.dateRange.from, snapshot.dateRange.to]);
 
   const isEmpty = snapshot.records.length === 0;
+  const primaryAlert = snapshot.alerts[0] ?? null;
+  const alertSummary = primaryAlert
+    ? primaryAlert.message
+    : 'No major anomalies detected across the selected range.';
+  const alertTone: 'success' | 'warning' | 'error' | 'info' = primaryAlert
+    ? primaryAlert.severity === 'high'
+      ? 'error'
+      : primaryAlert.severity === 'medium'
+        ? 'warning'
+        : 'info'
+    : 'success';
 
   const contextMetrics = useMemo(
     () => [
@@ -514,6 +525,19 @@ export const PosAiAssistantPanel = ({ loading, snapshot, primaryAction }: PosAiA
               <Chip label={`${snapshot.dateRange.from} to ${snapshot.dateRange.to}`} variant="outlined" />
               <Chip icon={<BoltIcon />} label={`${snapshot.alerts.length} alerts`} variant="outlined" />
             </Stack>
+            <Alert severity={alertTone} variant="outlined" sx={{ alignItems: 'flex-start' }}>
+              <Stack spacing={0.5}>
+                <Typography variant="subtitle1" fontWeight={900}>
+                  {primaryAlert ? 'Primary anomaly' : 'Stable range'}
+                </Typography>
+                <Typography variant="body2">{alertSummary}</Typography>
+                {primaryAlert ? (
+                  <Typography variant="caption" color="text.secondary">
+                    Source: {primaryAlert.type.replaceAll('_', ' ')} · Severity: {primaryAlert.severity}
+                  </Typography>
+                ) : null}
+              </Stack>
+            </Alert>
             <Typography variant="h6" fontWeight={900}>
               Ask plain-language POS questions and get a normal assistant-style response.
             </Typography>

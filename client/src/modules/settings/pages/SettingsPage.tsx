@@ -67,7 +67,11 @@ const getErrorMessage = (error: unknown, fallback: string) => {
   return axiosError.response?.data?.message ?? fallback;
 };
 
-export const SettingsPage = () => {
+type SettingsPageProps = {
+  showHeader?: boolean;
+};
+
+export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
   const dispatch = useAppDispatch();
   const location = useLocation();
   const navigate = useNavigate();
@@ -380,11 +384,13 @@ export const SettingsPage = () => {
 
   return (
     <Stack spacing={2.5}>
-      <PageHeader
-        title="Settings"
-        subtitle="Manage Google Sheets and QuickBooks integration configuration"
-        icon={<SettingsSuggestIcon />}
-      />
+      {showHeader ? (
+        <PageHeader
+          title="Settings"
+          subtitle="Manage Google Sheets and QuickBooks integration configuration"
+          icon={<SettingsSuggestIcon />}
+        />
+      ) : null}
 
       {error && <Alert severity="error">{error}</Alert>}
       {loading && <Alert severity="info">Loading settings...</Alert>}

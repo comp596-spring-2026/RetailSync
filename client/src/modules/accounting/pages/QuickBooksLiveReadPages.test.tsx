@@ -19,11 +19,13 @@ import {
 
 const {
   getQuickbooksAccountRegisterMock,
+  deleteQuickbooksMoneyTransactionMock,
   getQuickbooksLiveTransactionsMock,
   getQuickbooksTransactionDetailMock,
   useQuickBooksWorkspaceMock
 } = vi.hoisted(() => ({
   getQuickbooksAccountRegisterMock: vi.fn(),
+  deleteQuickbooksMoneyTransactionMock: vi.fn(),
   getQuickbooksLiveTransactionsMock: vi.fn(),
   getQuickbooksTransactionDetailMock: vi.fn(),
   useQuickBooksWorkspaceMock: vi.fn()
@@ -32,6 +34,8 @@ const {
 vi.mock('../api', () => ({
   accountingApi: {
     getQuickbooksAccountRegister: (...args: unknown[]) => getQuickbooksAccountRegisterMock(...args),
+    deleteQuickbooksMoneyTransaction: (...args: unknown[]) =>
+      deleteQuickbooksMoneyTransactionMock(...args),
     getQuickbooksLiveTransactions: (...args: unknown[]) => getQuickbooksLiveTransactionsMock(...args),
     getQuickbooksTransactionDetail: (...args: unknown[]) => getQuickbooksTransactionDetailMock(...args)
   }
@@ -147,9 +151,9 @@ describe('QuickBooks live read pages', () => {
 
     render(
       <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/dashboard/accounting/registers/35']}>
+        <MemoryRouter initialEntries={['/dashboard/quickbooks/accounts/35/register']}>
           <Routes>
-            <Route path="/dashboard/accounting/registers/:accountId" element={<QuickBooksAccountRegisterPage />} />
+            <Route path="/dashboard/quickbooks/accounts/:accountId/register" element={<QuickBooksAccountRegisterPage />} />
           </Routes>
         </MemoryRouter>
       </Provider>
@@ -204,10 +208,10 @@ describe('QuickBooks live read pages', () => {
 
     render(
       <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/dashboard/accounting/registers/35']}>
+        <MemoryRouter initialEntries={['/dashboard/quickbooks/accounts/35/register']}>
           <Routes>
-            <Route path="/dashboard/accounting/registers/:accountId" element={<QuickBooksAccountRegisterPage />} />
-            <Route path="/dashboard/accounting/transactions/:type/:qbTxnId" element={<div>Detail route</div>} />
+            <Route path="/dashboard/quickbooks/accounts/:accountId/register" element={<QuickBooksAccountRegisterPage />} />
+            <Route path="/dashboard/quickbooks/money/checks/:qbTxnId" element={<div>Detail route</div>} />
           </Routes>
         </MemoryRouter>
       </Provider>
@@ -227,22 +231,22 @@ describe('QuickBooks live read pages', () => {
   it.each([
     [
       'deposit',
-      '/dashboard/accounting/transactions/deposits',
+      '/dashboard/quickbooks/money/deposits',
       QuickBooksDepositsPage,
       'Deposits',
       'Fuel Stop'
     ],
-    ['check', '/dashboard/accounting/transactions/checks', QuickBooksChecksPage, 'Checks', 'Landlord'],
+    ['check', '/dashboard/quickbooks/money/checks', QuickBooksChecksPage, 'Checks', 'Landlord'],
     [
       'expense',
-      '/dashboard/accounting/transactions/expenses',
+      '/dashboard/quickbooks/money/expenses',
       QuickBooksExpensesPage,
       'Expenses',
       'Office Depot'
     ],
     [
       'transfer',
-      '/dashboard/accounting/transactions/transfers',
+      '/dashboard/quickbooks/money/transfers',
       QuickBooksTransfersPage,
       'Transfers',
       'Main Checking'
@@ -304,10 +308,22 @@ describe('QuickBooks live read pages', () => {
 
       expect(screen.getByText(`QuickBooks ${title}`)).toBeInTheDocument();
       expect(screen.getByText(payee)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /new|write check/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
     }
   );
 
-  it('loads transaction detail with the type query contract and supports back navigation', async () => {
+  it('loads transaction detail with the type query contract and supports edit/delete actions', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    deleteQuickbooksMoneyTransactionMock.mockResolvedValue({
+      data: {
+        data: {
+          txnType: 'check',
+          qbTxnId: '9001',
+          deleted: true
+        }
+      }
+    });
     getQuickbooksTransactionDetailMock.mockResolvedValue({
       data: {
         data: {
@@ -316,6 +332,8 @@ describe('QuickBooks live read pages', () => {
           type: 'check',
           txnDate: '2026-03-10',
           docNum: '3001',
+          syncToken: '3',
+          payeeId: 'vendor-1',
           payeeName: 'Staples',
           memo: 'Office supplies',
           amount: 18.5,
@@ -338,10 +356,11 @@ describe('QuickBooks live read pages', () => {
 
     render(
       <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/dashboard/accounting/transactions/check/9001']}>
+        <MemoryRouter initialEntries={['/dashboard/quickbooks/money/checks/9001']}>
           <Routes>
-            <Route path="/dashboard/accounting/transactions/checks" element={<div>Checks list</div>} />
-            <Route path="/dashboard/accounting/transactions/:type/:qbTxnId" element={<QuickBooksTransactionDetailPage />} />
+            <Route path="/dashboard/quickbooks/money/checks" element={<div>Checks list</div>} />
+            <Route path="/dashboard/quickbooks/money/checks/:qbTxnId" element={<QuickBooksTransactionDetailPage />} />
+            <Route path="/dashboard/quickbooks/money/checks/:qbTxnId/edit" element={<div>Edit check route</div>} />
           </Routes>
         </MemoryRouter>
       </Provider>
@@ -354,9 +373,73 @@ describe('QuickBooks live read pages', () => {
     expect(screen.getByRole('heading', { name: 'Staples' })).toBeInTheDocument();
     expect(screen.getByText('Office supplies')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to list' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 
     await waitFor(() => {
+      expect(screen.getByText('Edit check route')).toBeInTheDocument();
+    });
+  });
+
+  it('deletes a money transaction from detail view and returns to the list', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    deleteQuickbooksMoneyTransactionMock.mockResolvedValue({
+      data: {
+        data: {
+          txnType: 'check',
+          qbTxnId: '9001',
+          deleted: true
+        }
+      }
+    });
+    getQuickbooksTransactionDetailMock.mockResolvedValue({
+      data: {
+        data: {
+          id: 'txn-9',
+          qbTxnId: '9001',
+          type: 'check',
+          txnDate: '2026-03-10',
+          docNum: '3001',
+          syncToken: '3',
+          payeeId: 'vendor-1',
+          payeeName: 'Staples',
+          memo: 'Office supplies',
+          amount: 18.5,
+          accountId: '35',
+          accountName: 'Checking',
+          categoryAccountId: '7000',
+          categoryAccountName: 'Office Supplies',
+          fromAccountId: null,
+          fromAccountName: null,
+          toAccountId: null,
+          toAccountName: null,
+          raw: {
+            Id: '9001',
+            TxnDate: '2026-03-10',
+            DocNumber: '3001'
+          }
+        }
+      }
+    });
+
+    render(
+      <Provider store={createStore()}>
+        <MemoryRouter initialEntries={['/dashboard/quickbooks/money/checks/9001']}>
+          <Routes>
+            <Route path="/dashboard/quickbooks/money/checks" element={<div>Checks list</div>} />
+            <Route path="/dashboard/quickbooks/money/checks/:qbTxnId" element={<QuickBooksTransactionDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </Provider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Staples' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(deleteQuickbooksMoneyTransactionMock).toHaveBeenCalledWith('check', '9001');
       expect(screen.getByText('Checks list')).toBeInTheDocument();
     });
   });

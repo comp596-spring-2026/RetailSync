@@ -34,7 +34,11 @@ import {
 } from '../state';
 import { selectRoles } from '../../rbac/state';
 
-export const UsersPage = () => {
+type UsersPageProps = {
+  showHeader?: boolean;
+};
+
+export const UsersPage = ({ showHeader = true }: UsersPageProps) => {
   const dispatch = useAppDispatch();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'users', 'view');
@@ -79,7 +83,7 @@ export const UsersPage = () => {
 
   return (
     <Stack spacing={2}>
-      <PageHeader title="Users" subtitle="Invite users and manage assigned roles" icon={<GroupIcon />} />
+      {showHeader ? <PageHeader title="Users" subtitle="Invite users and manage assigned roles" icon={<GroupIcon />} /> : null}
       <LoadingEmptyStateWrapper loading={loading} empty={false} loadingLabel="Loading users and invites...">
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>

@@ -7,13 +7,7 @@ const tabItems: Array<{
   label: string;
   matchPrefixes?: string[];
 }> = [
-  { value: '/dashboard/accounting/statements', label: 'Statements' },
-  { value: '/dashboard/accounting/ledger', label: 'Ledger' },
-  {
-    value: '/dashboard/accounting/transactions/deposits',
-    label: 'Live Reads',
-    matchPrefixes: ['/dashboard/accounting/registers', '/dashboard/accounting/transactions']
-  }
+  { value: '/dashboard/accounting/statements', label: 'Statements' }
 ];
 
 export const AccountingTabs = () => {

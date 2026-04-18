@@ -1,200 +1,109 @@
 <p align="center">
-  <img src="client/public/brand/BigLogo.png" alt="RetailSync Big Logo" width="360" />
+  <img src="client/public/brand/BigLogo.png" alt="RetailSync Big Logo" width="320" />
 </p>
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm](https://img.shields.io/badge/pnpm-10.x-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
-[![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![React](https://img.shields.io/badge/React-18.x-149ECA?logo=react&logoColor=white)](https://react.dev/)
-[![Redux Toolkit](https://img.shields.io/badge/Redux%20Toolkit-2.x-764ABC?logo=redux&logoColor=white)](https://redux-toolkit.js.org/)
+[![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Material UI](https://img.shields.io/badge/MUI-6.x-007FFF?logo=mui&logoColor=white)](https://mui.com/)
 [![Express](https://img.shields.io/badge/Express-4.x-000000?logo=express&logoColor=white)](https://expressjs.com/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-7.x-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
-[![Mongoose](https://img.shields.io/badge/Mongoose-8.x-880000)](https://mongoosejs.com/)
-[![Zod](https://img.shields.io/badge/Zod-3.x-3E67B1)](https://zod.dev/)
-[![JWT](https://img.shields.io/badge/JWT-Auth-000000?logo=jsonwebtokens&logoColor=white)](https://jwt.io/)
-[![Vitest](https://img.shields.io/badge/Vitest-2.x-6E9F18?logo=vitest&logoColor=white)](https://vitest.dev/)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Google APIs](https://img.shields.io/badge/Google%20APIs-Sheets%20%2B%20OAuth-4285F4?logo=google&logoColor=white)](https://developers.google.com/sheets/api)
 
 ## Overview
 
-RetailSync centralizes sales, inventory, permissions, and operational workflows with strict tenant scoping and role enforcement.
+RetailSync is a TypeScript monorepo for a financial operations SaaS focused on:
+- auth and onboarding
+- role-based company access
+- POS imports and summaries
+- bank statement processing
+- QuickBooks operations
+- Google Sheets and QuickBooks integrations
 
-It solves:
+The active product is centered on `Dashboard`, `POS`, `Accounting`, `QuickBooks`, `Settings`, and `Access`.
 
-- fragmented POS and stock workflows
-- inconsistent permission enforcement
-- weak traceability for inventory changes
-- need for integrations (Google Sheets)
+Inventory is no longer part of the supported live product surface.
+
+## Current Product Shape
+
+### Authentication and Onboarding
+- Email/password register and login
+- Google OAuth sign-in
+- Email verification
+- Forgot/reset password
+- Invite acceptance
+- Create company
+- Join company
+- QuickBooks-assisted company onboarding
+
+### Dashboard Workspaces
+- `Dashboard`: company and account context
+- `POS`: import, table, analytics, AI view
+- `Accounting`: statements list and statement detail
+- `QuickBooks`: hub, accounts, contacts, sales, money, operations, reports, tax
+- `Settings`: Google Sheets and QuickBooks integration management
+- `Access`: users and roles
+
+### Important Notes
+- Accounting is intentionally narrowed to statements in the visible app shell.
+- QuickBooks is a separate workspace, not an accounting tab.
+- Procurement remains hidden/not release-ready.
 
 ## Tech Stack
 
-RetailSync is a TypeScript monorepo with React/Vite on the client and Express/MongoDB on the server, with shared schema contracts and integration adapters.
-
 - Frontend: React, Vite, Redux Toolkit, Material UI
 - Backend: Express, Mongoose, Zod, JWT
-- Data: MongoDB
+- Shared contracts: shared TypeScript + Zod package
 - Testing: Vitest, Supertest, mongodb-memory-server
-- Integrations: Google APIs (Sheets + OAuth)
-- DevOps/Tooling: pnpm workspaces, Docker Compose, Makefile
-
-## Major Features
-
-| Area | Capabilities |
-|---|---|
-| Frontend access | Login + Google login, onboarding (create/join company), protected dashboard |
-| Auth API (server) | Google OAuth start/callback, refresh/logout, current-user context (`me`) |
-| Tenant and RBAC | `companyId`-scoped data, server-side permission checks |
-| POS | CSV import, daily views, monthly reporting |
-| Inventory | Items, locations, immutable `InventoryLedger` movements |
-| Accounting | Statement upload, fallback OCR pipeline, check review, ledger approval, QuickBooks sync, tax dashboard, observability |
-| Integrations | Google Sheets (service account + OAuth connect), QuickBooks OAuth + CoA pull + posted ledger sync |
-| Quality | Vitest test suites, Docker workflows, CI quality gates |
-
-## Frontend UX System Updates
-
-Recent UI foundation upgrades now ship in the client:
-
-- Onboarding company setup:
-  - `Timezone` uses searchable `Autocomplete`.
-  - `Currency` uses searchable `Autocomplete` with `CODE (SYMBOL) - Name` labels.
-- Reusable CRUD building blocks for module shells:
-  - `SearchableCrudTable`
-  - `CrudEntityDialog` (create/edit)
-  - `ConfirmDeleteDialog`
-- Consistent feedback pattern for async flows:
-  - `useAsyncAction` for loading + success/error toast dispatch
-  - centralized API error-code mapping in `client/src/constants/errorCodes.ts`
-- Shared utility layer expanded:
-  - table pagination hook + helpers
-  - date formatter (`moment`-based) in `client/src/utils/date.ts`
-
-## External Product Dependencies
-
-| Product | Used For | Required Env |
-|---|---|---|
-| Google APIs (`googleapis`) | Sheets read and OAuth connect/callback flow | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_AUTH_REDIRECT_URI` |
-| Intuit QuickBooks OAuth 2.0 | Accounting connect/callback and token refresh | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_INTEGRATION_REDIRECT_URI` |
-
-## Brand Assets
-
-Client brand assets are served from `/client/public/brand` and used across auth UI.
-
-| Asset | Purpose |
-|---|---|
-| `icon.svg` / `icon.png` / `icon.ico` | icon-only mark, favicon, compact UI |
-| `BigLogo.png` | large auth/onboarding logo (icon + wordmark) |
-| `logo-horizontal-removebg.png` | horizontal logo in dashboard header |
-
-### Brand Preview
-
-| Asset | Preview |
-|---|---|
-| `icon.svg` | <img src="client/public/brand/icon.svg" alt="RetailSync icon svg" width="72" /> |
-| `icon.png` | <img src="client/public/brand/icon.png" alt="RetailSync icon png" width="72" /> |
-| `icon.ico` | <img src="client/public/brand/icon.ico" alt="RetailSync icon ico" width="72" /> |
-| `BigLogo.png` | <img src="client/public/brand/BigLogo.png" alt="RetailSync big logo" width="320" /> |
-| `logo-horizontal-removebg.png` | <img src="client/public/brand/logo-horizontal-removebg.png" alt="RetailSync horizontal logo" width="320" /> |
-
-## Architecture
-
-```mermaid
-flowchart LR
-  subgraph TenantBoundary["Tenant Boundary (companyId scoped)"]
-    C["React Client"] --> A["Auth Middleware"] --> R["RBAC Guard"] --> API["Express Controllers"]
-    API --> DB[("MongoDB")]
-  end
-
-  POS["POS CSV"] --> API
-  GS["Google Sheets API"] --> API
-```
-
-## Current Frontend Routing
-
-```mermaid
-flowchart TD
-  Start["Any Route"] --> Root{Path}
-  Root -- "/" --> Login["/login"]
-  Root -- "/login" --> Login
-  Root -- "/onboarding/*" --> Onboarding["Onboarding flow"]
-  Root -- "/dashboard/*" --> Dashboard["Protected dashboard"]
-  Root -- "unknown path" --> Login
-```
-
-Notes:
-- Login and onboarding pages are active.
-- Email/password recovery and verification flows are removed.
-
-## Integration Workflow (POS Sources)
-
-```mermaid
-flowchart TD
-  A["Import POS Data modal"] --> B["Select source (File / Google Sheets)"]
-  B -->|"File"| C["Upload file and commit import"]
-  B -->|"Google Sheets"| D["Navigate to Settings > Google Sheets setup"]
-  D --> E["Step 1: Source + Connect/Verify (OAuth or Shared)"]
-  E --> F["Step 2: Sheet + Tab + Preview"]
-  F --> G["Step 3: Mapping + Commit connector config"]
-  G --> H["POS Sync Now -> /api/pos/import/sheets/commit"]
-```
-
-### Google Sheets E2E Configuration Notes
-
-- Google Sheets configuration is connector-first in `/api/settings`:
-  - `googleSheets.activeIntegration`
-  - `googleSheets.oauth.sources[].connectors[]`
-  - `googleSheets.shared.profiles[].connectors[]`
-- POS page `Sync Now` resolves active connector config from server-authoritative settings.
-- POS Import modal no longer maintains a second Google setup flow; it redirects to Settings for Google configuration.
-- Mapping must be saved on the connector before sync/import.
-
-Detailed runbook: `/Users/trupal/Projects/RetailSync/docs/operations/google-sheets-e2e.md`
+- Integrations: Google Sheets, Google OAuth, QuickBooks OAuth/API
+- Tooling: pnpm workspaces, Docker Compose, GitHub Actions
 
 ## Monorepo Structure
 
 ```text
 RetailSync/
-  client/        # Vite + React + TypeScript + Redux Toolkit + MUI
-  server/        # Express + TypeScript + MongoDB + Mongoose + Zod + JWT
-  shared/        # Shared types and Zod schemas
-  docs/          # Architecture, backend, frontend, operations, testing
-  docker-compose.yml
-  pnpm-workspace.yaml
+  client/        # React + Vite application
+  server/        # Express API
+  shared/        # Shared types, schemas, constants
+  docs/          # Status, architecture, wireframes, testing docs
 ```
 
-## Accounting Documentation
-
-- Entry point: `/Users/trupal/Projects/RetailSync/docs/accounting/README.md`
-- UI wireframes + user lifecycle: `/Users/trupal/Projects/RetailSync/docs/accounting/wireframes-and-user-lifecycle.md`
-- Workflow lifecycle: `/Users/trupal/Projects/RetailSync/docs/accounting/end-to-end-workflow.md`
-- OCR/storage runtime: `/Users/trupal/Projects/RetailSync/docs/accounting/ocr-pipeline-and-storage.md`
-- Module docs:
-  - Statements: `/Users/trupal/Projects/RetailSync/docs/accounting/module-statements.md`
-  - Ledger: `/Users/trupal/Projects/RetailSync/docs/accounting/module-ledger.md`
-  - QuickBooks Sync: `/Users/trupal/Projects/RetailSync/docs/accounting/module-quickbooks-sync.md`
-  - Tax Dashboard: `/Users/trupal/Projects/RetailSync/docs/accounting/module-tax.md`
-  - Observability: `/Users/trupal/Projects/RetailSync/docs/accounting/module-observability.md`
-
-### Accounting Workspace At A Glance
+## Routing Summary
 
 ```mermaid
-flowchart LR
-  A["Statements"] --> B["Statement Detail"]
-  B --> C["Ledger"]
-  C --> D["QuickBooks Sync"]
-  D --> E["Tax"]
-  E --> F["Observability"]
+flowchart TD
+  Start["App Entry"] --> Public{Public route?}
+  Public -- "yes" --> Auth["/login /register /accept-invite /verify-email /forgot-password /reset-password"]
+  Public -- "no" --> Protected{Has session?}
+  Protected -- "no" --> Login["/login"]
+  Protected -- "yes" --> Company{Has company?}
+  Company -- "no" --> Onboarding["/onboarding/*"]
+  Company -- "yes" --> Dashboard["/dashboard/*"]
+  Dashboard --> Accounting["/dashboard/accounting/statements"]
+  Dashboard --> QuickBooks["/dashboard/quickbooks/*"]
 ```
 
-Notes:
+## QuickBooks Workspace
 
-- `Statements` owns upload, processing progress, and retry entry points.
-- `Ledger` is the approval gate before QuickBooks posting.
-- `QuickBooks Sync` handles OAuth, reference refresh, and post-approved dispatch.
-- `Tax` is a live QuickBooks reporting/recovery surface.
-- `Observability` reads run history, failures, and environment readiness.
+The QuickBooks workspace is organized as a hub plus focused pages:
+- Accounts
+- Contacts
+- Sales
+- Money
+- Operations
+- Reports
+- Tax
+
+Implemented operational flows include:
+- customer CRUD
+- vendor CRUD
+- invoice CRUD
+- payment CRUD
+- deposit CRUD
+- check CRUD
+- expense CRUD
+- transfer CRUD
 
 ## Local Development
 
@@ -202,168 +111,63 @@ Notes:
 
 - Node.js 20+
 - pnpm 10+
-- Docker Desktop (recommended for Mongo)
+- MongoDB or Docker Desktop
 
 ### Install
 
 ```bash
-make install
+pnpm install
 ```
 
 ### Start
 
 ```bash
-make dev
+pnpm dev
 ```
 
 Default local endpoints:
+- client: `http://localhost:4630`
+- server: `http://localhost:4000`
+- health: `http://localhost:4000/health`
 
-- Client: `http://localhost:4630`
-- Server: `http://localhost:4000`
-- Health: `http://localhost:4000/health`
-
-### Quality Gate
-
-```bash
-make typecheck
-make lint
-make test
-make build
-make check
-```
-
-### Local ADC for Sheets
-
-Cloud Run uses ADC automatically. For local Sheets calls, run:
+### Recommended Validation
 
 ```bash
-gcloud auth application-default login
+pnpm -r typecheck
+pnpm -r build
+pnpm -r test
 ```
 
-Local fallback is also supported in non-production:
+## Environment
 
-- if `/Users/trupal/Projects/RetailSync/credentials/gcp-service-account-retailsync-run-sa.json` exists, Sheets client auth uses it automatically.
+Important server env:
+- `PORT`
+- `MONGO_URI`
+- `CLIENT_URL`
+- `ENCRYPTION_KEY`
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `GOOGLE_AUTH_REDIRECT_URI`
+- `QUICKBOOKS_CLIENT_ID`
+- `QUICKBOOKS_CLIENT_SECRET`
+- `QUICKBOOKS_INTEGRATION_REDIRECT_URI`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_SECURE`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `SMTP_FROM`
 
-## Environment Variables
+## Documentation Map
 
-### Server (`/server/.env`)
+- Status: [docs/status.md](/Users/trupal/Projects/RetailSync/docs/status.md)
+- Backend API: [docs/backend/api-reference.md](/Users/trupal/Projects/RetailSync/docs/backend/api-reference.md)
+- Frontend routing: [docs/frontend/routing-and-permission-gates.md](/Users/trupal/Projects/RetailSync/docs/frontend/routing-and-permission-gates.md)
+- Testing matrix: [docs/testing/module-test-matrix.md](/Users/trupal/Projects/RetailSync/docs/testing/module-test-matrix.md)
+- Wireframes: [docs/wireframes](/Users/trupal/Projects/RetailSync/docs/wireframes)
 
-| Variable | Required | Notes |
-|---|---|---|
-| `PORT` | Yes | API port (`4000`) |
-| `MONGO_URI` | Yes | Mongo connection string |
-| `CLIENT_URL` | Yes | Allowed CORS origin |
-| `NODE_ENV` | Yes | `development` / `test` / `production` |
-| `ENCRYPTION_KEY` | Yes | Base64-encoded 32-byte master key used for encrypted integration secrets, derived JWT secrets, and internal service auth |
-| `GOOGLE_OAUTH_CLIENT_ID` | No | Google OAuth |
-| `GOOGLE_OAUTH_CLIENT_SECRET` | No | Google OAuth |
-| `GOOGLE_AUTH_REDIRECT_URI` | No | Google OAuth callback |
-| `GOOGLE_INTEGRATION_REDIRECT_URI` | No | Google integration callback |
-| `QUICKBOOKS_CLIENT_ID` | No | QuickBooks OAuth client id |
-| `QUICKBOOKS_CLIENT_SECRET` | No | QuickBooks OAuth client secret |
-| `QUICKBOOKS_INTEGRATION_REDIRECT_URI` | No | QuickBooks OAuth callback (`/api/integrations/quickbooks/callback`) |
-| `GCS_BUCKET_NAME` | No | Bucket used for accounting statement storage |
-| `TASKS_MODE` | No | `inline` (local/default) or `cloud` |
-| `INTERNAL_TASKS_ENDPOINT` | No | Task endpoint base (for example `https://<api-url>/api/tasks`); server appends `/pipeline` or `/sync` by job type |
-| `GCP_PROJECT_ID` | No | Required when `TASKS_MODE=cloud` |
-| `GCP_REGION` | No | Required when `TASKS_MODE=cloud` |
-| `TASKS_QUEUE_PIPELINE` | No | Queue for OCR/extraction jobs |
-| `TASKS_QUEUE_SYNC` | No | Queue for integration sync jobs |
-| `TASKS_OIDC_SERVICE_ACCOUNT_EMAIL` | No | OIDC service account for Cloud Tasks calls |
-| `API_SERVICE_NAME` | No | Cloud Run API service name used by observability log links |
+## Release Flow
 
-### Client (`/client/.env`)
-
-| Variable | Required | Notes |
-|---|---|---|
-| `VITE_API_URL` | Yes | API base URL (local: `http://localhost:4000/api`, deployed: `<Cloud Run API URL>/api`) |
-
-## Deployment Snapshot
-
-- Cloud Run service name is exposed as `API_SERVICE_NAME` for observability log links.
-- Client build expects: `VITE_API_URL=<deployed-api-url>/api`
-- Docker Compose build arg for client: `VITE_API_URL=/api` (when reverse-proxying API from same host)
-
-## Branching and Release
-
-- `development`: active feature branch target.
-- `production`: protected release branch.
-- PR flow: feature -> `development`, then `development` -> `production`.
-- GitHub Actions:
-  - `.github/workflows/ci.yml` runs on PRs to `development` and `production`.
-  - `.github/workflows/deploy.yml` runs on pushes to `development` and `production`.
-  - Deploy auto-injects QuickBooks secrets if present in Secret Manager (`QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_INTEGRATION_REDIRECT_URI`).
-  - Deploy workflow provisions Cloud Tasks queues, deploys worker first, then API with `TASKS_MODE=cloud`.
-
-## Testing
-
-| Layer | Tooling | Notes |
-|---|---|---|
-| Unit | Vitest | utility and schema tests |
-| Integration | Vitest + mongodb-memory-server | DB-backed auth and domain tests |
-| UI | Vitest + RTL | component-level behavior |
-| E2E | Planned | Playwright roadmap |
-
-## API and Docs
-
-- API reference: `/Users/trupal/Projects/RetailSync/docs/backend/api-reference.md`
-- System architecture: `/Users/trupal/Projects/RetailSync/docs/architecture/system-overview.md`
-- Local runbook: `/Users/trupal/Projects/RetailSync/docs/operations/local-development.md`
-- Testing strategy: `/Users/trupal/Projects/RetailSync/docs/testing/testing-strategy.md`
-
-### Daily Google Sheets → POS Sync
-
-- **Cloud Scheduler (production)**: configure a daily HTTP POST job to  
-  `https://<cloud-run-url>/api/cron/sync-sheets` with header `x-service-secret: $ENCRYPTION_KEY`.  
-  The header uses the same master key value already configured on the service.
-- **Local dev cron (optional)**: set `ENABLE_LOCAL_CRON=true` and optionally override  
-  `LOCAL_CRON_EXPR` (default: `0 2 * * *`) in `server/.env` to run the sync on a schedule.
-- **Manual / dry run**: you can test without writing to the DB via:  
-  `curl -X POST 'http://localhost:4000/api/cron/sync-sheets?dryRun=true' -H 'x-service-secret: <your-ENCRYPTION_KEY>'`
-
-### Accounting Worker + Tasks
-
-- API enqueue mode:
-  - local default: `TASKS_MODE=inline`
-  - cloud deploy: `TASKS_MODE=cloud`
-- Cloud mode targets the worker endpoint directly and keeps queue env names aligned for Cloud Tasks migration:
-  - pipeline queue: `TASKS_QUEUE_PIPELINE`
-  - sync queue: `TASKS_QUEUE_SYNC`
-  - task endpoint base: `${INTERNAL_TASKS_ENDPOINT}` (`/api/tasks`)
-- Current statement extraction is a fallback pipeline:
-  - uploaded PDFs are saved to GCS
-  - worker writes placeholder page images plus `ocr/text.txt` and `ocr/docai.json`
-  - transaction normalization is saved to `derived/gemini/normalized.v1.json`
-  - check artifacts and posting state are persisted separately
-- Full runtime breakdown: `/Users/trupal/Projects/RetailSync/docs/accounting/ocr-pipeline-and-storage.md`
-
-## Docker
-
-```bash
-make start
-make stop
-make logs
-make reset
-```
-
-Services:
-
-- `mongo` -> `27017`
-- `server` -> `4000`
-- `client` -> `8080`
-
-Notes:
-
-- No Dockerfile changes are required for the new timezone/currency UI and CRUD component system.
-- The existing Docker builds already install workspace dependencies from `pnpm-lock.yaml`, including new frontend packages like `moment`.
-
-## Security Notes
-
-- Tenant isolation is enforced with `companyId` on protected domains.
-- Role permission checks are server-authoritative.
-- Inventory is append-only ledger based.
-- Refresh token rotation and revocation are implemented.
-
-## License
-
-License: TBD
+- active branch: `development`
+- release target: `production`
+- release guide: [RELEASE.md](/Users/trupal/Projects/RetailSync/RELEASE.md)

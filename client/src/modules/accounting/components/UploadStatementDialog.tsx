@@ -936,27 +936,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
             </Stack>
           </Paper>
 
-          {submitError ? (
-            <Alert
-              severity="error"
-              action={
-                <Stack direction="row" spacing={1}>
-                  {file && !busy ? (
-                    <Button color="inherit" size="small" onClick={() => void submit()}>
-                      Retry save
-                    </Button>
-                  ) : null}
-                  {activeStatementId && !busy ? (
-                    <Button color="inherit" size="small" onClick={() => void retryProcessing()}>
-                      Retry processing
-                    </Button>
-                  ) : null}
-                </Stack>
-              }
-            >
-              {submitError}
-            </Alert>
-          ) : null}
+          {submitError ? <Alert severity="error">{submitError}</Alert> : null}
 
           <Typography variant="body2" color="text.secondary">
             Uploaded file is stored in secure object storage and processed in background jobs.

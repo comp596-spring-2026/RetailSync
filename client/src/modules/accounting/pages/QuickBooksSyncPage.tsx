@@ -23,51 +23,6 @@ import { accountingApi } from '../api';
 import { QuickBooksTabs } from '../components';
 import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
 
-const shortcutItems = [
-  {
-    title: 'Chart of Accounts',
-    description: 'Browse QuickBooks accounts, balances, and classifications.',
-    to: '/dashboard/quickbooks/chart-of-accounts',
-    icon: <AccountBalanceIcon />
-  },
-  {
-    title: 'Customers',
-    description: 'Search and review customer records from the connected company.',
-    to: '/dashboard/quickbooks/customers',
-    icon: <PeopleAltIcon />
-  },
-  {
-    title: 'Vendors',
-    description: 'Review supplier records and balances without leaving the hub.',
-    to: '/dashboard/quickbooks/vendors',
-    icon: <StorefrontIcon />
-  },
-  {
-    title: 'Reports',
-    description: 'Balance Sheet, Profit & Loss, Trial Balance, ledger views, and reporting filters.',
-    to: '/dashboard/quickbooks/reports',
-    icon: <InsightsIcon />
-  },
-  {
-    title: 'Operations',
-    description: 'Review posted and failed QuickBooks-linked ledger rows in one operational queue.',
-    to: '/dashboard/quickbooks/operations',
-    icon: <SyncIcon />
-  },
-  {
-    title: 'Tax',
-    description: 'Recover payments and create journal adjustments against the connected QuickBooks company.',
-    to: '/dashboard/quickbooks/tax',
-    icon: <ReceiptLongIcon />
-  },
-  {
-    title: 'Writes',
-    description: 'Create sales receipts, invoices, and payments in the connected QuickBooks company.',
-    to: '/dashboard/quickbooks/write/sales-receipt',
-    icon: <ReceiptLongIcon />
-  }
-];
-
 export const QuickBooksHomePage = () => {
   const dispatch = useAppDispatch();
   const location = useLocation();
@@ -109,7 +64,7 @@ export const QuickBooksHomePage = () => {
         })
       );
       void load().finally(() => {
-        navigate('/dashboard/quickbooks', { replace: true });
+        navigate('/dashboard/accounting/quickbooks', { replace: true });
       });
       return;
     }
@@ -121,7 +76,7 @@ export const QuickBooksHomePage = () => {
         })
       );
       void load().finally(() => {
-        navigate('/dashboard/quickbooks', { replace: true });
+        navigate('/dashboard/accounting/quickbooks', { replace: true });
       });
     }
   }, [dispatch, load, location.search, navigate]);
@@ -129,7 +84,7 @@ export const QuickBooksHomePage = () => {
   const onConnect = async () => {
     try {
       setBusy(true);
-      const response = await accountingApi.getQuickbooksConnectUrl('/dashboard/quickbooks');
+      const response = await accountingApi.getQuickbooksConnectUrl('/dashboard/accounting/quickbooks');
       const url = response.data.data.url;
       if (typeof window !== 'undefined') {
         window.location.href = url;
@@ -242,58 +197,6 @@ export const QuickBooksHomePage = () => {
         onRefreshStatus={load}
         initialExpanded
       />
-
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          QuickBooks Workspace
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Once connected, use these areas to explore reports, review operational posting outcomes, and run tax repair tools.
-        </Typography>
-        <Stack spacing={1.5}>
-          {shortcutItems.map((item) => {
-            const disabled = !isConnected;
-            return (
-              <Paper
-                key={item.to}
-                variant="outlined"
-                sx={{
-                  p: 1.5,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 2
-                }}
-              >
-                <Stack direction="row" spacing={1.5} alignItems="center">
-                  {item.icon}
-                  <Stack spacing={0.25}>
-                    <Typography variant="subtitle2">{item.title}</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {item.description}
-                    </Typography>
-                    {isDegraded ? (
-                      <Typography variant="caption" color="warning.main">
-                        {needsReconnect
-                          ? 'Connection repair required before sync actions.'
-                          : 'Connection degraded. Read access remains available.'}
-                      </Typography>
-                    ) : null}
-                  </Stack>
-                </Stack>
-                <Button
-                  component={RouterLink}
-                  to={item.to}
-                  variant="outlined"
-                  disabled={disabled}
-                >
-                  Open
-                </Button>
-              </Paper>
-            );
-          })}
-        </Stack>
-      </Paper>
     </Stack>
   );
 };
