@@ -14,8 +14,8 @@
     "migrate:accounting": "tsx src/scripts/migrateAccounting.ts",
     "statement:fixture": "tsx src/scripts/runStatementFixtureExtraction.ts",
     "test": "pnpm run test:unit",
-    "test:unit": "vitest run --exclude src/**/*.e2e.test.ts --exclude src/**/*.integration.test.ts --exclude src/tenantIsolation.test.ts --exclude src/auth.refresh.test.ts --exclude src/inventoryLedger.immutability.test.ts --exclude src/posAndReports.test.ts",
-    "test:integration": "vitest run src/tenantIsolation.test.ts src/auth.refresh.test.ts src/inventoryLedger.immutability.test.ts src/posAndReports.test.ts",
+    "test:unit": "vitest run --exclude src/**/*.e2e.test.ts --exclude src/**/*.integration.test.ts --exclude src/auth.refresh.test.ts --exclude src/posAndReports.test.ts",
+    "test:integration": "vitest run src/auth.refresh.test.ts src/posAndReports.test.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

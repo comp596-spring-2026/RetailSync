@@ -1,10 +1,7 @@
 export const moduleKeys = [
   'dashboard',
   'pos',
-  'items',
   'invoices',
-  'inventory',
-  'locations',
   'reconciliation',
   'bankStatements',
   'suppliers',
@@ -21,10 +18,7 @@ export type ModuleKey = (typeof moduleKeys)[number];
 export const moduleActionCatalog: Record<ModuleKey, string[]> = {
   dashboard: ['refresh'],
   pos: ['import', 'recalculate'],
-  items: ['import'],
   invoices: ['confirm', 'reprocess_ocr', 'export'],
-  inventory: ['move', 'adjust'],
-  locations: ['sync'],
   reconciliation: ['auto_match', 'confirm_match', 'unmatch'],
   bankStatements: ['import', 'parse_pdf', 'confirm', 'lock', 'reprocess'],
   suppliers: ['approve'],

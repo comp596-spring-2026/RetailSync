@@ -16,9 +16,29 @@ export type JoinCompanyPayload = {
   email: string;
 };
 
+export type QuickBooksOnboardingStatus = {
+  quickbooks: {
+    connected: boolean;
+    environment: 'sandbox' | 'production';
+    realmId: string;
+    companyName: string | null;
+  } | null;
+};
+
 export class CompanyApi {
   create(payload: CreateCompanyPayload) {
     return api.post('/company/create', payload);
+  }
+
+  getQuickBooksOnboardingStatus() {
+    return api.get<{ data: QuickBooksOnboardingStatus }>('/company/quickbooks/onboarding');
+  }
+
+  startQuickBooksOnboarding(returnTo = '/onboarding/create-company') {
+    return api.post<{ data: { url: string; environment: 'sandbox' | 'production' } }>(
+      '/company/quickbooks/connect',
+      { returnTo }
+    );
   }
 
   join(payload: JoinCompanyPayload) {

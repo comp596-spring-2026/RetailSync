@@ -28,10 +28,7 @@ export const adminPermissions = (): PermissionsMap => {
 export const memberPermissions = (): PermissionsMap => ({
   dashboard: makePermission('dashboard', { view: true, actions: ['refresh'] }),
   pos: makePermission('pos', { view: true, create: true, edit: true, actions: ['import', 'recalculate'] }),
-  items: makePermission('items', { view: true, create: true, edit: true, actions: ['import'] }),
   invoices: makePermission('invoices', { view: true, create: true, edit: true, actions: ['confirm'] }),
-  inventory: makePermission('inventory', { view: true, create: true, edit: true, actions: ['move'] }),
-  locations: makePermission('locations', { view: true, create: true, edit: true }),
   reconciliation: makePermission('reconciliation', { view: true, create: true, actions: ['auto_match', 'confirm_match'] }),
   bankStatements: makePermission('bankStatements', {
     view: true,

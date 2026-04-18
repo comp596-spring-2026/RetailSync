@@ -123,10 +123,9 @@ describe('QuickBooks write pages', () => {
   });
 
   it.each([
-    ['sales-receipt', 'Sales Receipts'],
-    ['invoice', 'Invoices'],
-    ['payment', 'Payments']
-  ])('loads the %s write list route and renders rows', async (txnType, title) => {
+    ['invoice', 'Invoices', '/dashboard/quickbooks/sales/invoices'],
+    ['payment', 'Payments', '/dashboard/quickbooks/sales/payments']
+  ])('loads the %s write list route and renders rows', async (txnType, title, path) => {
     getQuickbooksWriteTransactionsMock.mockResolvedValue({
       data: {
         data: {
@@ -158,10 +157,12 @@ describe('QuickBooks write pages', () => {
 
     render(
       <Provider store={createStore()}>
-        <MemoryRouter initialEntries={[`/dashboard/quickbooks/write/${txnType}`]}>
+        <MemoryRouter initialEntries={[path]}>
           <Routes>
-            <Route path="/dashboard/quickbooks/write/:txnType" element={<QuickBooksWriteListPage />} />
-            <Route path="/dashboard/quickbooks/write/:txnType/:qbTxnId" element={<div>Detail route</div>} />
+            <Route path="/dashboard/quickbooks/sales/invoices" element={<QuickBooksWriteListPage />} />
+            <Route path="/dashboard/quickbooks/sales/payments" element={<QuickBooksWriteListPage />} />
+            <Route path="/dashboard/quickbooks/sales/invoices/:qbTxnId" element={<div>Detail route</div>} />
+            <Route path="/dashboard/quickbooks/sales/payments/:qbTxnId" element={<div>Detail route</div>} />
           </Routes>
         </MemoryRouter>
       </Provider>
@@ -192,9 +193,9 @@ describe('QuickBooks write pages', () => {
     getQuickbooksWriteTransactionDetailMock.mockResolvedValue({
       data: {
         data: {
-          id: 'sr-1',
+          id: 'inv-1',
           qbTxnId: 'qb-1',
-          txnType: 'sales-receipt',
+          txnType: 'invoice',
           txnDate: '2026-03-10',
           docNumber: '1001',
           customerId: 'cust-1',
@@ -238,13 +239,10 @@ describe('QuickBooks write pages', () => {
 
     render(
       <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/dashboard/quickbooks/write/sales-receipt/qb-1']}>
+        <MemoryRouter initialEntries={['/dashboard/quickbooks/sales/invoices/qb-1']}>
           <Routes>
-            <Route path="/dashboard/quickbooks/write/:txnType/:qbTxnId" element={<QuickBooksWriteDetailPage />} />
-            <Route
-              path="/dashboard/quickbooks/write/:txnType/:qbTxnId/edit"
-              element={<div>Edit route</div>}
-            />
+            <Route path="/dashboard/quickbooks/sales/invoices/:qbTxnId" element={<QuickBooksWriteDetailPage />} />
+            <Route path="/dashboard/quickbooks/sales/invoices/:qbTxnId/edit" element={<div>Edit route</div>} />
           </Routes>
         </MemoryRouter>
       </Provider>
@@ -262,9 +260,9 @@ describe('QuickBooks write pages', () => {
     getQuickbooksWriteTransactionDetailMock.mockResolvedValue({
       data: {
         data: {
-          id: 'sr-2',
+          id: 'inv-2',
           qbTxnId: 'qb-created',
-          txnType: 'sales-receipt',
+          txnType: 'invoice',
           txnDate: '2026-03-11',
           docNumber: '1002',
           customerId: 'cust-2',
@@ -294,9 +292,9 @@ describe('QuickBooks write pages', () => {
     postQuickbooksWriteTransactionMock.mockResolvedValue({
       data: {
         data: {
-          id: 'sr-2',
+          id: 'inv-2',
           qbTxnId: 'qb-created',
-          txnType: 'sales-receipt',
+          txnType: 'invoice',
           txnDate: '2026-03-11',
           docNumber: '1002',
           customerId: 'cust-2',
@@ -326,10 +324,10 @@ describe('QuickBooks write pages', () => {
 
     render(
       <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/dashboard/quickbooks/write/sales-receipt/new']}>
+        <MemoryRouter initialEntries={['/dashboard/quickbooks/sales/invoices/new']}>
           <Routes>
-            <Route path="/dashboard/quickbooks/write/:txnType/new" element={<QuickBooksWriteCreatePage />} />
-            <Route path="/dashboard/quickbooks/write/:txnType/:qbTxnId" element={<QuickBooksWriteDetailPage />} />
+            <Route path="/dashboard/quickbooks/sales/invoices/new" element={<QuickBooksWriteCreatePage />} />
+            <Route path="/dashboard/quickbooks/sales/invoices/:qbTxnId" element={<QuickBooksWriteDetailPage />} />
           </Routes>
         </MemoryRouter>
       </Provider>
@@ -338,20 +336,20 @@ describe('QuickBooks write pages', () => {
     fireEvent.change(await screen.findByLabelText(/Customer ID/i), { target: { value: 'cust-2' } });
     fireEvent.change(await screen.findByLabelText(/Item ID/i), { target: { value: 'item-1' } });
     fireEvent.change(await screen.findByLabelText(/Amount/i), { target: { value: '45' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create Sales Receipt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Invoice' }));
 
     await waitFor(() => {
       expect(postQuickbooksWriteTransactionMock).toHaveBeenCalledWith(
-        'sales-receipt',
+        'invoice',
         expect.objectContaining({
           customerId: 'cust-2',
-          txnType: 'sales-receipt'
+          txnType: 'invoice'
         })
       );
     });
 
     await waitFor(() => {
-      expect(getQuickbooksWriteTransactionDetailMock).toHaveBeenCalledWith('sales-receipt', 'qb-created');
+      expect(getQuickbooksWriteTransactionDetailMock).toHaveBeenCalledWith('invoice', 'qb-created');
       expect(screen.getByText('Created Customer')).toBeInTheDocument();
     });
   });
@@ -499,10 +497,10 @@ describe('QuickBooks write pages', () => {
 
     render(
       <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/dashboard/quickbooks/write/invoice/qb-edit/edit']}>
+        <MemoryRouter initialEntries={['/dashboard/quickbooks/sales/invoices/qb-edit/edit']}>
           <Routes>
-            <Route path="/dashboard/quickbooks/write/:txnType/:qbTxnId/edit" element={<QuickBooksWriteEditPage />} />
-            <Route path="/dashboard/quickbooks/write/:txnType/:qbTxnId" element={<QuickBooksWriteDetailPage />} />
+            <Route path="/dashboard/quickbooks/sales/invoices/:qbTxnId/edit" element={<QuickBooksWriteEditPage />} />
+            <Route path="/dashboard/quickbooks/sales/invoices/:qbTxnId" element={<QuickBooksWriteDetailPage />} />
           </Routes>
         </MemoryRouter>
       </Provider>

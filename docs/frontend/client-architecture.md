@@ -2,116 +2,72 @@
 
 ## Stack
 
-- Vite + React 18 + TypeScript
+- React 18
+- Vite
+- TypeScript
 - Material UI
-- React Router v6
-- Redux Toolkit + redux-persist
-- Axios with refresh-token retry
+- React Router
+- Redux Toolkit
+- Axios
 - Vitest + React Testing Library
 
-## App Layers
+## High-Level Structure
 
 ```text
 client/src/
   app/
-    api/            # global axios client + shared API barrel
-    store/          # store infra only (index, rootReducer, hooks, uiSlice)
-    guards/         # ProtectedRoute, OnboardingGuard, PermissionGate
-    layout/         # Dashboard shell
+    api/
+    guards/
+    layout/
+    pages/
+    store/
   modules/
+    accounting/
     auth/
-    inventory/
+    dev/
     pos/
     procurement/
-    users/
+    quickbooks/
     rbac/
     settings/
-    dev/
-  components/       # shared reusable UI
-  layout/           # shared module shell page
+    users/
+  components/
+  constants/
 ```
 
-## Redux Pattern (Hybrid)
+## Current Route Ownership
 
-- Global infra lives in `client/src/app/store/*`.
-- Feature state lives in `client/src/modules/<module>/state/*`.
-- Root reducer imports module reducers from module entrypoints.
+Public:
+- auth pages
+- legal/demo/dev pages
 
-Current reducer keys:
+Protected:
+- dashboard shell
+- POS
+- statements
+- QuickBooks workspace
+- settings
+- access
 
-- `auth`
-- `company` (users module state)
-- `rbac`
-- `ui`
-- `items` (inventory)
-- `locations` (inventory)
-- `settings`
-- `pos`
+## Notes On Current Architecture
 
-## Routing
+- QuickBooks has a dedicated module workspace under `client/src/modules/quickbooks`.
+- Some QuickBooks page implementations still reuse accounting-layer components and pages.
+- Procurement still exists in code, but it is not part of the intended visible product navigation.
+- Inventory has been removed from the active client surface.
 
-Public routes:
+## State Ownership
 
-- `/login`
-- `/home-demo`
-- `/privacy`
-- `/terms`
-- `/data-deletion`
-- `/auth/google/success`
-- `/401`, `/403`, `/404`, `/500`
-- `/playground`
+Current major reducer areas include:
+- auth
+- company
+- rbac
+- ui
+- settings
+- pos
 
-Onboarding routes (guarded by `OnboardingGuard`):
+## Permission Model
 
-- `/onboarding`
-- `/onboarding/create-company`
-- `/onboarding/join-company`
-
-Protected routes (guarded by `ProtectedRoute` under `/dashboard`):
-
-- `/dashboard` (inventory dashboard home)
-- `/dashboard/pos`
-- `/dashboard/operations`
-- `/dashboard/items`
-- `/dashboard/locations`
-- `/dashboard/procurement`
-- `/dashboard/users`
-- `/dashboard/access`
-- `/dashboard/roles`
-- `/dashboard/settings`
-- `/dashboard/playground`
-- plus module-shell pages (`invoices`, `suppliers`, `reconciliation`, `bankStatements`, `rolesSettings`)
-
-## Module Conventions
-
-Each module may contain:
-
-- `state/` for slices/thunks/selectors
-- `api/` for module API wrappers
-- `pages/` for route-level screens
-- `components/` for module-only UI
-- `charts/` and `utils/` when needed
-- `tests/` for module tests
-
-## Auth + Token Refresh Flow
-
-```mermaid
-sequenceDiagram
-  participant UI as Client Action
-  participant AX as Axios Interceptor
-  participant API as Express API
-
-  UI->>AX: Request with bearer token
-  AX->>API: API request
-  API-->>AX: 401
-  AX->>API: POST /api/auth/refresh (cookie)
-  API-->>AX: New access token
-  AX->>AX: Update Redux auth token
-  AX->>API: Retry original request once
-```
-
-## Permissions
-
-- Route access and sidebar visibility are permission-aware.
-- `PermissionGate` enforces module/action visibility for controls.
-- `hasPermission` allows custom actions as `actions:<key>`.
+- sidebar visibility is permission-aware
+- route content uses auth/onboarding guards
+- action-level controls use `PermissionGate` and `hasPermission`

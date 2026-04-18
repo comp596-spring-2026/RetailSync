@@ -1,37 +1,36 @@
+import {
+  DEFAULT_CURRENCY_CODE,
+  DEFAULT_REGION_CURRENCY_MAP,
+  DEFAULT_TIMEZONE,
+  FALLBACK_TIMEZONES
+} from '@retailsync/shared';
+
 export type SelectOption = {
   value: string;
   label: string;
   keywords?: string;
 };
 
-const fallbackTimezones = [
-  'America/Los_Angeles',
-  'America/Denver',
-  'America/Chicago',
-  'America/New_York',
-  'America/Phoenix',
-  'America/Anchorage',
-  'Pacific/Honolulu',
-  'Europe/London',
-  'Europe/Paris',
-  'Europe/Berlin',
-  'Asia/Dubai',
-  'Asia/Kolkata',
-  'Asia/Singapore',
-  'Asia/Tokyo',
-  'Australia/Sydney',
-  'UTC'
-];
-
 const timezoneValues =
   typeof Intl !== 'undefined' && 'supportedValuesOf' in Intl
     ? Intl.supportedValuesOf('timeZone')
-    : fallbackTimezones;
+    : [...FALLBACK_TIMEZONES];
 
 export const timezoneOptions: SelectOption[] = timezoneValues.map((tz) => ({
   value: tz,
   label: tz.replaceAll('_', ' ')
 }));
+
+export const getDefaultTimezone = () => {
+  if (typeof Intl !== 'undefined') {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (timezone) {
+      return timezone;
+    }
+  }
+
+  return DEFAULT_TIMEZONE;
+};
 
 type CurrencySeed = {
   code: string;
@@ -80,3 +79,14 @@ export const currencyOptions: SelectOption[] = currencySeeds.map((item) => ({
   keywords: `${item.code} ${item.symbol} ${item.name}`.toLowerCase()
 }));
 
+export const getDefaultCurrencyFromLocale = () => {
+  if (typeof navigator !== 'undefined') {
+    const locale = navigator.languages?.[0] ?? navigator.language ?? '';
+    const region = locale.split('-')[1]?.toUpperCase() as keyof typeof DEFAULT_REGION_CURRENCY_MAP | undefined;
+    if (region && DEFAULT_REGION_CURRENCY_MAP[region]) {
+      return DEFAULT_REGION_CURRENCY_MAP[region];
+    }
+  }
+
+  return DEFAULT_CURRENCY_CODE;
+};

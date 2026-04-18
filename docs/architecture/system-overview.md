@@ -56,11 +56,11 @@ sequenceDiagram
   participant U as User
   participant C as Client
   participant A as API
-  U->>C: Click Continue with Google
-  C->>A: /api/auth/google/start
-  A-->>U: Google consent
-  U->>A: /api/auth/google/callback
-  A-->>C: redirect with accessToken
+  U->>C: Register, login, or continue with Google
+  C->>A: /api/auth/register or /api/auth/login
+  A-->>U: verification email or session
+  U->>A: /api/auth/verify-email/confirm or /api/auth/google/callback
+  A-->>C: accessToken + refresh cookie
   C->>A: /api/auth/me
 ```
 
@@ -72,8 +72,8 @@ sequenceDiagram
 ## Current Domain Coverage
 
 - Login/onboarding/dashboard routing, RBAC
+- Email/password auth, verification, forgot/reset, and invite emails
 - POS and reports
-- Items, locations, immutable inventory ledger
 - Integrations settings shell + Google Sheets read/connect flows
 - Server-side Google auth (google start/callback + refresh/logout/me)
 - Accounting domain:

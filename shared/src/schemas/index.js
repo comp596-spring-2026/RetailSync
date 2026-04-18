@@ -2,6 +2,41 @@ import { z } from "zod";
 import { moduleKeys } from "../constants/modules";
 import { permissionSetSchema, permissionsSchema, } from "../permissions/permissions";
 export const emailSchema = z.string().trim().toLowerCase().email();
+export const passwordSchema = z.string().min(8).max(128);
+export const authRegisterSchema = z.object({
+    firstName: z.string().trim().min(1),
+    lastName: z.string().trim().min(1),
+    email: emailSchema,
+    password: passwordSchema
+});
+export const authInviteLookupSchema = z.object({
+    email: emailSchema,
+    inviteCode: z.string().trim().min(6)
+});
+export const authInviteAcceptSchema = z.object({
+    firstName: z.string().trim().min(1),
+    lastName: z.string().trim().min(1),
+    email: emailSchema,
+    inviteCode: z.string().trim().min(6),
+    password: passwordSchema
+});
+export const authLoginSchema = z.object({
+    email: emailSchema,
+    password: z.string().min(1)
+});
+export const forgotPasswordSchema = z.object({
+    email: emailSchema
+});
+export const resetPasswordSchema = z.object({
+    token: z.string().trim().min(1),
+    password: passwordSchema
+});
+export const verifyEmailRequestSchema = z.object({
+    email: emailSchema
+});
+export const verifyEmailConfirmSchema = z.object({
+    token: z.string().trim().min(1)
+});
 export const companyCreateSchema = z.object({
     name: z.string().trim().min(2),
     businessType: z.string().trim().min(2),
@@ -82,49 +117,9 @@ export const dateRangeSummaryQuerySchema = z
         .string()
         .trim()
         .regex(/^\d{4}-\d{2}-\d{2}$/),
-})
+    })
     .refine((data) => data.from <= data.to, {
     message: "from must be before or equal to to",
     path: ["to"],
-});
-export const itemCreateSchema = z.object({
-    upc: z.string().trim().min(1),
-    modifier: z.string().trim().default(""),
-    description: z.string().trim().min(1),
-    department: z.string().trim().min(1),
-    price: z.number().min(0),
-    sku: z.string().trim().optional(),
-    defaultLocationCode: z.string().trim().optional(),
-});
-export const itemUpdateSchema = itemCreateSchema
-    .partial()
-    .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field is required",
-});
-export const locationTypeSchema = z.enum([
-    "shelf",
-    "fridge",
-    "freezer",
-    "backroom",
-]);
-export const locationCreateSchema = z.object({
-    code: z.string().trim().min(1),
-    type: locationTypeSchema,
-    label: z.string().trim().min(1),
-});
-export const locationUpdateSchema = locationCreateSchema
-    .partial()
-    .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field is required",
-});
-export const inventoryMoveSchema = z.object({
-    itemId: z.string().trim().min(1),
-    fromLocationCode: z.string().trim().min(1),
-    toLocationCode: z.string().trim().min(1),
-    qty: z.number().positive(),
-    notes: z.string().trim().optional(),
-});
-export const barcodeSearchSchema = z.object({
-    barcode: z.string().trim().min(1),
 });
 export const modulePermissionInputSchema = z.record(z.enum(moduleKeys), permissionSetSchema);

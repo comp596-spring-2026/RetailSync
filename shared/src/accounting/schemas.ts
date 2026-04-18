@@ -751,6 +751,26 @@ export const quickBooksHubEntitiesResponseSchema = quickBooksHubListResponseMeta
   items: z.array(quickBooksHubEntitySchema)
 });
 
+export const quickBooksContactDetailSchema = quickBooksHubEntitySchema.extend({
+  companyName: z.string().trim().nullable(),
+  givenName: z.string().trim().nullable(),
+  familyName: z.string().trim().nullable(),
+  syncToken: z.string().trim().nullable(),
+  raw: z.record(z.unknown())
+});
+
+const quickBooksContactInputBaseSchema = z.object({
+  displayName: z.string().trim().min(1).max(255),
+  companyName: z.string().trim().max(255).optional(),
+  givenName: z.string().trim().max(255).optional(),
+  familyName: z.string().trim().max(255).optional(),
+  email: z.string().trim().email().optional(),
+  phone: z.string().trim().max(100).optional()
+});
+
+export const quickBooksContactCreateInputSchema = quickBooksContactInputBaseSchema;
+export const quickBooksContactUpdateInputSchema = quickBooksContactInputBaseSchema;
+
 export const quickBooksHubOperationTypeSchema = z.enum([
   'Expense',
   'Deposit',
@@ -871,6 +891,8 @@ export const quickBooksTransactionDetailSchema = z.object({
   type: quickBooksLiveTransactionTypeSchema,
   txnDate: quickBooksTaxDateSchema.nullable(),
   docNum: z.string().trim().nullable(),
+  syncToken: z.string().trim().nullable(),
+  payeeId: z.string().trim().nullable(),
   payeeName: z.string().trim().nullable(),
   memo: z.string().trim().nullable(),
   amount: z.number().nullable(),
@@ -883,6 +905,60 @@ export const quickBooksTransactionDetailSchema = z.object({
   toAccountId: z.string().trim().nullable(),
   toAccountName: z.string().trim().nullable(),
   raw: z.record(z.unknown())
+});
+
+export const quickBooksMoneyTxnTypeSchema = z.enum([
+  'check',
+  'expense',
+  'deposit',
+  'transfer'
+]);
+
+const quickBooksMoneyBaseInputSchema = z.object({
+  txnDate: quickBooksTaxDateSchema,
+  amount: z.number().positive(),
+  memo: z.string().trim().max(1000).optional()
+});
+
+export const quickBooksMoneyCheckCreateInputSchema = quickBooksMoneyBaseInputSchema.extend({
+  txnType: z.literal('check'),
+  bankAccountId: z.string().trim().min(1),
+  categoryAccountId: z.string().trim().min(1),
+  payeeRefId: z.string().trim().min(1).optional()
+});
+
+export const quickBooksMoneyExpenseCreateInputSchema = quickBooksMoneyBaseInputSchema.extend({
+  txnType: z.literal('expense'),
+  bankAccountId: z.string().trim().min(1),
+  categoryAccountId: z.string().trim().min(1),
+  payeeRefId: z.string().trim().min(1).optional()
+});
+
+export const quickBooksMoneyDepositCreateInputSchema = quickBooksMoneyBaseInputSchema.extend({
+  txnType: z.literal('deposit'),
+  bankAccountId: z.string().trim().min(1),
+  categoryAccountId: z.string().trim().min(1)
+});
+
+export const quickBooksMoneyTransferCreateInputSchema = quickBooksMoneyBaseInputSchema.extend({
+  txnType: z.literal('transfer'),
+  fromAccountId: z.string().trim().min(1),
+  toAccountId: z.string().trim().min(1)
+});
+
+export const quickBooksMoneyCreateInputSchema = z.discriminatedUnion('txnType', [
+  quickBooksMoneyCheckCreateInputSchema,
+  quickBooksMoneyExpenseCreateInputSchema,
+  quickBooksMoneyDepositCreateInputSchema,
+  quickBooksMoneyTransferCreateInputSchema
+]);
+
+export const quickBooksMoneyUpdateInputSchema = quickBooksMoneyCreateInputSchema;
+
+export const quickBooksMoneyDeleteResultSchema = z.object({
+  txnType: quickBooksMoneyTxnTypeSchema,
+  qbTxnId: z.string().trim().min(1),
+  deleted: z.literal(true)
 });
 
 export const quickBooksWriteTxnTypeSchema = z.enum(['sales-receipt', 'invoice', 'payment']);
@@ -1239,6 +1315,13 @@ export type QuickBooksTransactionDetailQuery = z.infer<
   typeof quickBooksTransactionDetailQuerySchema
 >;
 export type QuickBooksTransactionDetail = z.infer<typeof quickBooksTransactionDetailSchema>;
+export type QuickBooksContactDetail = z.infer<typeof quickBooksContactDetailSchema>;
+export type QuickBooksContactCreateInput = z.infer<typeof quickBooksContactCreateInputSchema>;
+export type QuickBooksContactUpdateInput = z.infer<typeof quickBooksContactUpdateInputSchema>;
+export type QuickBooksMoneyTxnType = z.infer<typeof quickBooksMoneyTxnTypeSchema>;
+export type QuickBooksMoneyCreateInput = z.infer<typeof quickBooksMoneyCreateInputSchema>;
+export type QuickBooksMoneyUpdateInput = z.infer<typeof quickBooksMoneyUpdateInputSchema>;
+export type QuickBooksMoneyDeleteResult = z.infer<typeof quickBooksMoneyDeleteResultSchema>;
 export type QuickBooksWriteTxnType = z.infer<typeof quickBooksWriteTxnTypeSchema>;
 export type QuickBooksWriteStatus = z.infer<typeof quickBooksWriteStatusSchema>;
 export type QuickBooksWriteSort = z.infer<typeof quickBooksWriteSortSchema>;

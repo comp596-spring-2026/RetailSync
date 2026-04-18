@@ -23,10 +23,7 @@ describe('rbacSlice', () => {
           ...basePermissions,
           dashboard: { view: true, create: false, edit: false, delete: false, actions: [] },
           pos: { view: true, create: true, edit: true, delete: false, actions: ['import'] },
-          items: { view: true, create: true, edit: true, delete: true, actions: ['import'] },
           invoices: { view: true, create: true, edit: false, delete: false, actions: [] },
-          inventory: { view: true, create: false, edit: true, delete: false, actions: ['move'] },
-          locations: { view: true, create: true, edit: true, delete: false, actions: ['sync'] },
           suppliers: { view: true, create: false, edit: false, delete: false, actions: [] },
           users: { view: true, create: false, edit: false, delete: false, actions: ['invite'] },
           rolesSettings: { view: true, create: false, edit: false, delete: false, actions: [] }

@@ -1,7 +1,6 @@
 import { combineReducers } from '@reduxjs/toolkit';
 import { authReducer } from '../../modules/auth/state';
 import { companyReducer, usersReducer } from '../../modules/users/state';
-import { itemsReducer, locationsReducer } from '../../modules/inventory/state';
 import { posReducer } from '../../modules/pos/state';
 import { rbacReducer } from '../../modules/rbac/state';
 import { settingsReducer } from '../../modules/settings/state';
@@ -13,8 +12,6 @@ export const rootReducer = combineReducers({
   users: usersReducer,
   rbac: rbacReducer,
   ui: uiReducer,
-  items: itemsReducer,
-  locations: locationsReducer,
   settings: settingsReducer,
   pos: posReducer
 });

@@ -14,6 +14,13 @@ import {
   QuickBooksLiveTransactionsResponse,
   QuickBooksJournalAdjustmentInput,
   QuickBooksJournalAdjustmentResult,
+  QuickBooksContactCreateInput,
+  QuickBooksContactDetail,
+  QuickBooksContactUpdateInput,
+  QuickBooksMoneyCreateInput,
+  QuickBooksMoneyDeleteResult,
+  QuickBooksMoneyTxnType,
+  QuickBooksMoneyUpdateInput,
   QuickBooksRecoverPaymentInput,
   QuickBooksRecoverPaymentResult,
   ListBankStatementsQuery,
@@ -231,7 +238,7 @@ export class AccountingApi {
     return api.put('/integrations/quickbooks/settings', payload);
   }
 
-  getQuickbooksConnectUrl(returnTo = '/dashboard/quickbooks') {
+  getQuickbooksConnectUrl(returnTo = '/dashboard/accounting/quickbooks') {
     return api.get<{
       data: {
         url: string;
@@ -279,6 +286,40 @@ export class AccountingApi {
     });
   }
 
+  getQuickbooksContact(entityType: Exclude<QuickBooksHubEntityType, 'employee'>, qbId: string) {
+    return api.get<{
+      data: QuickBooksContactDetail;
+    }>(`/integrations/quickbooks/contacts/${entityType}/${qbId}`);
+  }
+
+  postQuickbooksContact(
+    entityType: Exclude<QuickBooksHubEntityType, 'employee'>,
+    payload: QuickBooksContactCreateInput
+  ) {
+    return api.post<{
+      data: QuickBooksContactDetail;
+    }>(`/integrations/quickbooks/contacts/${entityType}`, payload);
+  }
+
+  patchQuickbooksContact(
+    entityType: Exclude<QuickBooksHubEntityType, 'employee'>,
+    qbId: string,
+    payload: QuickBooksContactUpdateInput
+  ) {
+    return api.patch<{
+      data: QuickBooksContactDetail;
+    }>(`/integrations/quickbooks/contacts/${entityType}/${qbId}`, payload);
+  }
+
+  deleteQuickbooksContact(entityType: Exclude<QuickBooksHubEntityType, 'employee'>, qbId: string) {
+    return api.delete<{
+      data: {
+        qbId: string;
+        deleted: true;
+      };
+    }>(`/integrations/quickbooks/contacts/${entityType}/${qbId}`);
+  }
+
   getQuickbooksHubOperations(params?: QuickBooksHubOperationsParams) {
     return this.listQuickBooksHub<QuickBooksHubOperationsPayload>(
       '/integrations/quickbooks/hub/operations',
@@ -307,6 +348,31 @@ export class AccountingApi {
     }>(`/integrations/quickbooks/live/transaction/${qbTxnId}`, {
       params: { type }
     });
+  }
+
+  postQuickbooksMoneyTransaction(
+    txnType: QuickBooksMoneyTxnType,
+    payload: QuickBooksMoneyCreateInput
+  ) {
+    return api.post<{
+      data: QuickBooksTransactionDetail;
+    }>(`/integrations/quickbooks/money/${txnType}`, payload);
+  }
+
+  patchQuickbooksMoneyTransaction(
+    txnType: QuickBooksMoneyTxnType,
+    qbTxnId: string,
+    payload: QuickBooksMoneyUpdateInput
+  ) {
+    return api.patch<{
+      data: QuickBooksTransactionDetail;
+    }>(`/integrations/quickbooks/money/${txnType}/${qbTxnId}`, payload);
+  }
+
+  deleteQuickbooksMoneyTransaction(txnType: QuickBooksMoneyTxnType, qbTxnId: string) {
+    return api.delete<{
+      data: QuickBooksMoneyDeleteResult;
+    }>(`/integrations/quickbooks/money/${txnType}/${qbTxnId}`);
   }
 
   getQuickbooksWriteTransactions(txnType: QuickBooksWriteTxnType, params: QuickBooksWriteListQuery) {

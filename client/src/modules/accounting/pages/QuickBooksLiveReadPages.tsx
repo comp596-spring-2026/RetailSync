@@ -7,8 +7,6 @@ import {
   Chip,
   Paper,
   Stack,
-  Tab,
-  Tabs,
   Typography
 } from '@mui/material';
 import { type GridColDef, type GridSortModel } from '@mui/x-data-grid';
@@ -21,14 +19,15 @@ import {
   QuickBooksTransactionDetail
 } from '@retailsync/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { useAppSelector } from '../../../app/store/hooks';
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
+import { showSnackbar } from '../../../app/store/uiSlice';
 import { NoAccess, PageHeader, SmartTable } from '../../../components';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { formatDate } from '../../../utils/date';
 import { hasPermission } from '../../../utils/permissions';
 import { accountingApi } from '../api';
-import { AccountingTabs, RequireQuickBooksConnection } from '../components';
+import { QuickBooksTabs, RequireQuickBooksConnection } from '../components';
 import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
 import { quickBooksHubSortToParam, type QuickBooksHubSortModel } from '../types/quickbooksHub';
 
@@ -37,10 +36,10 @@ const transactionTypeOptions: Array<{
   label: string;
   path: string;
 }> = [
-  { type: 'deposit', label: 'Deposits', path: '/dashboard/accounting/transactions/deposits' },
-  { type: 'check', label: 'Checks', path: '/dashboard/accounting/transactions/checks' },
-  { type: 'expense', label: 'Expenses', path: '/dashboard/accounting/transactions/expenses' },
-  { type: 'transfer', label: 'Transfers', path: '/dashboard/accounting/transactions/transfers' }
+  { type: 'deposit', label: 'Deposits', path: '/dashboard/quickbooks/money/deposits' },
+  { type: 'check', label: 'Checks', path: '/dashboard/quickbooks/money/checks' },
+  { type: 'expense', label: 'Expenses', path: '/dashboard/quickbooks/money/expenses' },
+  { type: 'transfer', label: 'Transfers', path: '/dashboard/quickbooks/money/transfers' }
 ];
 
 const liveTransactionLabels: Record<QuickBooksLiveTransactionType, string> = {
@@ -62,6 +61,22 @@ const formatCurrency = (value: number | null | undefined) =>
 const isLiveTransactionType = (value: string | undefined): value is QuickBooksLiveTransactionType =>
   value === 'deposit' || value === 'check' || value === 'expense' || value === 'transfer';
 
+const inferLiveTransactionTypeFromPath = (pathname: string): QuickBooksLiveTransactionType | null => {
+  if (pathname.includes('/money/deposits') || pathname.includes('/transactions/deposit')) {
+    return 'deposit';
+  }
+  if (pathname.includes('/money/checks') || pathname.includes('/transactions/check')) {
+    return 'check';
+  }
+  if (pathname.includes('/money/expenses') || pathname.includes('/transactions/expense')) {
+    return 'expense';
+  }
+  if (pathname.includes('/money/transfers') || pathname.includes('/transactions/transfer')) {
+    return 'transfer';
+  }
+  return null;
+};
+
 const typeFromTxnType = (txnType: string | null | undefined): QuickBooksLiveTransactionType | null => {
   const normalized = txnType?.trim().toLowerCase();
   if (normalized === 'deposit' || normalized === 'check' || normalized === 'expense' || normalized === 'transfer') {
@@ -73,7 +88,31 @@ const typeFromTxnType = (txnType: string | null | undefined): QuickBooksLiveTran
 const isNavigableQuickBooksTxnId = (qbTxnId: string) => /^\d+$/.test(qbTxnId);
 
 const detailRouteFor = (type: QuickBooksLiveTransactionType, qbTxnId: string) =>
-  `/dashboard/accounting/transactions/${type}/${qbTxnId}`;
+  type === 'deposit'
+    ? `/dashboard/quickbooks/money/deposits/${qbTxnId}`
+    : type === 'check'
+      ? `/dashboard/quickbooks/money/checks/${qbTxnId}`
+      : type === 'expense'
+        ? `/dashboard/quickbooks/money/expenses/${qbTxnId}`
+        : `/dashboard/quickbooks/money/transfers/${qbTxnId}`;
+
+const createRouteFor = (type: QuickBooksLiveTransactionType) =>
+  type === 'deposit'
+    ? '/dashboard/quickbooks/money/deposits/new'
+    : type === 'check'
+      ? '/dashboard/quickbooks/money/checks/new'
+      : type === 'expense'
+        ? '/dashboard/quickbooks/money/expenses/new'
+        : '/dashboard/quickbooks/money/transfers/new';
+
+const editRouteFor = (type: QuickBooksLiveTransactionType, qbTxnId: string) =>
+  type === 'deposit'
+    ? `/dashboard/quickbooks/money/deposits/${qbTxnId}/edit`
+    : type === 'check'
+      ? `/dashboard/quickbooks/money/checks/${qbTxnId}/edit`
+      : type === 'expense'
+        ? `/dashboard/quickbooks/money/expenses/${qbTxnId}/edit`
+        : `/dashboard/quickbooks/money/transfers/${qbTxnId}/edit`;
 
 const liveTransactionsSortToParam = (sortModel: QuickBooksHubSortModel) => {
   const firstSort = sortModel[0];
@@ -87,7 +126,8 @@ const liveTransactionsSortToParam = (sortModel: QuickBooksHubSortModel) => {
 
 const liveTransactionColumns = (
   type: QuickBooksLiveTransactionType,
-  navigate: ReturnType<typeof useNavigate>
+  navigate: ReturnType<typeof useNavigate>,
+  canPost: boolean
 ): GridColDef<QuickBooksLiveTransactionListItem>[] => [
   {
     field: 'txnDate',
@@ -123,16 +163,26 @@ const liveTransactionColumns = (
   {
     field: 'actions',
     headerName: 'Actions',
-    width: 120,
+    width: canPost ? 180 : 120,
     sortable: false,
     filterable: false,
     renderCell: (params) => (
-      <Button
-        size="small"
-        onClick={() => navigate(detailRouteFor(type, params.row.qbTxnId))}
-      >
-        Open
-      </Button>
+      <Stack direction="row" spacing={1}>
+        <Button
+          size="small"
+          onClick={() => navigate(detailRouteFor(type, params.row.qbTxnId))}
+        >
+          Open
+        </Button>
+        {canPost ? (
+          <Button
+            size="small"
+            onClick={() => navigate(editRouteFor(type, params.row.qbTxnId))}
+          >
+            Edit
+          </Button>
+        ) : null}
+      </Stack>
     )
   }
 ];
@@ -208,7 +258,7 @@ const registerColumns = (
   }
 ];
 
-const QuickBooksLiveTransactionTabs = ({
+const QuickBooksLiveTransactionButtons = ({
   type
 }: {
   type: QuickBooksLiveTransactionType;
@@ -216,23 +266,17 @@ const QuickBooksLiveTransactionTabs = ({
   const navigate = useNavigate();
 
   return (
-    <Paper sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-      <Tabs
-        value={type}
-        onChange={(_, value: QuickBooksLiveTransactionType) => {
-          const target = transactionTypeOptions.find((option) => option.type === value);
-          if (target) {
-            navigate(target.path);
-          }
-        }}
-        variant="scrollable"
-        allowScrollButtonsMobile
-      >
-        {transactionTypeOptions.map((item) => (
-          <Tab key={item.type} value={item.type} label={item.label} />
-        ))}
-      </Tabs>
-    </Paper>
+    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+      {transactionTypeOptions.map((item) => (
+        <Button
+          key={item.type}
+          variant={item.type === type ? 'contained' : 'outlined'}
+          onClick={() => navigate(item.path)}
+        >
+          {item.label}
+        </Button>
+      ))}
+    </Stack>
   );
 };
 
@@ -298,7 +342,7 @@ export const QuickBooksAccountRegisterPage = () => {
         subtitle={`Review register rows for account ${accountId}.`}
         icon={<AccountBalanceWalletOutlinedIcon />}
       />
-      <AccountingTabs />
+      <QuickBooksTabs />
       <RequireQuickBooksConnection
         loading={workspaceLoading}
         isConnected={isConnected}
@@ -355,6 +399,7 @@ const QuickBooksLiveTransactionsView = ({
   const navigate = useNavigate();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
+  const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
   const { loading: workspaceLoading, isConnected, error: workspaceError, warning: workspaceWarning } =
     useQuickBooksWorkspace(canView);
 
@@ -394,7 +439,7 @@ const QuickBooksLiveTransactionsView = ({
     void load();
   }, [canView, isConnected, load]);
 
-  const columns = useMemo(() => liveTransactionColumns(type, navigate), [navigate, type]);
+  const columns = useMemo(() => liveTransactionColumns(type, navigate, canPost), [canPost, navigate, type]);
 
   if (!canView) {
     return <NoAccess />;
@@ -407,8 +452,21 @@ const QuickBooksLiveTransactionsView = ({
         subtitle="Browse live QuickBooks transactions and drill into individual records."
         icon={<ReceiptLongIcon />}
       />
-      <AccountingTabs />
-      <QuickBooksLiveTransactionTabs type={type} />
+      <QuickBooksTabs />
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }}>
+        <QuickBooksLiveTransactionButtons type={type} />
+        {canPost ? (
+          <Button variant="contained" onClick={() => navigate(createRouteFor(type))}>
+            {type === 'check'
+              ? 'Write check'
+              : type === 'expense'
+                ? 'New expense'
+                : type === 'deposit'
+                  ? 'New deposit'
+                  : 'New transfer'}
+          </Button>
+        ) : null}
+      </Stack>
       <RequireQuickBooksConnection
         loading={workspaceLoading}
         isConnected={isConnected}
@@ -466,10 +524,15 @@ const detailField = (label: string, value: string | number | null | undefined) =
 );
 
 export const QuickBooksTransactionDetailPage = () => {
+  const location = useLocation();
   const { type: rawType, qbTxnId } = useParams<{ type: string; qbTxnId: string }>();
-  const type = isLiveTransactionType(rawType) ? rawType : null;
+  const type = isLiveTransactionType(rawType)
+    ? rawType
+    : inferLiveTransactionTypeFromPath(location.pathname);
   const permissions = useAppSelector((state) => state.auth.permissions);
+  const dispatch = useAppDispatch();
   const canView = hasPermission(permissions, 'quickbooks', 'view');
+  const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
   const { loading: workspaceLoading, isConnected, error: workspaceError, warning: workspaceWarning } =
     useQuickBooksWorkspace(canView);
   const navigate = useNavigate();
@@ -505,7 +568,26 @@ export const QuickBooksTransactionDetailPage = () => {
     return <Navigate to="/404" replace />;
   }
 
-  const backPath = transactionTypeOptions.find((item) => item.type === type)?.path ?? '/dashboard/accounting/transactions/deposits';
+  const backPath = transactionTypeOptions.find((item) => item.type === type)?.path ?? '/dashboard/quickbooks/money/deposits';
+
+  const onDelete = async () => {
+    if (!window.confirm(`Delete this ${type} in QuickBooks?`)) {
+      return;
+    }
+
+    try {
+      await accountingApi.deleteQuickbooksMoneyTransaction(type, qbTxnId);
+      dispatch(
+        showSnackbar({
+          message: `${liveTransactionLabels[type].slice(0, -1)} deleted in QuickBooks.`,
+          severity: 'success'
+        })
+      );
+      navigate(backPath);
+    } catch (apiError) {
+      setError(extractApiErrorMessage(apiError, 'Failed to delete transaction'));
+    }
+  };
 
   return (
     <Stack spacing={2}>
@@ -514,8 +596,8 @@ export const QuickBooksTransactionDetailPage = () => {
         subtitle="Inspect the live transaction payload and review routing fields."
         icon={<ReceiptLongIcon />}
       />
-      <AccountingTabs />
-      <QuickBooksLiveTransactionTabs type={type} />
+      <QuickBooksTabs />
+      <QuickBooksLiveTransactionButtons type={type} />
       <RequireQuickBooksConnection
         loading={workspaceLoading}
         isConnected={isConnected}
@@ -539,6 +621,16 @@ export const QuickBooksTransactionDetailPage = () => {
                 <Button variant="outlined" onClick={() => navigate(backPath)}>
                   Back to list
                 </Button>
+                {canPost ? (
+                  <Button variant="outlined" onClick={() => navigate(editRouteFor(type, qbTxnId))}>
+                    Edit
+                  </Button>
+                ) : null}
+                {canPost ? (
+                  <Button color="error" variant="outlined" onClick={() => void onDelete()} disabled={loading}>
+                    Delete
+                  </Button>
+                ) : null}
                 <Button variant="outlined" onClick={() => void load()} disabled={loading}>
                   Refresh
                 </Button>

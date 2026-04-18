@@ -459,7 +459,7 @@ describe('UploadStatementDialog', () => {
 
     await waitFor(() => expect(createStatementMock).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('button', { name: /Retry Save/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Retry processing/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Retry processing/i })).not.toBeInTheDocument();
     expect(axiosPutMock).toHaveBeenCalledTimes(1);
     expect(requestUploadUrlMock).toHaveBeenCalledTimes(1);
 

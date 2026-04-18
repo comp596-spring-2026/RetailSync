@@ -1,10 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button, Stack, TextField } from '@mui/material';
-import Groups2Icon from '@mui/icons-material/Groups2';
 import LoginIcon from '@mui/icons-material/Login';
 import { companyJoinSchema } from '@retailsync/shared';
+import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { useAppDispatch } from '../../../app/store/hooks';
 import { showSnackbar } from '../../../app/store/uiSlice';
@@ -16,11 +16,28 @@ type JoinForm = z.infer<typeof companyJoinSchema>;
 export const JoinCompanyPage = () => {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
+  const [params] = useSearchParams();
+  const defaults = useMemo(
+    () => ({
+      companyCode: params.get('companyCode') ?? '',
+      inviteCode: params.get('inviteCode') ?? '',
+      email: params.get('email') ?? ''
+    }),
+    [params]
+  );
   const {
     register,
+    reset,
     handleSubmit,
     formState: { errors, isSubmitting }
-  } = useForm<JoinForm>({ resolver: zodResolver(companyJoinSchema) });
+  } = useForm<JoinForm>({
+    resolver: zodResolver(companyJoinSchema),
+    defaultValues: defaults
+  });
+
+  useEffect(() => {
+    reset((current) => ({ ...current, ...defaults }));
+  }, [defaults, reset]);
 
   const onSubmit = async (values: JoinForm) => {
     try {
@@ -36,9 +53,8 @@ export const JoinCompanyPage = () => {
     <AuthShell
       title="Join Company"
       subtitle="Use your company and invite codes to join."
-      icon={<Groups2Icon color="primary" />}
       width={460}
-      logoHeight={96}
+      logoHeight={192}
     >
       <Stack spacing={2} component="form" onSubmit={handleSubmit(onSubmit)}>
         <TextField label="Company Code" {...register('companyCode')} error={!!errors.companyCode} helperText={errors.companyCode?.message} />

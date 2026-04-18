@@ -18,7 +18,7 @@ vi.mock('../api', () => ({
 
 describe('fetchMeAndSync', () => {
   const createStalePermissions = () => ({
-    items: { view: true, create: false, edit: false, delete: false, actions: [] }
+    suppliers: { view: true, create: false, edit: false, delete: false, actions: [] }
   }) as PermissionsMap;
 
   const createCurrentPermissions = () => {
@@ -52,9 +52,9 @@ describe('fetchMeAndSync', () => {
         _id: 'r1',
         name: 'Admin',
         isSystem: false,
-        permissions: { items: { view: true, create: true, edit: true, delete: true, actions: [] } }
+        permissions: { suppliers: { view: true, create: true, edit: true, delete: true, actions: [] } }
       },
-      permissions: { items: { view: true, create: true, edit: true, delete: true, actions: [] } },
+      permissions: { suppliers: { view: true, create: true, edit: true, delete: true, actions: [] } },
       company: {
         _id: 'c1',
         name: 'Acme',

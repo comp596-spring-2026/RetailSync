@@ -20,7 +20,7 @@ import { formatDate } from '../../../utils/date';
 import { hasPermission } from '../../../utils/permissions';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { accountingApi } from '../api';
-import { AccountingTabs, UploadStatementDialog } from '../components';
+import { UploadStatementDialog } from '../components';
 
 type StatementItem = {
   id: string;
@@ -234,11 +234,7 @@ export const StatementsPage = () => {
         subtitle="Upload statements and monitor extraction/check processing before ledger approval."
         icon={<AccountBalanceIcon />}
       />
-      <AccountingTabs />
       {error && <Alert severity="error">{error}</Alert>}
-      <Alert severity="info">
-        One statement stays active per month. A new PDF for the same month replaces the old one.
-      </Alert>
 
       <Paper sx={{ p: 2 }}>
         <Stack

@@ -1,54 +1,35 @@
-import { Paper, Tab, Tabs } from '@mui/material';
-import { SyntheticEvent } from 'react';
+import { Button, Stack, Typography } from '@mui/material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useLocation, useNavigate } from 'react-router-dom';
-
-const tabItems: Array<{
-  value: string;
-  label: string;
-  matchPrefixes?: string[];
-}> = [
-  { value: '/dashboard/quickbooks', label: 'Home' },
-  { value: '/dashboard/quickbooks/chart-of-accounts', label: 'Chart of Accounts' },
-  { value: '/dashboard/quickbooks/customers', label: 'Customers' },
-  { value: '/dashboard/quickbooks/vendors', label: 'Vendors' },
-  { value: '/dashboard/quickbooks/operations', label: 'Operations' },
-  { value: '/dashboard/quickbooks/reports', label: 'Reports' },
-  { value: '/dashboard/quickbooks/tax', label: 'Tax' },
-  {
-    value: '/dashboard/quickbooks/write/sales-receipt',
-    label: 'Writes',
-    matchPrefixes: ['/dashboard/quickbooks/write']
-  },
-  {
-    value: '/dashboard/accounting/transactions/deposits',
-    label: 'Live Reads',
-    matchPrefixes: ['/dashboard/accounting/registers', '/dashboard/accounting/transactions']
-  }
-];
+import { QUICKBOOKS_BASE_PATH, QUICKBOOKS_QUICK_ACCESS_ITEMS } from '../../quickbooks/constants';
 
 export const QuickBooksTabs = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
   const selected =
-    tabItems.find((item) =>
-      (item.matchPrefixes ?? [item.value]).some(
+    QUICKBOOKS_QUICK_ACCESS_ITEMS.find((item) =>
+      item.matchPrefixes.some(
         (prefix) =>
-          location.pathname === prefix || location.pathname.startsWith(`${prefix}/`) || location.pathname.startsWith(item.value)
+          location.pathname === prefix || location.pathname.startsWith(`${prefix}/`) || location.pathname.startsWith(item.to)
       )
-    )?.value ?? '/dashboard/quickbooks';
-
-  const onChange = (_event: SyntheticEvent, value: string) => {
-    navigate(value);
-  };
+    )?.to ?? QUICKBOOKS_BASE_PATH;
+  const currentLabel =
+    QUICKBOOKS_QUICK_ACCESS_ITEMS.find((item) => item.to === selected)?.title ?? 'QuickBooks';
 
   return (
-    <Paper sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-      <Tabs value={selected} onChange={onChange} variant="scrollable" allowScrollButtonsMobile>
-        {tabItems.map((tab) => (
-          <Tab key={tab.value} value={tab.value} label={tab.label} />
-        ))}
-      </Tabs>
-    </Paper>
+    <Stack direction="row" justifyContent="space-between" alignItems="center">
+      <Button
+        variant="text"
+        startIcon={<ArrowBackIcon />}
+        onClick={() => navigate(QUICKBOOKS_BASE_PATH)}
+        sx={{ alignSelf: 'flex-start' }}
+      >
+        Back to QuickBooks
+      </Button>
+      <Typography variant="body2" color="text.secondary">
+        {currentLabel}
+      </Typography>
+    </Stack>
   );
 };

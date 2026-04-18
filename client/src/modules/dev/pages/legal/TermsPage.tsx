@@ -16,8 +16,8 @@ export const TermsPage = () => {
           Last updated: February 25, 2026
         </Typography>
         <Typography variant="body2">
-          RetailSync is provided for business inventory and POS operations. By using the service, you agree to use it only for lawful business
-          purposes and to keep account credentials secure.
+          RetailSync is provided for business POS, accounting, and access-management operations. By using the service, you agree to use it
+          only for lawful business purposes and to keep account credentials secure.
         </Typography>
         <Typography variant="h6">Account responsibilities</Typography>
         <Typography variant="body2">

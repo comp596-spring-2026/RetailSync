@@ -184,6 +184,8 @@ describe('quickbooks live reads', () => {
       type: 'expense',
       txnDate: '2026-03-10',
       docNum: '1009',
+      syncToken: null,
+      payeeId: 'v-9',
       payeeName: 'Staples',
       memo: 'Supplies',
       amount: 18.5,

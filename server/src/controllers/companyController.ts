@@ -1,35 +1,18 @@
 import { companyCreateSchema, companyJoinSchema } from '@retailsync/shared';
 import { Request, Response } from 'express';
+import { UserModel } from '../models/User';
 import { CompanyModel } from '../models/Company';
 import { InviteModel } from '../models/Invite';
 import { RoleModel } from '../models/Role';
-import { UserModel } from '../models/User';
 import { fail, ok } from '../utils/apiResponse';
-import { adminPermissions, memberPermissions, viewerPermissions } from '../utils/defaultPermissions';
-
-const random = (len: number) => Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, len);
-
-const generateCompanyCode = async () => {
-  for (let i = 0; i < 10; i += 1) {
-    const candidate = `RS-${random(6)}`;
-    const exists = await CompanyModel.exists({ code: candidate });
-    if (!exists) {
-      return candidate;
-    }
-  }
-  throw new Error('Failed to generate unique company code');
-};
-
-const generateInviteCode = async () => {
-  for (let i = 0; i < 10; i += 1) {
-    const candidate = random(10);
-    const exists = await InviteModel.exists({ code: candidate });
-    if (!exists) {
-      return candidate;
-    }
-  }
-  throw new Error('Failed to generate invite code');
-};
+import {
+  buildQuickBooksOnboardingConnectUrl,
+  getPendingQuickBooksOnboarding,
+  claimPendingQuickBooksOnboarding,
+  quickBooksOAuthCookieOptions,
+  quickbooksOauthStateCookie
+} from '../services/quickbooks/applicationService';
+import { createCompanyForUser } from '../services/companyOnboardingService';
 
 export const createCompany = async (req: Request, res: Response) => {
   if (!req.user) {
@@ -50,45 +33,60 @@ export const createCompany = async (req: Request, res: Response) => {
     return fail(res, 'User already belongs to a company', 409);
   }
 
-  const companyCode = await generateCompanyCode();
-  const company = await CompanyModel.create({ ...parsed.data, code: companyCode });
-
-  const [adminRole, memberRole, viewerRole] = await RoleModel.create([
-    {
-      companyId: company._id,
-      name: 'Admin',
-      isSystem: true,
-      permissions: adminPermissions()
-    },
-    {
-      companyId: company._id,
-      name: 'Member',
-      isSystem: true,
-      permissions: memberPermissions()
-    },
-    {
-      companyId: company._id,
-      name: 'Viewer',
-      isSystem: true,
-      permissions: viewerPermissions()
-    }
-  ]);
-
-  user.companyId = company._id;
-  user.roleId = adminRole._id;
-  await user.save();
-
-  const inviteCode = await generateInviteCode();
-  await InviteModel.create({
-    companyId: company._id,
-    email: user.email,
-    code: inviteCode,
-    roleId: adminRole._id,
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    acceptedAt: new Date()
+  const created = await createCompanyForUser({
+    userId: req.user.id,
+    payload: parsed.data
   });
 
-  return ok(res, { company, roles: [adminRole, memberRole, viewerRole] }, 201);
+  const quickbooks = await claimPendingQuickBooksOnboarding({
+    userId: created.user._id.toString(),
+    companyId: created.company._id.toString()
+  });
+
+  return ok(res, { company: created.company, roles: created.roles, quickbooks }, 201);
+};
+
+export const getQuickBooksOnboardingStatus = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return fail(res, 'Unauthorized', 401);
+  }
+
+  return ok(res, {
+    quickbooks: await getPendingQuickBooksOnboarding(req.user.id)
+  });
+};
+
+export const startQuickBooksOnboarding = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return fail(res, 'Unauthorized', 401);
+  }
+
+  if (req.user.companyId) {
+    return fail(res, 'User already belongs to a company', 409);
+  }
+
+  const returnTo =
+    typeof req.body?.returnTo === 'string'
+      ? req.body.returnTo
+      : '/onboarding/create-company';
+
+  try {
+    const built = await buildQuickBooksOnboardingConnectUrl({
+      userId: req.user.id,
+      returnToPath: returnTo
+    });
+    res.cookie(
+      quickbooksOauthStateCookie,
+      built.nonce,
+      quickBooksOAuthCookieOptions()
+    );
+    return ok(res, { url: built.url, environment: built.environment });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'QuickBooks OAuth setup failed';
+    const status = message === 'Unauthorized' ? 401 : 501;
+    return fail(res, message, status);
+  }
 };
 
 export const joinCompany = async (req: Request, res: Response) => {

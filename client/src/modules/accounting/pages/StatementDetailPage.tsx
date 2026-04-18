@@ -33,7 +33,6 @@ import { formatDate } from '../../../utils/date';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { hasPermission } from '../../../utils/permissions';
 import { accountingApi } from '../api';
-import { AccountingTabs } from '../components';
 
 type StatementViewerTab =
   | 'pdf'
@@ -960,7 +959,6 @@ export const StatementDetailPage = () => {
         subtitle="Review the source PDF, inspect derived artifacts, and monitor processing without leaving the statement."
         icon={<DescriptionIcon />}
       />
-      <AccountingTabs />
       {error && <Alert severity="error">{error}</Alert>}
 
       <LoadingEmptyStateWrapper

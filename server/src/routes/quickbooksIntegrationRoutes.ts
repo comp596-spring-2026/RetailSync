@@ -12,11 +12,17 @@ import {
   updateQuickBooksSettings
 } from '../controllers/quickbooksController';
 import {
+  deleteQuickBooksContactById,
+  deleteQuickBooksMoneyTransactionById,
+  getQuickBooksContactById,
   getQuickBooksAccountRegisterByAccount,
   getQuickBooksHubChartOfAccounts,
   getQuickBooksHubEntities,
   getQuickBooksHubOperations,
   getQuickBooksLiveTransactionsByType,
+  patchQuickBooksContact,
+  patchQuickBooksMoneyTransaction,
+  postQuickBooksContact,
   getQuickBooksTransactionDetailById,
   getQuickBooksWriteTransactionDetailById,
   getQuickBooksWriteTransactionsByType,
@@ -26,6 +32,7 @@ import {
   getQuickBooksTaxPayments,
   getQuickBooksTaxReport,
   deleteQuickBooksWriteTransactionById,
+  postQuickBooksMoneyTransaction,
   patchQuickBooksWriteTransaction,
   postQuickBooksJournalAdjustment,
   postQuickBooksRecoverPayment,
@@ -102,6 +109,24 @@ router.get(
   requirePermission('quickbooks', 'view'),
   getQuickBooksTransactionDetailById
 );
+router.post(
+  '/money/:txnType',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  postQuickBooksMoneyTransaction
+);
+router.patch(
+  '/money/:txnType/:qbTxnId',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  patchQuickBooksMoneyTransaction
+);
+router.delete(
+  '/money/:txnType/:qbTxnId',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  deleteQuickBooksMoneyTransactionById
+);
 router.get(
   '/write/:txnType',
   requireAuth,
@@ -143,6 +168,30 @@ router.get(
   requireAuth,
   requirePermission('quickbooks', 'view'),
   getQuickBooksHubEntities
+);
+router.get(
+  '/contacts/:entityType/:qbId',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksContactById
+);
+router.post(
+  '/contacts/:entityType',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  postQuickBooksContact
+);
+router.patch(
+  '/contacts/:entityType/:qbId',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  patchQuickBooksContact
+);
+router.delete(
+  '/contacts/:entityType/:qbId',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  deleteQuickBooksContactById
 );
 router.get(
   '/hub/operations',
