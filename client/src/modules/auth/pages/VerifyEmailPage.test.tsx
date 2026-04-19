@@ -1,12 +1,6 @@
-import { configureStore } from '@reduxjs/toolkit';
-import { Provider } from 'react-redux';
-import { MemoryRouter } from 'react-router-dom';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import authReducer from '../state';
-import companyReducer from '../../users/state';
-import rbacReducer from '../../rbac/state';
-import uiReducer from '../../../app/store/uiSlice';
+import { renderWithAppProviders } from '../../../test/utils';
 import { VerifyEmailPage } from './VerifyEmailPage';
 
 const mockNavigate = vi.fn();
@@ -33,16 +27,6 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-const createStore = () =>
-  configureStore({
-    reducer: {
-      auth: authReducer,
-      company: companyReducer,
-      rbac: rbacReducer,
-      ui: uiReducer
-    }
-  });
-
 describe('VerifyEmailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,13 +45,9 @@ describe('VerifyEmailPage', () => {
   });
 
   it('requests a verification email when no token is present', async () => {
-    render(
-      <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/verify-email']}>
-          <VerifyEmailPage />
-        </MemoryRouter>
-      </Provider>
-    );
+    renderWithAppProviders(<VerifyEmailPage />, {
+      initialEntries: ['/verify-email']
+    });
 
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@retailsync.com' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send verification email' }));
@@ -77,13 +57,9 @@ describe('VerifyEmailPage', () => {
   });
 
   it('confirms a verification token from the link', async () => {
-    render(
-      <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/verify-email?token=verify-token&email=user@retailsync.com']}>
-          <VerifyEmailPage />
-        </MemoryRouter>
-      </Provider>
-    );
+    renderWithAppProviders(<VerifyEmailPage />, {
+      initialEntries: ['/verify-email?token=verify-token&email=user@retailsync.com']
+    });
 
     await waitFor(() => expect(mockConfirm).toHaveBeenCalledWith({ token: 'verify-token' }));
     expect(mockNavigate).toHaveBeenCalledWith('/login?reason=verified&email=user%40retailsync.com', { replace: true });

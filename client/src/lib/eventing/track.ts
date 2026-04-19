@@ -1,6 +1,7 @@
 export type TrackingPayload = Record<string, unknown>;
 
-const isDev = import.meta.env.DEV;
+const isVitest = import.meta.env.VITEST;
+const shouldLogTrackingEvent = import.meta.env.DEV && !isVitest;
 
 export const track = (eventName: string, payload: TrackingPayload = {}) => {
   const event = {
@@ -9,7 +10,11 @@ export const track = (eventName: string, payload: TrackingPayload = {}) => {
     ...payload,
   };
 
-  if (isDev) {
+  if (isVitest) {
+    return;
+  }
+
+  if (shouldLogTrackingEvent) {
     // eslint-disable-next-line no-console
     console.info('[track]', event);
     return;

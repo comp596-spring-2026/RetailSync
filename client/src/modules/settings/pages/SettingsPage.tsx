@@ -42,6 +42,7 @@ import {
 } from "../state";
 
 const OAUTH_WIZARD_RESUME_KEY = "retailsync.googleSheets.oauthResumeWizard";
+const shouldLogGoogleSheetsOauthDebug = import.meta.env.DEV && !import.meta.env.VITEST;
 
 const REQUIRED_FIELDS = [
   "date",
@@ -178,17 +179,21 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
           severity: "success",
         }),
       );
-      console.info("[GoogleSheets OAuth] callback connected; resuming wizard at step 2.");
+      if (shouldLogGoogleSheetsOauthDebug) {
+        console.info("[GoogleSheets OAuth] callback connected; resuming wizard at step 2.");
+      }
       void refreshSettings().finally(() => {
         navigate("/dashboard/settings", { replace: true });
       });
       return;
     }
     if (googleStatus === "error") {
-      console.error("[GoogleSheets OAuth] callback error", {
-        reason: reason ?? "unknown",
-        query: location.search,
-      });
+      if (shouldLogGoogleSheetsOauthDebug) {
+        console.error("[GoogleSheets OAuth] callback error", {
+          reason: reason ?? "unknown",
+          query: location.search,
+        });
+      }
       void refreshSettings().then((action) => {
         const payload = (action as { payload?: { googleSheets?: { oauth?: { connectionStatus?: string } } } }).payload;
         const connected = payload?.googleSheets?.oauth?.connectionStatus === "connected";
@@ -211,7 +216,9 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
               severity: "success",
             }),
           );
-          console.info("[GoogleSheets OAuth] callback returned error but settings show connected; resuming wizard.");
+          if (shouldLogGoogleSheetsOauthDebug) {
+            console.info("[GoogleSheets OAuth] callback returned error but settings show connected; resuming wizard.");
+          }
         } else {
           dispatch(
             showSnackbar({

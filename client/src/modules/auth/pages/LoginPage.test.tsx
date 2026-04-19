@@ -1,12 +1,6 @@
-import { configureStore } from '@reduxjs/toolkit';
-import { Provider } from 'react-redux';
-import { MemoryRouter } from 'react-router-dom';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import authReducer from '../state';
-import companyReducer from '../../users/state';
-import rbacReducer from '../../rbac/state';
-import uiReducer from '../../../app/store/uiSlice';
+import { renderWithAppProviders } from '../../../test/utils';
 import { LoginPage } from './LoginPage';
 
 const mockNavigate = vi.fn();
@@ -31,16 +25,6 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-const createStore = () =>
-  configureStore({
-    reducer: {
-      auth: authReducer,
-      company: companyReducer,
-      rbac: rbacReducer,
-      ui: uiReducer
-    }
-  });
-
 describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,13 +45,7 @@ describe('LoginPage', () => {
   });
 
   it('renders the email and password login form', () => {
-    render(
-      <Provider store={createStore()}>
-        <MemoryRouter>
-          <LoginPage />
-        </MemoryRouter>
-      </Provider>
-    );
+    renderWithAppProviders(<LoginPage />);
 
     expect(screen.getByAltText('RetailSync')).toBeInTheDocument();
     expect(screen.getByLabelText('Email')).toBeInTheDocument();
@@ -76,13 +54,7 @@ describe('LoginPage', () => {
   });
 
   it('signs in with email and password', async () => {
-    render(
-      <Provider store={createStore()}>
-        <MemoryRouter>
-          <LoginPage />
-        </MemoryRouter>
-      </Provider>
-    );
+    renderWithAppProviders(<LoginPage />);
 
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@retailsync.com' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });

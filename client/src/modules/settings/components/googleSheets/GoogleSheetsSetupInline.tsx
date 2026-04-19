@@ -83,6 +83,7 @@ const WIZARD_STEPS = ['Source & Summary', 'Sheet & Preview', 'Mapping & Save'];
 const DEFAULT_SERVICE_ACCOUNT_EMAIL = 'retailsync-run-sa@lively-infinity-488304-m9.iam.gserviceaccount.com';
 const OAUTH_TOKENS_MISSING_TEXT = 'google oauth tokens not found';
 const USE_CONNECTOR_NATIVE_SETTINGS = import.meta.env.VITE_USE_CONNECTOR_NATIVE_SETTINGS !== 'false';
+const shouldLogGoogleSheetsDebug = import.meta.env.DEV && !import.meta.env.VITEST;
 
 const createCorrelationId = () => {
   try {
@@ -509,7 +510,7 @@ export const GoogleSheetsSetupInline = ({
   }, [oauthFiles, sharedFiles, sheetSearch, stagedSource]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
+    if (!shouldLogGoogleSheetsDebug) return;
     const files = stagedSource === 'oauth' ? oauthFiles : sharedFiles;
     console.info('[GoogleSheets Setup] visible files state', {
       stagedSource,
@@ -572,7 +573,7 @@ export const GoogleSheetsSetupInline = ({
           | { data?: { files?: SheetFile[] }; files?: SheetFile[] }
           | undefined;
         const files = (root?.data?.files ?? root?.files ?? []) as SheetFile[];
-        if (import.meta.env.DEV) {
+        if (shouldLogGoogleSheetsDebug) {
           console.info('[GoogleSheets Setup] OAuth files loaded', {
             count: files.length,
             names: files.slice(0, 5).map((file) => file.name),
@@ -583,7 +584,7 @@ export const GoogleSheetsSetupInline = ({
         // Shared mode is tenant-config driven; avoid listing all service-account-visible sheets.
         // Show only sheets already configured in this company's shared settings.
         const files = buildConfiguredSharedFiles(sharedSheets, settings.sharedConfig, selectedProfileName);
-        if (import.meta.env.DEV) {
+        if (shouldLogGoogleSheetsDebug) {
           console.info('[GoogleSheets Setup] Shared files loaded', {
             count: files.length,
             names: files.slice(0, 5).map((file) => file.name),
@@ -600,7 +601,7 @@ export const GoogleSheetsSetupInline = ({
         return;
       }
       setError(message);
-      if (import.meta.env.DEV) {
+      if (shouldLogGoogleSheetsDebug) {
         console.error('[GoogleSheets Setup] loadFiles failed', {
           sourceType,
           message,

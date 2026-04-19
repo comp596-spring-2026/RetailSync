@@ -1,12 +1,6 @@
-import { configureStore } from '@reduxjs/toolkit';
-import { Provider } from 'react-redux';
-import { MemoryRouter } from 'react-router-dom';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import authReducer from '../state';
-import companyReducer from '../../users/state';
-import rbacReducer from '../../rbac/state';
-import uiReducer from '../../../app/store/uiSlice';
+import { renderWithAppProviders } from '../../../test/utils';
 import { RegisterPage } from './RegisterPage';
 
 const mockNavigate = vi.fn();
@@ -31,16 +25,6 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-const createStore = () =>
-  configureStore({
-    reducer: {
-      auth: authReducer,
-      company: companyReducer,
-      rbac: rbacReducer,
-      ui: uiReducer
-    }
-  });
-
 describe('RegisterPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -62,13 +46,7 @@ describe('RegisterPage', () => {
   });
 
   it('creates the user account first and routes into onboarding', async () => {
-    render(
-      <Provider store={createStore()}>
-        <MemoryRouter>
-          <RegisterPage />
-        </MemoryRouter>
-      </Provider>
-    );
+    renderWithAppProviders(<RegisterPage />);
 
     fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Ada' } });
     fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Lovelace' } });

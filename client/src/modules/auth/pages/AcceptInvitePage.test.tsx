@@ -1,12 +1,6 @@
-import { configureStore } from '@reduxjs/toolkit';
-import { Provider } from 'react-redux';
-import { MemoryRouter } from 'react-router-dom';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import authReducer from '../state';
-import companyReducer from '../../users/state';
-import rbacReducer from '../../rbac/state';
-import uiReducer from '../../../app/store/uiSlice';
+import { renderWithAppProviders } from '../../../test/utils';
 import { AcceptInvitePage } from './AcceptInvitePage';
 
 const mockNavigate = vi.fn();
@@ -32,16 +26,6 @@ vi.mock('react-router-dom', async () => {
     useNavigate: () => mockNavigate
   };
 });
-
-const createStore = () =>
-  configureStore({
-    reducer: {
-      auth: authReducer,
-      company: companyReducer,
-      rbac: rbacReducer,
-      ui: uiReducer
-    }
-  });
 
 describe('AcceptInvitePage', () => {
   beforeEach(() => {
@@ -74,13 +58,9 @@ describe('AcceptInvitePage', () => {
   });
 
   it('loads invite context and activates the invite with a password', async () => {
-    render(
-      <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/accept-invite?email=invitee@example.com&inviteCode=INVITE123']}>
-          <AcceptInvitePage />
-        </MemoryRouter>
-      </Provider>
-    );
+    renderWithAppProviders(<AcceptInvitePage />, {
+      initialEntries: ['/accept-invite?email=invitee@example.com&inviteCode=INVITE123']
+    });
 
     expect(await screen.findByText('Invite Retail')).toBeInTheDocument();
     expect(mockGetInvite).toHaveBeenCalledWith({ email: 'invitee@example.com', inviteCode: 'INVITE123' });
