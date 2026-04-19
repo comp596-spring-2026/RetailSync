@@ -166,6 +166,65 @@ Important server env:
 - Testing matrix: [docs/testing/module-test-matrix.md](/Users/trupal/Projects/RetailSync/docs/testing/module-test-matrix.md)
 - Wireframes: [docs/wireframes](/Users/trupal/Projects/RetailSync/docs/wireframes)
 
+## Agent And Skill System
+
+RetailSync includes a repo-level multi-agent operating system for Codex, Cursor, and orchestrated agent workflows.
+
+### Main entrypoint
+
+- Agent system map: [.agents/README.md](/Users/trupal/Projects/RetailSync/.agents/README.md)
+
+### Layer agents
+
+- Manager: [.agents/manager/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/manager/AGENTS.md)
+- Database: [.agents/database/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/database/AGENTS.md)
+- Backend: [.agents/backend/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/backend/AGENTS.md)
+- Integrations: [.agents/integrations/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/integrations/AGENTS.md)
+- Frontend: [.agents/frontend/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/frontend/AGENTS.md)
+- Tester: [.agents/tester/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/tester/AGENTS.md)
+
+### Domain specialists
+
+- Auth & Onboarding: [.agents/auth-onboarding/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/auth-onboarding/AGENTS.md)
+- Access & RBAC: [.agents/access-rbac/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/access-rbac/AGENTS.md)
+- POS & Sheets: [.agents/pos-sheets/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/pos-sheets/AGENTS.md)
+- Accounting Statements: [.agents/accounting-statements/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/accounting-statements/AGENTS.md)
+- QuickBooks: [.agents/quickbooks/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/quickbooks/AGENTS.md)
+- Release & Docs: [.agents/release-docs/AGENTS.md](/Users/trupal/Projects/RetailSync/.agents/release-docs/AGENTS.md)
+
+### Workflow skills
+
+- Skill index: [.agents/skills/README.md](/Users/trupal/Projects/RetailSync/.agents/skills/README.md)
+- Auth workflow: [.agents/skills/auth-onboarding-workflow.md](/Users/trupal/Projects/RetailSync/.agents/skills/auth-onboarding-workflow.md)
+- RBAC alignment: [.agents/skills/rbac-and-route-alignment.md](/Users/trupal/Projects/RetailSync/.agents/skills/rbac-and-route-alignment.md)
+- POS + Sheets mapping: [.agents/skills/pos-sheets-mapping-workflow.md](/Users/trupal/Projects/RetailSync/.agents/skills/pos-sheets-mapping-workflow.md)
+- Statement processing: [.agents/skills/statement-processing-workflow.md](/Users/trupal/Projects/RetailSync/.agents/skills/statement-processing-workflow.md)
+- QuickBooks workspace: [.agents/skills/quickbooks-workspace-workflow.md](/Users/trupal/Projects/RetailSync/.agents/skills/quickbooks-workspace-workflow.md)
+- Release readiness: [.agents/skills/release-readiness-workflow.md](/Users/trupal/Projects/RetailSync/.agents/skills/release-readiness-workflow.md)
+
+### Cursor support
+
+Cursor-specific rules live in:
+
+- [.cursor/rules](/Users/trupal/Projects/RetailSync/.cursor/rules)
+
+These mirror the same project boundaries so Cursor prompts can reference the same agents and skills directly.
+
+### Recommended usage pattern
+
+1. Pick a domain specialist first.
+2. Pick one or more layer agents second.
+3. Add the matching workflow skill if the task is complex or repeated.
+4. Use Manager for cross-cutting or multi-phase work.
+
+Example prompt:
+
+```text
+Use .agents/quickbooks/AGENTS.md, .agents/frontend/AGENTS.md, and .agents/skills/quickbooks-workspace-workflow.md.
+
+Improve the QuickBooks Money workspace without changing provider contracts.
+```
+
 ## Release Flow
 
 - active branch: `development`

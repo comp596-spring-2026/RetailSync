@@ -12,6 +12,5 @@ coverage
 
 *.tsbuildinfo
 credentials/
-.agents
-.vscode
+
 server/tmp
