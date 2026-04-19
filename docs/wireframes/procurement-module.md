@@ -1,5 +1,9 @@
 # Procurement Module Wireframe
 
+Historical note:
+- Procurement is currently hidden from the active product navigation.
+- This wireframe is preserved as a planning/reference artifact, not as the current live UX.
+
 Path: `/client/src/modules/procurement/pages/ProcurementHubPage.tsx`
 
 Provides a unified hub for Invoices and Suppliers utilizing a clean Tab structure above generic module data tables.

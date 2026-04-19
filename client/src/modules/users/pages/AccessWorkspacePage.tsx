@@ -7,7 +7,7 @@ import { hasPermission } from '../../../utils/permissions';
 
 type AccessTab = 'users' | 'roles';
 
-export const AccessHubPage = () => {
+export const AccessWorkspacePage = () => {
   const location = useLocation();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const tab = location.pathname.endsWith('/roles')

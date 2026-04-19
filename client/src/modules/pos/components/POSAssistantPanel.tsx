@@ -37,7 +37,7 @@ type PosAiSnapshot = {
   alerts: PosState['alerts'];
 };
 
-type PosAiAssistantPanelProps = {
+type POSAssistantPanelProps = {
   loading: boolean;
   snapshot: PosAiSnapshot;
   primaryAction: PosPrimaryAction;
@@ -413,7 +413,7 @@ const AssistantAttachments = ({
   );
 };
 
-export const PosAiAssistantPanel = ({ loading, snapshot, primaryAction }: PosAiAssistantPanelProps) => {
+export const POSAssistantPanel = ({ loading, snapshot, primaryAction }: POSAssistantPanelProps) => {
   const [draftPrompt, setDraftPrompt] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [queryLoading, setQueryLoading] = useState(false);

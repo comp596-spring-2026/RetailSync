@@ -99,7 +99,7 @@ export const QuickBooksHomePage = () => {
   const onDisconnect = async () => {
     try {
       setBusy(true);
-      await accountingApi.disconnectQuickbooks();
+      await accountingApi.disconnectQuickBooks();
       await load();
       dispatch(
         showSnackbar({

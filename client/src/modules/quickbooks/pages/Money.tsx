@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { NoAccess, PageHeader } from '../../../components';
 import { useAppSelector } from '../../../app/store/hooks';
 import { hasPermission } from '../../../utils/permissions';
-import { QuickbooksCard } from '../components/QuickbooksCard';
+import { QuickBooksCard } from '../components/QuickBooksCard';
 import { QuickBooksTabs, RequireQuickBooksConnection } from '../components';
 import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
 
@@ -50,25 +50,25 @@ export const MoneyPage = () => {
             }
           }}
         >
-          <QuickbooksCard
+          <QuickBooksCard
             title="Deposits"
             description="Review deposits and drill into the raw QuickBooks record."
             icon={SavingsOutlinedIcon}
             onClick={() => navigate('/dashboard/quickbooks/money/deposits')}
           />
-          <QuickbooksCard
+          <QuickBooksCard
             title="Checks"
             description="Inspect check activity with account and payee details."
             icon={AccountBalanceWalletOutlinedIcon}
             onClick={() => navigate('/dashboard/quickbooks/money/checks')}
           />
-          <QuickbooksCard
+          <QuickBooksCard
             title="Expenses"
             description="Open expenses posted in QuickBooks for live review."
             icon={PaidOutlinedIcon}
             onClick={() => navigate('/dashboard/quickbooks/money/expenses')}
           />
-          <QuickbooksCard
+          <QuickBooksCard
             title="Transfers"
             description="Trace movement between accounts from the live QuickBooks ledger."
             icon={SwapHorizOutlinedIcon}

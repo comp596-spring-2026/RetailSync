@@ -104,8 +104,8 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
     onVerifySharedConfig,
     onCheckOAuthStatus,
     onToggleUpdateDbWithSheet,
-    onConnectQuickbooks,
-    onDisconnectQuickbooks,
+    onConnectQuickBooks,
+    onDisconnectQuickBooks,
     onRefreshQuickbooksReferences,
     onPostApprovedQuickbooks,
     onRefreshQuickbooksStatus,
@@ -456,8 +456,8 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
                 canViewHealth={canViewQuickbooks}
                 busy={isBusy}
                 loading={false}
-                onConnect={onConnectQuickbooks}
-                onDisconnect={onDisconnectQuickbooks}
+                onConnect={onConnectQuickBooks}
+                onDisconnect={onDisconnectQuickBooks}
                 onRefreshReferences={onRefreshQuickbooksReferences}
                 onPostApproved={onPostApprovedQuickbooks}
                 onRefreshStatus={onRefreshQuickbooksStatus}

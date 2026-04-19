@@ -55,7 +55,7 @@ type PosTableTotals = {
   cashExpenses: number;
 };
 
-type PosTableViewPageProps = {
+type POSDailySummaryPageProps = {
   loading: boolean;
   rows: PosTableRow[];
   totals: PosTableTotals;
@@ -77,7 +77,7 @@ const resolveSourceLabel = (row: PosTableRow) => {
 const resolveSourceDetail = (row: PosTableRow) =>
   row.sourceRef?.profileName ?? row.sourceRef?.sheetName ?? row.sourceRef?.mode ?? 'Operational source';
 
-export const PosTableViewPage = ({
+export const POSDailySummaryPage = ({
   loading,
   rows,
   totals,
@@ -87,7 +87,7 @@ export const PosTableViewPage = ({
   onPageChange,
   onLimitChange,
   primaryAction
-}: PosTableViewPageProps) => {
+}: POSDailySummaryPageProps) => {
   const sourceCount = new Set(rows.map((row) => resolveSourceLabel(row))).size;
   const netTotal = totals.totalSales - totals.saleTax;
 
@@ -242,3 +242,5 @@ export const PosTableViewPage = ({
     </LoadingEmptyStateWrapper>
   );
 };
+
+export default POSDailySummaryPage;

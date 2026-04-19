@@ -12,5 +12,5 @@ export { accountingApi } from "../../modules/accounting/api";
 export type {
   GoogleSheetMode,
   GoogleSheetSource,
-  QuickbooksEnvironment,
+  QuickBooksEnvironment,
 } from "../../modules/settings/api";

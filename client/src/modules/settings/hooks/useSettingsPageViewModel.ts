@@ -4,9 +4,9 @@ import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import {
   commitGoogleSheetsImportThunk,
   configureSharedSheetThunk,
-  connectQuickbooksThunk,
+  connectQuickBooksThunk,
   deleteGoogleSheetsSourceThunk,
-  disconnectQuickbooksThunk,
+  disconnectQuickBooksThunk,
   fetchGoogleSheetsSyncOverview,
   fetchOAuthStatus,
   fetchQuickbooksOAuthStatus,
@@ -287,11 +287,11 @@ export const useSettingsPageViewModel = ({
     }
   }, [canEdit, dispatch, settings, sharedHeaderRow, sharedSheetName, sharedSpreadsheetId]);
 
-  const onConnectQuickbooks = useCallback(async () => {
+  const onConnectQuickBooks = useCallback(async () => {
     if (!canEdit) return;
     try {
       setIsBusyLocal(true);
-      const url = await dispatch(connectQuickbooksThunk('/dashboard/settings')).unwrap();
+      const url = await dispatch(connectQuickBooksThunk('/dashboard/settings')).unwrap();
       if (typeof window !== 'undefined') {
         window.location.href = url;
       }
@@ -302,10 +302,10 @@ export const useSettingsPageViewModel = ({
     }
   }, [canEdit, dispatch]);
 
-  const onDisconnectQuickbooks = useCallback(async () => {
+  const onDisconnectQuickBooks = useCallback(async () => {
     if (!canEdit) return;
     try {
-      await dispatch(disconnectQuickbooksThunk()).unwrap();
+      await dispatch(disconnectQuickBooksThunk()).unwrap();
       await reloadQuickbooksSurface();
     } catch (err) {
       dispatch(showSnackbar({ message: getErrorMessage(err, 'Failed to disconnect QuickBooks'), severity: 'error' }));
@@ -364,8 +364,8 @@ export const useSettingsPageViewModel = ({
     onVerifySharedConfig,
     onCheckOAuthStatus,
     onToggleUpdateDbWithSheet,
-    onConnectQuickbooks,
-    onDisconnectQuickbooks,
+    onConnectQuickBooks,
+    onDisconnectQuickBooks,
     onRefreshQuickbooksReferences,
     onPostApprovedQuickbooks,
     onRefreshQuickbooksStatus,

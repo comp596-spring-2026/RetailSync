@@ -2,7 +2,7 @@ import { api } from '../../../app/api/client';
 import type { GoogleSheetsSyncOverview, QuickBooksOAuthStatus } from '../types';
 
 export type GoogleSheetMode = 'service_account' | 'oauth';
-export type QuickbooksEnvironment = 'sandbox' | 'production';
+export type QuickBooksEnvironment = 'sandbox' | 'production';
 
 export type GoogleSheetSource = {
   sourceId?: string;
@@ -194,7 +194,7 @@ export class SettingsApi {
   }
 
   setQuickbooks(payload: {
-    environment?: QuickbooksEnvironment;
+    environment?: QuickBooksEnvironment;
     connected?: boolean;
     realmId?: string | null;
     companyName?: string | null;
@@ -206,21 +206,21 @@ export class SettingsApi {
     return api.get<{
       data: {
         url: string;
-        environment: QuickbooksEnvironment;
+        environment: QuickBooksEnvironment;
       };
     }>('/integrations/quickbooks/start-url', { params: { returnTo } });
   }
 
-  connectQuickbooks(returnTo = '/dashboard/settings') {
+  connectQuickBooks(returnTo = '/dashboard/settings') {
     return api.post<{
       data: {
         url: string;
-        environment: QuickbooksEnvironment;
+        environment: QuickBooksEnvironment;
       };
     }>('/settings/quickbooks/connect', { returnTo });
   }
 
-  disconnectQuickbooks() {
+  disconnectQuickBooks() {
     return api.post('/settings/disconnect/quickbooks');
   }
 

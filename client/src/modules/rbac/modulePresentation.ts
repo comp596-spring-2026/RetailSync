@@ -24,20 +24,20 @@ export const modulePresentation: Record<
     surfaces: ['POS analytics', 'POS table', 'POS AI']
   },
   invoices: {
-    label: 'Procurement / Invoices',
-    surfaces: ['Procurement invoices']
+    label: 'Procurement / Invoices (Hidden)',
+    surfaces: ['Legacy procurement invoice routes']
   },
   reconciliation: {
-    label: 'Accounting / Reconciliation',
-    surfaces: ['Reconciliation entry points']
+    label: 'Accounting / Reconciliation (Legacy)',
+    surfaces: ['Compatibility reconciliation routes']
   },
   bankStatements: {
     label: 'Accounting / Statements',
     surfaces: ['Statements list', 'Statement detail']
   },
   suppliers: {
-    label: 'Procurement / Suppliers',
-    surfaces: ['Procurement suppliers']
+    label: 'Procurement / Suppliers (Hidden)',
+    surfaces: ['Legacy procurement supplier routes']
   },
   reports: {
     label: 'Reports',
@@ -52,12 +52,12 @@ export const modulePresentation: Record<
     surfaces: ['Access roles']
   },
   accounting: {
-    label: 'Accounting / Overview',
+    label: 'Accounting / Statements',
     surfaces: ['Statements list', 'Statement detail']
   },
   ledger: {
-    label: 'Accounting / Ledger',
-    surfaces: ['Ledger queue', 'Ledger review']
+    label: 'Accounting / Ledger (Legacy)',
+    surfaces: ['Legacy ledger routes']
   },
   quickbooks: {
     label: 'QuickBooks',

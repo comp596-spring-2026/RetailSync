@@ -2,19 +2,19 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import type { SvgIconComponent } from '@mui/icons-material';
 import { ButtonBase, Paper, Stack, Typography } from '@mui/material';
 
-type QuickbooksCardProps = {
+type QuickBooksCardProps = {
   title: string;
   description: string;
   icon: SvgIconComponent;
   onClick: () => void;
 };
 
-export const QuickbooksCard = ({
+export const QuickBooksCard = ({
   title,
   description,
   icon: Icon,
   onClick
-}: QuickbooksCardProps) => (
+}: QuickBooksCardProps) => (
   <ButtonBase
     onClick={onClick}
     sx={{
@@ -74,4 +74,4 @@ export const QuickbooksCard = ({
   </ButtonBase>
 );
 
-export default QuickbooksCard;
+export default QuickBooksCard;

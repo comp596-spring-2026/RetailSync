@@ -15,7 +15,7 @@ export const QUICKBOOKS_SERVICE_DEFAULTS = {
   invoiceSort: '-date'
 } as const;
 
-export type QuickbooksWorkspaceKey =
+export type QuickBooksWorkspaceKey =
   | 'accounts'
   | 'contacts'
   | 'operations'
@@ -24,8 +24,8 @@ export type QuickbooksWorkspaceKey =
   | 'sales'
   | 'money';
 
-export type QuickbooksQuickAccessItem = {
-  key: QuickbooksWorkspaceKey;
+export type QuickBooksQuickAccessItem = {
+  key: QuickBooksWorkspaceKey;
   title: string;
   description: string;
   to: string;
@@ -34,7 +34,7 @@ export type QuickbooksQuickAccessItem = {
   matchPrefixes: readonly string[];
 };
 
-export const QUICKBOOKS_QUICK_ACCESS_ITEMS: readonly QuickbooksQuickAccessItem[] = [
+export const QUICKBOOKS_QUICK_ACCESS_ITEMS: readonly QuickBooksQuickAccessItem[] = [
   {
     key: 'accounts',
     title: 'Accounts',
@@ -128,7 +128,7 @@ export const QUICKBOOKS_QUICK_ACCESS_ITEMS: readonly QuickbooksQuickAccessItem[]
 ] as const;
 
 export const QUICKBOOKS_SECTION_DESCRIPTIONS: Record<
-  QuickbooksQuickAccessItem['section'],
+  QuickBooksQuickAccessItem['section'],
   string
 > = {
   Records: 'Reference data and account structure',

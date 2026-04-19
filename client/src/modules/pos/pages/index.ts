@@ -1,5 +1,5 @@
-export { PosPage } from './PosPage';
-export { PosTableViewPage } from './PosTableViewPage';
-export { PosAnalyticsViewPage } from './PosAnalyticsViewPage';
-export { PosAiViewPage } from './PosAiViewPage';
+export { POSWorkspacePage } from './POSWorkspacePage';
+export { POSDailySummaryPage } from './POSDailySummaryPage';
+export { POSAnalyticsPage } from './POSAnalyticsPage';
+export { POSAssistantPage } from './POSAssistantPage';
 export type { PosPrimaryAction } from './types';

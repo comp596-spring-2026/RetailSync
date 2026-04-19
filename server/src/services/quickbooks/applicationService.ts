@@ -42,7 +42,7 @@ export const defaultQuickBooksReturnTo = "/dashboard/accounting/quickbooks";
 const quickbooksOauthStateTtlMs = 30 * 60 * 1000;
 const quickbooksOauthStateTtlJwt = "30m";
 
-export const updateQuickbooksSettingsSchema = z.object({
+export const updateQuickBooksSettingsSchema = z.object({
   environment: z.enum(["sandbox", "production"]),
 });
 
@@ -50,7 +50,7 @@ export const quickBooksReadQuerySchema = z.object({
   query: z.string().trim().min(1).max(2000),
 });
 
-export const settingsQuickbooksMutationSchema = z.object({
+export const settingsQuickBooksMutationSchema = z.object({
   environment: z.enum(["sandbox", "production"]).optional(),
   connected: z.boolean().optional(),
   realmId: z.string().nullable().optional(),
@@ -200,7 +200,7 @@ const buildQuickBooksOAuthStatus = (args: {
   };
 };
 
-export const ensureQuickbooksShape = (settings: SettingsWithQuickBooks) => {
+export const ensureQuickBooksShape = (settings: SettingsWithQuickBooks) => {
   if (!settings.quickbooks) {
     settings.quickbooks = {
       connected: false,
@@ -263,7 +263,7 @@ export const ensureQuickbooksShape = (settings: SettingsWithQuickBooks) => {
 export const toQuickBooksSettings = (
   settings: SettingsWithQuickBooks,
 ): QuickBooksSettings => {
-  const quickbooks = ensureQuickbooksShape(settings);
+  const quickbooks = ensureQuickBooksShape(settings);
   return quickBooksSettingsSchema.parse({
     connected: Boolean(quickbooks.connected),
     environment:
@@ -344,7 +344,7 @@ export const buildQuickBooksConnectUrl = async (params: {
   returnToPath?: string;
 }) => {
   const settings = await getOrCreateSettings(params.companyId, params.userId);
-  const quickbooks = ensureQuickbooksShape(settings);
+  const quickbooks = ensureQuickBooksShape(settings);
   const environment: QuickBooksEnvironment =
     quickbooks.environment === "production" ? "production" : "sandbox";
   const returnTo = normalizeQuickBooksReturnTo(
@@ -548,7 +548,7 @@ export const handleQuickBooksCallback = async (params: {
         parsedState.companyId,
         parsedState.userId,
       );
-      const quickbooks = ensureQuickbooksShape(settings);
+      const quickbooks = ensureQuickBooksShape(settings);
       quickbooks.connected = true;
       quickbooks.environment = parsedState.environment;
       quickbooks.realmId = realmId;
@@ -598,7 +598,7 @@ export const claimPendingQuickBooksOnboarding = async (params: {
 
   await saveQuickBooksSecret(params.companyId, pending.payload);
   const settings = await getOrCreateSettings(params.companyId, params.userId);
-  const quickbooks = ensureQuickbooksShape(settings);
+  const quickbooks = ensureQuickBooksShape(settings);
   quickbooks.connected = true;
   quickbooks.environment = pending.environment;
   quickbooks.realmId = pending.realmId;
@@ -620,7 +620,7 @@ export const getQuickBooksOAuthStatus = async (
   userId: string,
 ) => {
   const settings = await getOrCreateSettings(companyId, userId);
-  const quickbooks = ensureQuickbooksShape(settings);
+  const quickbooks = ensureQuickBooksShape(settings);
 
   try {
     if (!quickbooks.connected) {
@@ -712,7 +712,7 @@ export const queueQuickBooksSync = async (params: {
   jobType: "quickbooks.refresh_reference_data" | "quickbooks.post_approved";
 }) => {
   const settings = await getOrCreateSettings(params.companyId, params.userId);
-  const quickbooks = ensureQuickbooksShape(settings);
+  const quickbooks = ensureQuickBooksShape(settings);
   if (!quickbooks.connected) {
     throw new Error("QuickBooks is not connected");
   }
@@ -744,7 +744,7 @@ export const updateQuickBooksSettings = async (params: {
   environment: "sandbox" | "production";
 }) => {
   const settings = await getOrCreateSettings(params.companyId, params.userId);
-  const quickbooks = ensureQuickbooksShape(settings);
+  const quickbooks = ensureQuickBooksShape(settings);
   quickbooks.environment = params.environment;
   quickbooks.updatedAt = new Date();
   await settings.save();
@@ -760,7 +760,7 @@ export const disconnectQuickBooks = async (
     provider: "quickbooks_oauth",
   });
   const settings = await getOrCreateSettings(companyId, userId);
-  const quickbooks = ensureQuickbooksShape(settings);
+  const quickbooks = ensureQuickBooksShape(settings);
   quickbooks.connected = false;
   quickbooks.realmId = null;
   quickbooks.companyName = null;
@@ -786,7 +786,7 @@ export const quickBooksReadQueryForCompany = async (
   return { query, payload };
 };
 
-export const updateLegacyQuickbooksSettings = async (params: {
+export const updateLegacyQuickBooksSettings = async (params: {
   companyId: string;
   userId: string;
   environment?: "sandbox" | "production";
@@ -808,7 +808,7 @@ export const updateLegacyQuickbooksSettings = async (params: {
   return toSafeSettings(settings);
 };
 
-export const disconnectLegacyQuickbooksSettings = async (
+export const disconnectLegacyQuickBooksSettings = async (
   companyId: string,
   userId: string,
 ) => {

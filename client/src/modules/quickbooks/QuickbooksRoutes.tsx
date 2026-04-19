@@ -1,5 +1,5 @@
 import { Navigate, useParams, useRoutes } from 'react-router-dom';
-import QuickbooksDashboard from './QuickbooksDashboard';
+import QuickBooksDashboard from './QuickBooksDashboard';
 import AccountsPage from './pages/Accounts';
 import AccountRegisterPage from './pages/AccountRegister';
 import ChecksPage from './pages/Checks';
@@ -34,9 +34,9 @@ const LegacyQuickBooksTransactionRedirect = ({
   return <Navigate to={qbTxnId ? `${to}/${qbTxnId}` : to} replace />;
 };
 
-export const QuickbooksRoutes = () =>
+export const QuickBooksRoutes = () =>
   useRoutes([
-    { index: true, element: <QuickbooksDashboard /> },
+    { index: true, element: <QuickBooksDashboard /> },
     { path: 'accounts', element: <AccountsPage /> },
     { path: 'accounts/:accountId/register', element: <AccountRegisterPage /> },
     { path: 'contacts', element: <ContactsPage /> },
@@ -99,4 +99,4 @@ export const QuickbooksRoutes = () =>
     { path: '*', element: <Navigate to="/404" replace /> }
   ]);
 
-export default QuickbooksRoutes;
+export default QuickBooksRoutes;

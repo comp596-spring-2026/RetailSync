@@ -1,5 +1,10 @@
 # Quarterly Project Report #1  
 **RetailSync**    
+
+Historical note:
+- This report describes an earlier project phase.
+- References to inventory as an active product area are historical and do not reflect the current live app surface.
+
 ## What Did You Do
 
 This quarter, I worked on building the foundation of **RetailSync**, a multi-tenant retail operations platform designed for small grocery stores and gas stations. The goal of the project is to solve a very practical problem: many small retail businesses rely on spreadsheets, exporte d POS reports, and manual reconciliation to manage inventory and finances. There is often no structured system connecting sales data, inventory movement, supplier invoices, and bank deposits.
