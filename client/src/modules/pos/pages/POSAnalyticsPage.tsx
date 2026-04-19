@@ -15,7 +15,7 @@ import type { PosPrimaryAction } from './types';
 const fmt = (n: number) =>
   n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-type PosAnalyticsViewPageProps = {
+type POSAnalyticsPageProps = {
   loading: boolean;
   chartsData: PosState['chartsData'];
   primaryAction: PosPrimaryAction;
@@ -30,7 +30,7 @@ type PosAnalyticsViewPageProps = {
   cashDiff: number;
 };
 
-export const PosAnalyticsViewPage = ({
+export const POSAnalyticsPage = ({
   loading,
   chartsData,
   primaryAction,
@@ -43,7 +43,7 @@ export const PosAnalyticsViewPage = ({
   totalLottery,
   netIncome,
   cashDiff
-}: PosAnalyticsViewPageProps) => {
+}: POSAnalyticsPageProps) => {
   const distribution = [
     { label: 'Credit Card', value: totalCredit },
     { label: 'Cash', value: totalCash },
@@ -201,3 +201,5 @@ export const PosAnalyticsViewPage = ({
     </LoadingEmptyStateWrapper>
   );
 };
+
+export default POSAnalyticsPage;

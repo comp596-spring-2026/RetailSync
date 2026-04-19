@@ -2,6 +2,49 @@ import React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { vi } from 'vitest';
 
+const benignClientTestWarningPatterns = [
+  /React Router Future Flag Warning/,
+  /No reducer provided for key "(auth|company|users|rbac|settings|pos|ui)"/
+];
+
+const shouldIgnoreBenignClientTestWarning = (args: unknown[]) => {
+  const message = args
+    .map((value) => {
+      if (typeof value === 'string') {
+        return value;
+      }
+
+      if (value instanceof Error) {
+        return value.message;
+      }
+
+      return '';
+    })
+    .filter(Boolean)
+    .join(' ');
+
+  return benignClientTestWarningPatterns.some((pattern) => pattern.test(message));
+};
+
+const originalConsoleWarn = console.warn.bind(console);
+const originalConsoleError = console.error.bind(console);
+
+vi.spyOn(console, 'warn').mockImplementation((...args: Parameters<typeof console.warn>) => {
+  if (shouldIgnoreBenignClientTestWarning(args)) {
+    return;
+  }
+
+  originalConsoleWarn(...args);
+});
+
+vi.spyOn(console, 'error').mockImplementation((...args: Parameters<typeof console.error>) => {
+  if (shouldIgnoreBenignClientTestWarning(args)) {
+    return;
+  }
+
+  originalConsoleError(...args);
+});
+
 vi.mock('@mui/x-data-grid', () => {
   const DataGrid = ({
     rows = [],

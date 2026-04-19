@@ -26,15 +26,15 @@ import { showSnackbar } from '../../../app/store/uiSlice';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { hasPermission } from '../../../utils/permissions';
 import { accountingApi } from '../../accounting/api';
-import { QuickBooksTabs, RequireQuickBooksConnection } from '../../accounting/components';
-import { useQuickBooksWorkspace } from '../../accounting/hooks/useQuickBooksWorkspace';
+import { QuickBooksTabs, RequireQuickBooksConnection } from '../components';
+import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
 import {
   quickBooksHubSortToParam,
   type QuickBooksHubEntitiesParams,
   type QuickBooksHubEntityRow,
   type QuickBooksHubEntityType,
   type QuickBooksHubSortModel
-} from '../../accounting/types/quickbooksHub';
+} from '../types/quickbooksHub';
 
 type SupportedEntityType = Exclude<QuickBooksHubEntityType, 'employee'>;
 

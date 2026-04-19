@@ -1,8 +1,8 @@
 # QuickBooks Workspace Wireframe
 
 Paths:
-- [client/src/modules/quickbooks/QuickbooksDashboard.tsx](/Users/trupal/Projects/RetailSync/client/src/modules/quickbooks/QuickbooksDashboard.tsx)
-- [client/src/modules/quickbooks/QuickbooksRoutes.tsx](/Users/trupal/Projects/RetailSync/client/src/modules/quickbooks/QuickbooksRoutes.tsx)
+- [client/src/modules/quickbooks/QuickBooksDashboard.tsx](/Users/trupal/Projects/RetailSync/client/src/modules/quickbooks/QuickBooksDashboard.tsx)
+- [client/src/modules/quickbooks/QuickBooksRoutes.tsx](/Users/trupal/Projects/RetailSync/client/src/modules/quickbooks/QuickBooksRoutes.tsx)
 
 ## Current Model
 

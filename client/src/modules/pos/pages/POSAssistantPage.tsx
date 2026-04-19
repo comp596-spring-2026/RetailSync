@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import type { PosState } from '../state';
-import { PosAiAssistantPanel } from '../components/PosAiAssistantPanel';
+import { POSAssistantPanel } from '../components/POSAssistantPanel';
 import type { PosPrimaryAction } from './types';
 
-type PosAiViewPageProps = {
+type POSAssistantPageProps = {
   loading: boolean;
   records: PosState['records'];
   totals: PosState['totals'];
@@ -14,7 +14,7 @@ type PosAiViewPageProps = {
   primaryAction: PosPrimaryAction;
 };
 
-export const PosAiViewPage = ({
+export const POSAssistantPage = ({
   loading,
   records,
   totals,
@@ -23,7 +23,7 @@ export const PosAiViewPage = ({
   alerts,
   dateRange,
   primaryAction
-}: PosAiViewPageProps) => {
+}: POSAssistantPageProps) => {
   const snapshot = useMemo(
     () => ({
       records,
@@ -36,5 +36,7 @@ export const PosAiViewPage = ({
     [alerts, chartsData, dateRange, kpis, records, totals]
   );
 
-  return <PosAiAssistantPanel loading={loading} snapshot={snapshot} primaryAction={primaryAction} />;
+  return <POSAssistantPanel loading={loading} snapshot={snapshot} primaryAction={primaryAction} />;
 };
+
+export default POSAssistantPage;

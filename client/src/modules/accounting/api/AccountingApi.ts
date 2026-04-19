@@ -260,7 +260,7 @@ export class AccountingApi {
     }>('/integrations/quickbooks/oauth-status');
   }
 
-  disconnectQuickbooks() {
+  disconnectQuickBooks() {
     return api.post('/integrations/quickbooks/disconnect');
   }
 

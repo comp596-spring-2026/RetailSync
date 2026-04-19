@@ -561,20 +561,20 @@ export const deleteGoogleSheetsSourceThunk = createAsyncThunk<
   await dispatch(fetchGoogleSheetsSyncOverview());
 });
 
-export const connectQuickbooksThunk = createAsyncThunk<string, string | undefined>(
-  'settings/connectQuickbooks',
+export const connectQuickBooksThunk = createAsyncThunk<string, string | undefined>(
+  'settings/connectQuickBooks',
   async (returnTo) => {
-    const response = await settingsApi.connectQuickbooks(returnTo);
+    const response = await settingsApi.connectQuickBooks(returnTo);
     const url = (response.data as { data?: { url?: string } })?.data?.url;
     if (!url) throw new Error('Missing QuickBooks OAuth URL');
     return url;
   }
 );
 
-export const disconnectQuickbooksThunk = createAsyncThunk<void, void, { dispatch: AppDispatch }>(
-  'settings/disconnectQuickbooks',
+export const disconnectQuickBooksThunk = createAsyncThunk<void, void, { dispatch: AppDispatch }>(
+  'settings/disconnectQuickBooks',
   async (_, { dispatch }) => {
-    await settingsApi.disconnectQuickbooks();
+    await settingsApi.disconnectQuickBooks();
     dispatch(showSnackbar({ message: 'QuickBooks disconnected', severity: 'success' }));
     await dispatch(fetchSettings());
   }
@@ -718,12 +718,12 @@ const settingsSlice = createSlice({
       .addCase(deleteGoogleSheetsSourceThunk.pending, (state) => { state.isBusy = true; })
       .addCase(deleteGoogleSheetsSourceThunk.fulfilled, (state) => { state.isBusy = false; })
       .addCase(deleteGoogleSheetsSourceThunk.rejected, (state) => { state.isBusy = false; })
-      .addCase(connectQuickbooksThunk.pending, (state) => { state.isBusy = true; })
-      .addCase(connectQuickbooksThunk.fulfilled, (state) => { state.isBusy = false; })
-      .addCase(connectQuickbooksThunk.rejected, (state) => { state.isBusy = false; })
-      .addCase(disconnectQuickbooksThunk.pending, (state) => { state.isBusy = true; })
-      .addCase(disconnectQuickbooksThunk.fulfilled, (state) => { state.isBusy = false; })
-      .addCase(disconnectQuickbooksThunk.rejected, (state) => { state.isBusy = false; })
+      .addCase(connectQuickBooksThunk.pending, (state) => { state.isBusy = true; })
+      .addCase(connectQuickBooksThunk.fulfilled, (state) => { state.isBusy = false; })
+      .addCase(connectQuickBooksThunk.rejected, (state) => { state.isBusy = false; })
+      .addCase(disconnectQuickBooksThunk.pending, (state) => { state.isBusy = true; })
+      .addCase(disconnectQuickBooksThunk.fulfilled, (state) => { state.isBusy = false; })
+      .addCase(disconnectQuickBooksThunk.rejected, (state) => { state.isBusy = false; })
       .addCase(refreshQuickbooksReferencesThunk.pending, (state) => { state.isBusy = true; })
       .addCase(refreshQuickbooksReferencesThunk.fulfilled, (state) => { state.isBusy = false; })
       .addCase(refreshQuickbooksReferencesThunk.rejected, (state) => { state.isBusy = false; })

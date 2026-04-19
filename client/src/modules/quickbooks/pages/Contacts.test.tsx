@@ -37,11 +37,11 @@ vi.mock('../../accounting/api', () => ({
   }
 }));
 
-vi.mock('../../accounting/hooks/useQuickBooksWorkspace', () => ({
+vi.mock('../hooks/useQuickBooksWorkspace', () => ({
   useQuickBooksWorkspace: (...args: unknown[]) => useQuickBooksWorkspaceMock(...args)
 }));
 
-vi.mock('../../accounting/components', () => ({
+vi.mock('../components', () => ({
   QuickBooksTabs: () => null,
   RequireQuickBooksConnection: ({ children }: { children: ReactNode }) => <>{children}</>
 }));

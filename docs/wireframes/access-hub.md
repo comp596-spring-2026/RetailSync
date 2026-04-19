@@ -1,6 +1,6 @@
 # Access Hub Wireframe
 
-Path: [client/src/modules/users/pages/AccessHubPage.tsx](/Users/trupal/Projects/RetailSync/client/src/modules/users/pages/AccessHubPage.tsx)
+Path: [client/src/modules/users/pages/AccessWorkspacePage.tsx](/Users/trupal/Projects/RetailSync/client/src/modules/users/pages/AccessWorkspacePage.tsx)
 
 ## Current Model
 

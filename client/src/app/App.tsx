@@ -26,12 +26,12 @@ import {
   UnauthorizedPage
 } from "../modules/dev/pages";
 import { DashboardHomePage } from "./pages/DashboardHomePage";
-import { PosPage } from "../modules/pos/pages";
+import { POSWorkspacePage } from "../modules/pos/pages";
 import { ProcurementHubPage } from "../modules/procurement/pages";
 import { RolesPage } from "../modules/rbac/pages";
 import { SettingsPage } from "../modules/settings/pages";
-import { AccessHubPage, UsersPage } from "../modules/users/pages";
-import { QuickbooksRoutes } from "../modules/quickbooks/QuickbooksRoutes";
+import { AccessWorkspacePage, UsersPage } from "../modules/users/pages";
+import { QuickBooksRoutes } from "../modules/quickbooks/QuickBooksRoutes";
 import {
   StatementDetailPage,
   StatementsPage,
@@ -145,13 +145,13 @@ const App = () => {
           <Route path="procurement" element={<ProcurementHubPage />} />
           <Route path="users" element={<Navigate to="/dashboard/access/users" replace />} />
           <Route path="roles" element={<Navigate to="/dashboard/access/roles" replace />} />
-          <Route path="access" element={<AccessHubPage />}>
+          <Route path="access" element={<AccessWorkspacePage />}>
             <Route index element={<AccessIndexRedirect />} />
             <Route path="users" element={<UsersPage showHeader={false} />} />
             <Route path="roles" element={<RolesPage showHeader={false} />} />
             <Route path="settings" element={<Navigate to="/dashboard/settings" replace />} />
           </Route>
-          <Route path="pos" element={<PosPage />} />
+          <Route path="pos" element={<POSWorkspacePage />} />
           <Route path="invoices" element={<Navigate to="/dashboard/procurement" replace />} />
           <Route path="reconciliation" element={<Navigate to="/dashboard/accounting" replace />} />
           <Route path="bankStatements" element={<Navigate to="/dashboard/accounting/statements" replace />} />
@@ -172,7 +172,7 @@ const App = () => {
             <Route path="tax" element={<TaxDashboardPage />} />
             <Route path="observability" element={<Navigate to="/dashboard/accounting/statements" replace />} />
           </Route>
-          <Route path="quickbooks/*" element={<QuickbooksRoutes />} />
+          <Route path="quickbooks/*" element={<QuickBooksRoutes />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Route>

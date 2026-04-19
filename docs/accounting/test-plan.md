@@ -1,5 +1,9 @@
 # Test Plan and Quality Gates (Accounting)
 
+Current product note:
+- visible accounting UX is statements-first
+- ledger and observability remain operational/backend concerns, not the primary user-facing accounting workspace
+
 ## 1) Test pyramid
 
 1. Unit tests
@@ -11,8 +15,9 @@
    - ledger transition and mirror consistency
    - quickbooks sync job behavior
 3. E2E workflow tests
-   - upload -> process -> review -> approve -> post
+   - upload -> process -> review artifacts/checks
    - failure and retry paths
+   - legacy operational posting paths where still applicable
 
 ## 2) Required must-pass scenarios
 

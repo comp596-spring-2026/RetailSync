@@ -1,6 +1,6 @@
 # Point of Sale (POS) Module Wireframe
 
-Path: `/client/src/modules/pos/pages/PosPage.tsx`
+Path: `/client/src/modules/pos/pages/POSWorkspacePage.tsx`
 
 The POS hub utilizes a universal control panel governing three distinct sub-views: Table, Analytics, and AI.
 
@@ -31,7 +31,7 @@ The POS hub utilizes a universal control panel governing three distinct sub-view
 
 ## Sub-View Wireframes (Table & AI)
 
-### Table View (`PosTableViewPage`)
+### Daily Summary View (`POSDailySummaryPage`)
 Filters explicitly change from charts to a paginated Data Table.
 
 ```text
@@ -52,7 +52,7 @@ Filters explicitly change from charts to a paginated Data Table.
 ```
 *(On mobile, the table strictly uses `overflowX: auto` requiring horizontal swiping to access the far-right columns.)*
 
-### AI View (`PosAiViewPage`)
+### Assistant View (`POSAssistantPage`)
 Converts the bottom area to alert cards and a chat interface.
 
 ```text

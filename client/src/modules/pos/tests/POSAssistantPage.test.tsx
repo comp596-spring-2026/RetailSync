@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PosAiViewPage } from '../pages/PosAiViewPage';
+import { POSAssistantPage } from '../pages/POSAssistantPage';
 import type { PosAiChatResponse, PosDailyRecord } from '../api';
 import type { PosState } from '../state';
 
@@ -234,7 +234,7 @@ const buildFinalResponse = (): PosAiChatResponse =>
     generatedAt: '2026-03-08T00:00:00.000Z'
   }) as PosAiChatResponse;
 
-describe('PosAiViewPage', () => {
+describe('POSAssistantPage', () => {
   it('renders a conversational reply with structured widgets and follow-up chips', async () => {
     aiQueryMock.mockResolvedValueOnce({
       data: {
@@ -242,7 +242,7 @@ describe('PosAiViewPage', () => {
       }
     });
 
-    render(<PosAiViewPage {...buildProps()} />);
+    render(<POSAssistantPage {...buildProps()} />);
 
     const user = userEvent.setup();
     const composer = screen.getAllByRole('textbox')[0] as HTMLTextAreaElement;
@@ -305,7 +305,7 @@ describe('PosAiViewPage', () => {
         }
       });
 
-    render(<PosAiViewPage {...buildProps()} />);
+    render(<POSAssistantPage {...buildProps()} />);
 
     const user = userEvent.setup();
     const composer = screen.getAllByRole('textbox')[0] as HTMLTextAreaElement;
@@ -361,7 +361,7 @@ describe('PosAiViewPage', () => {
         }
       });
 
-    render(<PosAiViewPage {...buildProps()} />);
+    render(<POSAssistantPage {...buildProps()} />);
 
     const user = userEvent.setup();
     const composer = screen.getAllByRole('textbox')[0] as HTMLTextAreaElement;

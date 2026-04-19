@@ -5,9 +5,9 @@ import { useNavigate } from 'react-router-dom';
 import { NoAccess, PageHeader } from '../../../components';
 import { useAppSelector } from '../../../app/store/hooks';
 import { hasPermission } from '../../../utils/permissions';
-import { QuickBooksTabs, RequireQuickBooksConnection } from '../../accounting/components';
-import { useQuickBooksWorkspace } from '../../accounting/hooks/useQuickBooksWorkspace';
-import { QuickbooksCard } from '../components/QuickbooksCard';
+import { QuickBooksCard } from '../components/QuickBooksCard';
+import { QuickBooksTabs, RequireQuickBooksConnection } from '../components';
+import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
 
 export const SalesPage = () => {
   const navigate = useNavigate();
@@ -51,13 +51,13 @@ export const SalesPage = () => {
             }
           }}
         >
-          <QuickbooksCard
+          <QuickBooksCard
             title="Invoices"
             description="Create, review, edit, and delete invoices in the connected QuickBooks company."
             icon={ReceiptLongOutlinedIcon}
             onClick={() => navigate('/dashboard/quickbooks/sales/invoices')}
           />
-          <QuickbooksCard
+          <QuickBooksCard
             title="Payments"
             description="Record received payments and manage invoice-linked payment activity."
             icon={PaidOutlinedIcon}

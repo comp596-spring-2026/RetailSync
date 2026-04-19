@@ -31,9 +31,9 @@ import { ImportPOSDataModal } from '../components/ImportPOSDataModal';
 import { fetchSettings, selectGoogleSheetsSettings, selectSettings } from '../../settings/state';
 import { hasPermission } from '../../../utils/permissions';
 import type { PosView } from '../state';
-import { PosAnalyticsViewPage } from './PosAnalyticsViewPage';
-import { PosAiViewPage } from './PosAiViewPage';
-import { PosTableViewPage } from './PosTableViewPage';
+import { POSAnalyticsPage } from './POSAnalyticsPage';
+import { POSAssistantPage } from './POSAssistantPage';
+import { POSDailySummaryPage } from './POSDailySummaryPage';
 import type { PosPrimaryAction } from './types';
 
 type LastImportSource = 'file' | 'google_sheets' | null;
@@ -121,7 +121,7 @@ const resolveSyncConfigured = (
   return hasShared || hasLegacyShared || hasOauth;
 };
 
-export const PosPage = () => {
+export const POSWorkspacePage = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const permissions = useAppSelector((state) => state.auth.permissions);
@@ -330,7 +330,7 @@ export const PosPage = () => {
       {state.error ? <Alert severity="error">{state.error}</Alert> : null}
 
       {state.view === 'analytics' ? (
-        <PosAnalyticsViewPage
+        <POSAnalyticsPage
           loading={state.loading.overview}
           chartsData={state.chartsData}
           primaryAction={primaryAction}
@@ -345,7 +345,7 @@ export const PosPage = () => {
           cashDiff={cashDiff}
         />
       ) : state.view === 'ai' ? (
-        <PosAiViewPage
+        <POSAssistantPage
           loading={state.loading.overview || state.loading.daily}
           records={state.records}
           totals={state.totals}
@@ -356,7 +356,7 @@ export const PosPage = () => {
           primaryAction={primaryAction}
         />
       ) : (
-        <PosTableViewPage
+        <POSDailySummaryPage
           loading={state.loading.daily}
           rows={state.records}
           totals={state.totals}
@@ -384,3 +384,5 @@ export const PosPage = () => {
     </Stack>
   );
 };
+
+export default POSWorkspacePage;

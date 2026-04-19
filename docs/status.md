@@ -183,8 +183,7 @@ Environment/config readiness required for production:
 
 ## Known Drift / Cleanup Still Worth Doing
 
-- Some docs outside the core status set still reference inventory or earlier accounting layouts.
-- Some QuickBooks implementation still lives under accounting-layer files even though the UX is now a dedicated workspace.
+- Some QuickBooks detail pages still share older accounting-owned implementations even though route ownership and workspace plumbing now live under the dedicated QuickBooks module.
 - Procurement remains intentionally hidden rather than fully deleted from every historical reference.
 - The release path should eventually include a stricter hosted green-run requirement before merging to `production`.
 
@@ -193,7 +192,7 @@ Environment/config readiness required for production:
 ## Recommended Near-Term Priorities
 
 1. Keep the active product surface tight: auth, POS, statements, QuickBooks, settings, access.
-2. Continue reducing route and doc drift from older accounting and inventory concepts.
+2. Continue reducing route drift from older accounting aliases and compatibility paths.
 3. Add stronger release validation for active user journeys before broadening module scope again.
 4. Treat procurement/reconciliation/invoice OCR as explicit future initiatives, not implied production-complete surfaces.
 

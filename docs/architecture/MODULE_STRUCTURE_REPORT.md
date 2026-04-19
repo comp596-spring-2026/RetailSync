@@ -2,6 +2,11 @@
 
 Date: 2026-03-25
 
+Historical note:
+- this document is a cleanup-planning artifact from an earlier structure pass
+- references to inventory or older accounting ownership should be read as historical, not as the active product surface
+- treat routes and ownership notes here as planning-era guidance unless they match `docs/status.md` and the current app router
+
 ## Purpose
 
 This document is the manager-owned canonical map for cleanup planning.

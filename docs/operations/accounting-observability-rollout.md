@@ -98,15 +98,16 @@ The URI configured in Intuit must equal `QUICKBOOKS_INTEGRATION_REDIRECT_URI`.
 
 ### App checks
 
-- Open `/dashboard/accounting/quickbooks`
+- Open `/dashboard/quickbooks`
   - connect QuickBooks
   - refresh reference data
   - post approved entries
-- Open `/dashboard/accounting/observability`
+- Open `/dashboard/accounting/statements`
   - recent statements load
-  - failed jobs list renders
-  - debug diagnostics run
-  - GCP log shortcut links open
+  - statement detail opens
+  - processing artifacts render as expected
+
+Operational observability endpoints still exist on the backend, but they are no longer a primary user-facing accounting page in the current UI model.
 
 Detailed accounting lifecycle + module docs:
 

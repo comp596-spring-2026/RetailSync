@@ -1,30 +1,24 @@
 import { Navigate, useParams, useRoutes } from 'react-router-dom';
-import QuickbooksDashboard from './QuickbooksDashboard';
+import QuickBooksDashboard from './QuickBooksDashboard';
 import AccountsPage from './pages/Accounts';
+import AccountRegisterPage from './pages/AccountRegister';
+import ChecksPage from './pages/Checks';
 import ContactsPage from './pages/Contacts';
+import DepositsPage from './pages/Deposits';
+import ExpensesPage from './pages/Expenses';
+import MoneyCreatePage from './pages/MoneyCreate';
+import MoneyEditPage from './pages/MoneyEdit';
 import MoneyPage from './pages/Money';
 import OperationsPage from './pages/Operations';
 import ReportsPage from './pages/Reports';
 import SalesPage from './pages/Sales';
 import TaxPage from './pages/Tax';
-import {
-  QuickBooksAccountRegisterPage,
-  QuickBooksChecksPage,
-  QuickBooksDepositsPage,
-  QuickBooksExpensesPage,
-  QuickBooksTransactionDetailPage,
-  QuickBooksTransfersPage
-} from '../accounting/pages/QuickBooksLiveReadPages';
-import {
-  QuickBooksMoneyCreatePage,
-  QuickBooksMoneyEditPage
-} from '../accounting/pages/QuickBooksMoneyPages';
-import {
-  QuickBooksWriteCreatePage,
-  QuickBooksWriteDetailPage,
-  QuickBooksWriteEditPage,
-  QuickBooksWriteListPage
-} from '../accounting/pages/QuickBooksWritePages';
+import TransactionDetailPage from './pages/TransactionDetail';
+import TransfersPage from './pages/Transfers';
+import WriteCreatePage from './pages/WriteCreate';
+import WriteDetailPage from './pages/WriteDetail';
+import WriteEditPage from './pages/WriteEdit';
+import WriteListPage from './pages/WriteList';
 
 const LegacyQuickBooksRegisterRedirect = () => {
   const { accountId } = useParams<{ accountId: string }>();
@@ -40,11 +34,11 @@ const LegacyQuickBooksTransactionRedirect = ({
   return <Navigate to={qbTxnId ? `${to}/${qbTxnId}` : to} replace />;
 };
 
-export const QuickbooksRoutes = () =>
+export const QuickBooksRoutes = () =>
   useRoutes([
-    { index: true, element: <QuickbooksDashboard /> },
+    { index: true, element: <QuickBooksDashboard /> },
     { path: 'accounts', element: <AccountsPage /> },
-    { path: 'accounts/:accountId/register', element: <QuickBooksAccountRegisterPage /> },
+    { path: 'accounts/:accountId/register', element: <AccountRegisterPage /> },
     { path: 'contacts', element: <ContactsPage /> },
     { path: 'customers', element: <Navigate to="/dashboard/quickbooks/contacts" replace /> },
     { path: 'vendors', element: <Navigate to="/dashboard/quickbooks/contacts" replace /> },
@@ -52,31 +46,31 @@ export const QuickbooksRoutes = () =>
     { path: 'reports', element: <ReportsPage /> },
     { path: 'tax', element: <TaxPage /> },
     { path: 'sales', element: <SalesPage /> },
-    { path: 'sales/invoices', element: <QuickBooksWriteListPage /> },
-    { path: 'sales/invoices/new', element: <QuickBooksWriteCreatePage /> },
-    { path: 'sales/invoices/:qbTxnId/edit', element: <QuickBooksWriteEditPage /> },
-    { path: 'sales/invoices/:qbTxnId', element: <QuickBooksWriteDetailPage /> },
-    { path: 'sales/payments', element: <QuickBooksWriteListPage /> },
-    { path: 'sales/payments/new', element: <QuickBooksWriteCreatePage /> },
-    { path: 'sales/payments/:qbTxnId/edit', element: <QuickBooksWriteEditPage /> },
-    { path: 'sales/payments/:qbTxnId', element: <QuickBooksWriteDetailPage /> },
+    { path: 'sales/invoices', element: <WriteListPage /> },
+    { path: 'sales/invoices/new', element: <WriteCreatePage /> },
+    { path: 'sales/invoices/:qbTxnId/edit', element: <WriteEditPage /> },
+    { path: 'sales/invoices/:qbTxnId', element: <WriteDetailPage /> },
+    { path: 'sales/payments', element: <WriteListPage /> },
+    { path: 'sales/payments/new', element: <WriteCreatePage /> },
+    { path: 'sales/payments/:qbTxnId/edit', element: <WriteEditPage /> },
+    { path: 'sales/payments/:qbTxnId', element: <WriteDetailPage /> },
     { path: 'money', element: <MoneyPage /> },
-    { path: 'money/deposits', element: <QuickBooksDepositsPage /> },
-    { path: 'money/deposits/new', element: <QuickBooksMoneyCreatePage /> },
-    { path: 'money/checks', element: <QuickBooksChecksPage /> },
-    { path: 'money/checks/new', element: <QuickBooksMoneyCreatePage /> },
-    { path: 'money/expenses', element: <QuickBooksExpensesPage /> },
-    { path: 'money/expenses/new', element: <QuickBooksMoneyCreatePage /> },
-    { path: 'money/transfers', element: <QuickBooksTransfersPage /> },
-    { path: 'money/transfers/new', element: <QuickBooksMoneyCreatePage /> },
-    { path: 'money/deposits/:qbTxnId/edit', element: <QuickBooksMoneyEditPage /> },
-    { path: 'money/deposits/:qbTxnId', element: <QuickBooksTransactionDetailPage /> },
-    { path: 'money/checks/:qbTxnId/edit', element: <QuickBooksMoneyEditPage /> },
-    { path: 'money/checks/:qbTxnId', element: <QuickBooksTransactionDetailPage /> },
-    { path: 'money/expenses/:qbTxnId/edit', element: <QuickBooksMoneyEditPage /> },
-    { path: 'money/expenses/:qbTxnId', element: <QuickBooksTransactionDetailPage /> },
-    { path: 'money/transfers/:qbTxnId/edit', element: <QuickBooksMoneyEditPage /> },
-    { path: 'money/transfers/:qbTxnId', element: <QuickBooksTransactionDetailPage /> },
+    { path: 'money/deposits', element: <DepositsPage /> },
+    { path: 'money/deposits/new', element: <MoneyCreatePage /> },
+    { path: 'money/checks', element: <ChecksPage /> },
+    { path: 'money/checks/new', element: <MoneyCreatePage /> },
+    { path: 'money/expenses', element: <ExpensesPage /> },
+    { path: 'money/expenses/new', element: <MoneyCreatePage /> },
+    { path: 'money/transfers', element: <TransfersPage /> },
+    { path: 'money/transfers/new', element: <MoneyCreatePage /> },
+    { path: 'money/deposits/:qbTxnId/edit', element: <MoneyEditPage /> },
+    { path: 'money/deposits/:qbTxnId', element: <TransactionDetailPage /> },
+    { path: 'money/checks/:qbTxnId/edit', element: <MoneyEditPage /> },
+    { path: 'money/checks/:qbTxnId', element: <TransactionDetailPage /> },
+    { path: 'money/expenses/:qbTxnId/edit', element: <MoneyEditPage /> },
+    { path: 'money/expenses/:qbTxnId', element: <TransactionDetailPage /> },
+    { path: 'money/transfers/:qbTxnId/edit', element: <MoneyEditPage /> },
+    { path: 'money/transfers/:qbTxnId', element: <TransactionDetailPage /> },
     { path: 'transactions', element: <Navigate to="/dashboard/quickbooks/sales" replace /> },
     { path: 'transactions/registers/:accountId', element: <LegacyQuickBooksRegisterRedirect /> },
     { path: 'transactions/deposit', element: <Navigate to="/dashboard/quickbooks/money/deposits" replace /> },
@@ -105,4 +99,4 @@ export const QuickbooksRoutes = () =>
     { path: '*', element: <Navigate to="/404" replace /> }
   ]);
 
-export default QuickbooksRoutes;
+export default QuickBooksRoutes;

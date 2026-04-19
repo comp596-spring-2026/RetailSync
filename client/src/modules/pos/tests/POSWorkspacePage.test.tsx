@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { PosPage } from '../pages/PosPage';
+import { POSWorkspacePage } from '../pages/POSWorkspacePage';
 
 const dispatchMock = vi.fn();
 const navigateMock = vi.fn();
@@ -145,23 +145,23 @@ vi.mock('../hooks/usePos', () => ({
   })
 }));
 
-vi.mock('../pages/PosAnalyticsViewPage', () => ({
-  PosAnalyticsViewPage: () => <div data-testid="pos-analytics-view">Analytics view</div>
+vi.mock('../pages/POSAnalyticsPage', () => ({
+  POSAnalyticsPage: () => <div data-testid="pos-analytics-view">Analytics view</div>
 }));
 
-vi.mock('../pages/PosAiViewPage', () => ({
-  PosAiViewPage: () => <div data-testid="pos-ai-view">AI view</div>
+vi.mock('../pages/POSAssistantPage', () => ({
+  POSAssistantPage: () => <div data-testid="pos-ai-view">AI view</div>
 }));
 
-vi.mock('../pages/PosTableViewPage', () => ({
-  PosTableViewPage: () => <div data-testid="pos-table-view">Table view</div>
+vi.mock('../pages/POSDailySummaryPage', () => ({
+  POSDailySummaryPage: () => <div data-testid="pos-table-view">Table view</div>
 }));
 
 vi.mock('../components/ImportPOSDataModal', () => ({
   ImportPOSDataModal: () => null
 }));
 
-describe('PosPage', () => {
+describe('POSWorkspacePage', () => {
   beforeEach(() => {
     dispatchMock.mockReset();
     navigateMock.mockReset();
@@ -177,7 +177,7 @@ describe('PosPage', () => {
   it('dispatches the AI tab switch and keeps the POS AI route in the page shell', async () => {
     const user = userEvent.setup();
 
-    render(<PosPage />);
+    render(<POSWorkspacePage />);
 
     expect(screen.getByRole('heading', { name: 'POS Table View' })).toBeInTheDocument();
     expect(screen.getByTestId('pos-table-view')).toBeInTheDocument();
@@ -190,7 +190,7 @@ describe('PosPage', () => {
   it('renders the AI view when the state is already switched there', () => {
     usePosState.state.view = 'ai';
 
-    render(<PosPage />);
+    render(<POSWorkspacePage />);
 
     expect(screen.getByRole('heading', { name: 'POS AI View' })).toBeInTheDocument();
     expect(screen.getByTestId('pos-ai-view')).toBeInTheDocument();

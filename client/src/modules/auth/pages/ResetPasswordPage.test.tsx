@@ -1,12 +1,6 @@
-import { configureStore } from '@reduxjs/toolkit';
-import { Provider } from 'react-redux';
-import { MemoryRouter } from 'react-router-dom';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import authReducer from '../state';
-import companyReducer from '../../users/state';
-import rbacReducer from '../../rbac/state';
-import uiReducer from '../../../app/store/uiSlice';
+import { renderWithAppProviders } from '../../../test/utils';
 import { ResetPasswordPage } from './ResetPasswordPage';
 
 const mockNavigate = vi.fn();
@@ -31,16 +25,6 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-const createStore = () =>
-  configureStore({
-    reducer: {
-      auth: authReducer,
-      company: companyReducer,
-      rbac: rbacReducer,
-      ui: uiReducer
-    }
-  });
-
 describe('ResetPasswordPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,13 +40,9 @@ describe('ResetPasswordPage', () => {
   });
 
   it('resets the password from a reset token', async () => {
-    render(
-      <Provider store={createStore()}>
-        <MemoryRouter initialEntries={['/reset-password?token=reset-token&email=user@retailsync.com']}>
-          <ResetPasswordPage />
-        </MemoryRouter>
-      </Provider>
-    );
+    renderWithAppProviders(<ResetPasswordPage />, {
+      initialEntries: ['/reset-password?token=reset-token&email=user@retailsync.com']
+    });
 
     fireEvent.change(screen.getByLabelText('New password'), { target: { value: 'password123' } });
     fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'password123' } });

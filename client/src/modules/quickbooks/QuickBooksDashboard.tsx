@@ -18,8 +18,8 @@ import { getAppErrorMessage } from '../../constants/errorCodes';
 import { hasPermission } from '../../utils/permissions';
 import { extractApiErrorMessage } from '../../utils/apiError';
 import { accountingApi } from '../accounting/api';
-import { useQuickBooksWorkspace } from '../accounting/hooks/useQuickBooksWorkspace';
-import { QuickbooksCard } from './components/QuickbooksCard';
+import { useQuickBooksWorkspace } from './hooks/useQuickBooksWorkspace';
+import { QuickBooksCard } from './components/QuickBooksCard';
 import { QUICKBOOKS_QUICK_ACCESS_ITEMS, QUICKBOOKS_SECTION_DESCRIPTIONS } from './constants';
 
 const connectionChipColor = (status: 'connected' | 'degraded' | 'not_connected') => {
@@ -39,7 +39,7 @@ const tokenHealthLabel = (
   return 'Healthy';
 };
 
-export const QuickbooksDashboard = () => {
+export const QuickBooksDashboard = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
@@ -104,7 +104,7 @@ export const QuickbooksDashboard = () => {
   const onDisconnect = async () => {
     try {
       setBusy(true);
-      await accountingApi.disconnectQuickbooks();
+      await accountingApi.disconnectQuickBooks();
       await load();
       dispatch(showSnackbar({ message: 'QuickBooks disconnected.', severity: 'success' }));
     } catch (apiError) {
@@ -159,7 +159,7 @@ export const QuickbooksDashboard = () => {
               }}
             >
               {items.map((item) => (
-                <QuickbooksCard
+                <QuickBooksCard
                   key={item.to}
                   title={item.title}
                   description={item.description}
@@ -266,4 +266,4 @@ export const QuickbooksDashboard = () => {
   );
 };
 
-export default QuickbooksDashboard;
+export default QuickBooksDashboard;

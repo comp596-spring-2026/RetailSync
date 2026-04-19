@@ -14,7 +14,7 @@ import {
   quickBooksReadQueryForCompany,
   quickBooksReadQuerySchema,
   queueQuickBooksSync,
-  updateQuickbooksSettingsSchema,
+  updateQuickBooksSettingsSchema,
   updateQuickBooksSettings as updateQuickBooksSettingsApp
 } from '../services/quickbooks/applicationService';
 
@@ -162,7 +162,7 @@ export const updateQuickBooksSettings = async (req: Request, res: Response) => {
     return fail(res, 'Company onboarding required', 403);
   }
 
-  const parsed = updateQuickbooksSettingsSchema.safeParse(req.body ?? {});
+  const parsed = updateQuickBooksSettingsSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return fail(res, 'Validation failed', 422, parsed.error.flatten());
   }

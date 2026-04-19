@@ -10,7 +10,7 @@ User-facing accounting routes:
 - `/dashboard/accounting/statements`
 - `/dashboard/accounting/statements/:statementId`
 
-QuickBooks is documented separately as its own workspace even though some backend and internal service layers are still shared with accounting workflows.
+QuickBooks is documented separately as its own workspace. Shared backend data and sync services still interact with accounting records, but client-side QuickBooks workspace ownership now lives under the dedicated QuickBooks module.
 
 ## What Accounting Owns
 
