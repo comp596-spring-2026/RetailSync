@@ -5,9 +5,9 @@ import { useNavigate } from 'react-router-dom';
 import { NoAccess, PageHeader } from '../../../components';
 import { useAppSelector } from '../../../app/store/hooks';
 import { hasPermission } from '../../../utils/permissions';
-import { QuickBooksTabs, RequireQuickBooksConnection } from '../../accounting/components';
-import { useQuickBooksWorkspace } from '../../accounting/hooks/useQuickBooksWorkspace';
 import { QuickbooksCard } from '../components/QuickbooksCard';
+import { QuickBooksTabs, RequireQuickBooksConnection } from '../components';
+import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
 
 export const SalesPage = () => {
   const navigate = useNavigate();

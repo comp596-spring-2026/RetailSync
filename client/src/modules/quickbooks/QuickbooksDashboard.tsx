@@ -18,7 +18,7 @@ import { getAppErrorMessage } from '../../constants/errorCodes';
 import { hasPermission } from '../../utils/permissions';
 import { extractApiErrorMessage } from '../../utils/apiError';
 import { accountingApi } from '../accounting/api';
-import { useQuickBooksWorkspace } from '../accounting/hooks/useQuickBooksWorkspace';
+import { useQuickBooksWorkspace } from './hooks/useQuickBooksWorkspace';
 import { QuickbooksCard } from './components/QuickbooksCard';
 import { QUICKBOOKS_QUICK_ACCESS_ITEMS, QUICKBOOKS_SECTION_DESCRIPTIONS } from './constants';
 

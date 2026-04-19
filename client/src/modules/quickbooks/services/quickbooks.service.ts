@@ -8,7 +8,7 @@ import { api } from '../../../app/api/client';
 import type {
   QuickBooksChartOfAccountsRow,
   QuickBooksHubEntityRow
-} from '../../accounting/types/quickbooksHub';
+} from '../types/quickbooksHub';
 import { QUICKBOOKS_SERVICE_DEFAULTS } from '../constants';
 
 type Paged<T> = {

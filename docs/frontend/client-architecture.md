@@ -52,7 +52,7 @@ Protected:
 ## Notes On Current Architecture
 
 - QuickBooks has a dedicated module workspace under `client/src/modules/quickbooks`.
-- Some QuickBooks page implementations still reuse accounting-layer components and pages.
+- QuickBooks shared workspace plumbing now lives under `client/src/modules/quickbooks`, even where some detailed page implementations are still shared with older accounting-owned files.
 - Procurement still exists in code, but it is not part of the intended visible product navigation.
 - Inventory has been removed from the active client surface.
 

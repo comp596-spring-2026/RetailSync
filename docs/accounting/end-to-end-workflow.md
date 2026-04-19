@@ -2,6 +2,11 @@
 
 This document is the concrete lifecycle reference for accounting as implemented in the current codebase.
 
+Current product note:
+- the visible accounting workspace is statements-first
+- QuickBooks is a standalone workspace
+- ledger review and observability material below describes operational/background flow references, not the current primary navigation model
+
 ## 1) Prerequisite: QuickBooks connection
 
 1. User opens `QuickBooks Sync` tab.

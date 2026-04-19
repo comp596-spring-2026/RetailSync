@@ -31,8 +31,8 @@ Base URL: `http://localhost:4000/api`
 - `POST /company/create`
 - `POST /company/join`
 - `GET /company/mine`
-- `GET /company/quickbooks-onboarding-status`
-- `POST /company/quickbooks-onboarding/start`
+- `GET /company/quickbooks/onboarding`
+- `POST /company/quickbooks/connect`
 
 ## Users / Roles / Invites
 
@@ -80,7 +80,7 @@ Base URL: `http://localhost:4000/api`
 
 ## Accounting Legacy/Operational Endpoints
 
-These still exist for pipeline and compatibility needs, but they are not the primary visible product surface:
+These still exist for pipeline, background processing, or compatibility needs, but they are not part of the primary visible accounting workspace:
 
 - `GET /accounting/ledger/entries`
 - `GET /accounting/ledger/entries/:id`
@@ -95,10 +95,15 @@ These still exist for pipeline and compatibility needs, but they are not the pri
 ## QuickBooks Integrations
 
 Connection/sync:
-- `GET /integrations/quickbooks/connect-url`
+- `GET /integrations/quickbooks/oauth-status`
+- `GET /integrations/quickbooks/settings`
+- `PUT /integrations/quickbooks/settings`
+- `GET /integrations/quickbooks/start-url`
+- `GET /integrations/quickbooks/start`
 - `POST /integrations/quickbooks/disconnect`
 - `POST /integrations/quickbooks/sync/refresh-reference-data`
 - `POST /integrations/quickbooks/sync/post-approved`
+- `POST /integrations/quickbooks/query`
 
 Hub/read surfaces:
 - `GET /integrations/quickbooks/hub/chart-of-accounts`
@@ -106,10 +111,10 @@ Hub/read surfaces:
 - `GET /integrations/quickbooks/hub/operations`
 
 Contacts:
-- `GET /integrations/quickbooks/contact/:entityType/:qbId`
-- `POST /integrations/quickbooks/contact/:entityType`
-- `PATCH /integrations/quickbooks/contact/:entityType/:qbId`
-- `DELETE /integrations/quickbooks/contact/:entityType/:qbId`
+- `GET /integrations/quickbooks/contacts/:entityType/:qbId`
+- `POST /integrations/quickbooks/contacts/:entityType`
+- `PATCH /integrations/quickbooks/contacts/:entityType/:qbId`
+- `DELETE /integrations/quickbooks/contacts/:entityType/:qbId`
 
 Money transactions:
 - `POST /integrations/quickbooks/money/:txnType`
@@ -124,7 +129,16 @@ Write transactions:
 - `DELETE /integrations/quickbooks/write/:txnType/:qbTxnId`
 
 Tax/live reads:
-- tax and reporting endpoints under `/integrations/quickbooks/*`
+- `GET /integrations/quickbooks/live/registers/:accountId`
+- `GET /integrations/quickbooks/live/transactions/:type`
+- `GET /integrations/quickbooks/live/transaction/:qbTxnId`
+- `GET /integrations/quickbooks/tax/overview`
+- `GET /integrations/quickbooks/tax/reports/:reportKey`
+- `GET /integrations/quickbooks/tax/chart-of-accounts`
+- `GET /integrations/quickbooks/tax/ledger`
+- `GET /integrations/quickbooks/tax/payments`
+- `POST /integrations/quickbooks/tax/recover-payment`
+- `POST /integrations/quickbooks/tax/journal-adjustment`
 
 ## Google / Google Sheets
 

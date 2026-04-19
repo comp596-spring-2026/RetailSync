@@ -11,11 +11,11 @@
 
 - Auth: login/onboarding pages + auth API + auth sync flow tests
 - POS: slice thunks, mapping wizard, chart rendering tests
-- Inventory: item/location slice tests
 - Users: company slice tests
 - RBAC: role state tests
 - Settings: settings slice + debug helper tests
-- Accounting: backend integration flow in `server/src/accounting.e2e.test.ts`, module playbook in `module-e2e-cases.md`
+- Accounting statements: upload/detail/retry coverage plus server pipeline tests
+- QuickBooks: hub/page/service coverage across contacts, money, writes, and live reads
 - Procurement: hub page smoke test
 - Dev: home demo page smoke test
 
@@ -29,8 +29,8 @@ Detailed matrix:
 
 - Health/app contract
 - JWT refresh rotation and reuse protection
-- Tenant isolation for company-scoped data
-- Inventory ledger immutability
+- Company-scoped auth, onboarding, and RBAC behavior
+- Statement pipeline, QuickBooks services, and POS/reporting behavior
 - POS/reports integration baseline behavior
 
 ## Commands
@@ -52,3 +52,4 @@ pnpm test
 
 - CI should run client + server typecheck and tests on every PR.
 - Integration suites requiring Mongo memory binaries should run in CI environments with download/cache access.
+- Full release confidence still requires a runner that permits local bind/listen behavior for `mongodb-memory-server` and `supertest`.
