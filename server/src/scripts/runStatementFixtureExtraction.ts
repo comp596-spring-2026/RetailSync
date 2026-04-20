@@ -16,7 +16,7 @@ import {
   extractPdfFallbackText
 } from '../services/accountingPdfAnalysisService';
 import { renderStatementPdfPages } from '../services/accountingPdfRenderService';
-import { ocrStatementPages } from '../services/accountingStatementOcrService';
+import { extractStatementPagesFromPdfBuffer } from '../services/accountingPdfTextExtractionService';
 import { runStatementCheckExtraction } from '../services/accountingCheckExtractionService';
 import type { CheckCropBox } from '../services/accountingCheckCropService';
 
@@ -317,16 +317,10 @@ const main = async () => {
         error: string;
       };
 
-  let pageObservations: Awaited<ReturnType<typeof ocrStatementPages>> = [];
+  let pageObservations: Awaited<ReturnType<typeof extractStatementPagesFromPdfBuffer>> = [];
 
   try {
-    pageObservations = await ocrStatementPages(
-      renderedPages.map((page) => ({
-        pageNumber: page.pageNo,
-        imageBuffer: page.buffer,
-        mimeType: 'image/png'
-      }))
-    );
+    pageObservations = await extractStatementPagesFromPdfBuffer(pdfBuffer);
     const observationsPath = buildOcrPath(rootPrefix, 'statement-pages.ocr.json');
     await writeJson(toLocalPath(observationsPath), pageObservations);
     statementOcr = {
@@ -417,6 +411,7 @@ const main = async () => {
           cropBox: anchoredCheck.bbox,
           checkKey,
           pageContext: page.text,
+          internalPdfPageText: page.text,
           persistArtifacts: false
         });
 

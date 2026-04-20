@@ -7,6 +7,8 @@ import {
   detectStatementMonthResponseSchema,
   listBankStatementsQuerySchema,
   listChecksQuerySchema,
+  updateStatementEntryReviewSchema,
+  updateStatementSuggestionReviewSchema,
   reprocessBankStatementSchema,
   statementSuggestionsResponseSchema,
   requestStatementUploadUrlResponseSchema,
@@ -452,6 +454,9 @@ const buildStatementArtifacts = (statement: any) => {
     checksClearedTablePath: artifacts.checksClearedTablePath ?? undefined,
     transactionSectionsPath: artifacts.transactionSectionsPath ?? undefined,
     extractedChecksPath: artifacts.extractedChecksPath ?? undefined,
+    classificationOutputPath: artifacts.classificationOutputPath ?? undefined,
+    suggestionsOutputPath: artifacts.suggestionsOutputPath ?? undefined,
+    processingSummaryPath: artifacts.processingSummaryPath ?? undefined,
     geminiPath: artifacts.geminiPath ?? undefined,
     detectionEvidence: artifacts.detectionEvidence ?? undefined,
     detectedStatementMonth: artifacts.detectedStatementMonth ?? undefined,
@@ -627,6 +632,31 @@ const loadStatementTransactions = async (statementId: string, companyId: unknown
   return map;
 };
 
+const buildMonthCloseGates = async (statement: any) => {
+  const statementId = statement._id.toString();
+  const companyId = statement.companyId;
+  const [transactions, checks] = await Promise.all([
+    StatementTransactionModel.find({ statementId, companyId }).lean(),
+    StatementCheckModel.find({ statementId, companyId }).lean()
+  ]);
+
+  const rowsReviewed =
+    transactions.length > 0 &&
+    transactions.every((txn: any) => ['approved', 'excluded'].includes(String(txn.reviewStatus ?? 'proposed')));
+  const noBlockingExtractionFailures = String(statement.status) !== 'failed' && checks.every((c: any) => c.status !== 'failed');
+  const noMandatoryUnknowns = transactions.every((txn: any) => String(txn.classification ?? 'unknown') !== 'unknown');
+  const noPendingMandatorySuggestionDecisions = transactions.every((txn: any) =>
+    ['approved', 'excluded'].includes(String(txn.proposal?.status ?? txn.reviewStatus ?? 'proposed'))
+  );
+
+  return {
+    rowsReviewed,
+    noBlockingExtractionFailures,
+    noMandatoryUnknowns,
+    noPendingMandatorySuggestionDecisions
+  };
+};
+
 const toListItem = (statement: any) =>
   bankStatementListItemSchema.parse({
     id: statement._id.toString(),
@@ -659,6 +689,7 @@ const toDetailItem = async (statement: any) => {
     )
   );
 
+  const monthCloseGates = await buildMonthCloseGates(statement);
   return bankStatementDetailSchema.parse({
     ...toListItem(statement),
     periodStart: statement.periodStart ?? undefined,
@@ -670,6 +701,12 @@ const toDetailItem = async (statement: any) => {
       pdfPath: statement.gcs?.pdfPath
     },
     artifacts: buildStatementArtifacts(statement),
+    monthClose: {
+      status: statement.monthClose?.status ?? 'open',
+      completedAt: statement.monthClose?.completedAt ?? undefined,
+      completedBy: statement.monthClose?.completedBy?.toString?.() ?? undefined,
+      gates: monthCloseGates
+    },
     checks: checksPayload,
     issues: Array.isArray(statement.issues)
       ? statement.issues.map((issue: unknown) => String(issue))
@@ -950,6 +987,9 @@ export const createStatement = async (req: Request, res: Response) => {
               : nowIso()
         }
       };
+      statement.monthClose = {
+        status: 'open'
+      };
       await statement.save();
     } else {
       statement = await BankStatement.create({
@@ -971,6 +1011,9 @@ export const createStatement = async (req: Request, res: Response) => {
           }
         },
         progress: uploadedProgress,
+        monthClose: {
+          status: 'open'
+        },
         hash: undefined,
         issues: [],
         createdBy: req.user.id
@@ -1112,6 +1155,96 @@ export const listStatements = async (req: Request, res: Response) => {
   }
 };
 
+export const listStatementMonths = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+
+  const statements = await BankStatement.find({ companyId: req.companyId })
+    .select('_id statementMonth status updatedAt createdAt')
+    .sort({ statementMonth: -1, createdAt: -1 })
+    .lean();
+
+  const byMonth = new Map<
+    string,
+    {
+      month: string;
+      statementCount: number;
+      latestStatementId: string;
+      latestStatus: string;
+      updatedAt: string;
+    }
+  >();
+
+  for (const statement of statements) {
+    const month = String(statement.statementMonth ?? '');
+    if (!month) continue;
+    if (!byMonth.has(month)) {
+      byMonth.set(month, {
+        month,
+        statementCount: 1,
+        latestStatementId: String(statement._id),
+        latestStatus: String(statement.status ?? 'uploaded'),
+        updatedAt:
+          statement.updatedAt instanceof Date
+            ? statement.updatedAt.toISOString()
+            : String(statement.updatedAt ?? new Date().toISOString())
+      });
+      continue;
+    }
+
+    const current = byMonth.get(month)!;
+    current.statementCount += 1;
+  }
+
+  return ok(res, {
+    months: Array.from(byMonth.values()).sort((a, b) => b.month.localeCompare(a.month))
+  });
+};
+
+export const getStatementMonthSummary = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  const month = String(req.params.month ?? '');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return fail(res, 'Invalid month format, expected YYYY-MM', 422);
+  }
+
+  const statements = await BankStatement.find({ companyId: req.companyId, statementMonth: month })
+    .sort({ createdAt: -1 })
+    .lean();
+  if (statements.length === 0) {
+    return fail(res, 'Statement month not found', 404);
+  }
+
+  const statementIds = statements.map((statement) => String(statement._id));
+  const [entryCount, unresolvedEntries, unknownEntries] = await Promise.all([
+    StatementTransactionModel.countDocuments({
+      companyId: req.companyId,
+      statementId: { $in: statementIds }
+    }),
+    StatementTransactionModel.countDocuments({
+      companyId: req.companyId,
+      statementId: { $in: statementIds },
+      reviewStatus: { $nin: ['approved', 'excluded'] }
+    }),
+    StatementTransactionModel.countDocuments({
+      companyId: req.companyId,
+      statementId: { $in: statementIds },
+      classification: 'unknown'
+    })
+  ]);
+
+  const latest = statements[0];
+  return ok(res, {
+    month,
+    latestStatementId: String(latest._id),
+    latestStatus: String(latest.status ?? 'uploaded'),
+    statementCount: statements.length,
+    entryCount,
+    unresolvedEntries,
+    unknownEntries,
+    monthCloseStatus: String(latest.monthClose?.status ?? 'open')
+  });
+};
+
 export const getStatementById = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
 
@@ -1137,11 +1270,33 @@ export const getStatementStatus = async (req: Request, res: Response) => {
       return fail(res, 'Statement not found', 404);
     }
 
+    const checks = await StatementCheckModel.find({
+      statementId: statement._id.toString(),
+      companyId: req.companyId
+    })
+      .sort({ createdAt: 1 })
+      .limit(200)
+      .lean();
+
     const payload = bankStatementStatusResponseSchema.parse({
       statementId: statement._id.toString(),
       status: statement.status,
       progress: buildStatementProgress(statement),
+      gcs: {
+        rootPrefix: String(statement.gcs?.rootPrefix ?? ''),
+        pdfPath: String(statement.gcs?.pdfPath ?? '')
+      },
       artifacts: buildStatementArtifacts(statement),
+      checkImagePreview: checks.map((check: any) => ({
+        id: String(check._id),
+        status: String(check.status ?? 'queued'),
+        pageNumber:
+          check.artifacts?.pageNumber != null
+            ? Number(check.artifacts.pageNumber)
+            : undefined,
+        cropImagePath: check.artifacts?.cropImagePath ?? undefined,
+        frontPath: check.gcs?.frontPath ?? undefined
+      })),
       updatedAt: statement.updatedAt instanceof Date ? statement.updatedAt.toISOString() : String(statement.updatedAt),
       issues: Array.isArray(statement.issues)
         ? statement.issues.map((issue: unknown) => String(issue))
@@ -1171,6 +1326,111 @@ export const getStatementSuggestions = async (req: Request, res: Response) => {
     console.error('[accounting.get-statement-suggestions] failed', error);
     return fail(res, 'Failed to load statement suggestions', 500);
   }
+};
+
+export const listStatementEntries = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+  if (!statement) return fail(res, 'Statement not found', 404);
+
+  const entries = await StatementTransactionModel.find({
+    statementId: req.params.id,
+    companyId: req.companyId
+  })
+    .sort({ postDate: 1, createdAt: 1 })
+    .lean();
+
+  return ok(res, {
+    statementId: req.params.id,
+    entries
+  });
+};
+
+export const updateStatementEntryReview = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  const parsed = updateStatementEntryReviewSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, 'Validation failed', 422, parsed.error.flatten());
+
+  const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+  if (!statement) return fail(res, 'Statement not found', 404);
+
+  const entry = await StatementTransactionModel.findOne({
+    _id: req.params.entryId,
+    statementId: req.params.id,
+    companyId: req.companyId
+  });
+  if (!entry) return fail(res, 'Statement entry not found', 404);
+
+  entry.reviewStatus = parsed.data.reviewStatus as any;
+  entry.proposal = {
+    ...(entry.proposal ?? {}),
+    status: parsed.data.reviewStatus
+  } as any;
+  await entry.save();
+
+  return ok(res, { entryId: entry._id.toString(), reviewStatus: entry.reviewStatus });
+};
+
+export const updateStatementSuggestionReview = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  const parsed = updateStatementSuggestionReviewSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, 'Validation failed', 422, parsed.error.flatten());
+
+  const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+  if (!statement) return fail(res, 'Statement not found', 404);
+
+  if (parsed.data.source === 'transaction') {
+    const entry = await StatementTransactionModel.findOne({
+      _id: req.params.suggestionId,
+      statementId: req.params.id,
+      companyId: req.companyId
+    });
+    if (!entry) return fail(res, 'Suggestion not found', 404);
+    entry.proposal = {
+      ...(entry.proposal ?? {}),
+      status: parsed.data.reviewStatus
+    } as any;
+    entry.reviewStatus = parsed.data.reviewStatus as any;
+    await entry.save();
+  }
+
+  return ok(res, {
+    suggestionId: req.params.suggestionId,
+    source: parsed.data.source,
+    reviewStatus: parsed.data.reviewStatus
+  });
+};
+
+export const completeStatementMonth = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  if (!req.user?.id) return fail(res, 'Unauthorized', 401);
+  const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+  if (!statement) return fail(res, 'Statement not found', 404);
+
+  const gates = await buildMonthCloseGates(statement);
+  const canComplete = Object.values(gates).every(Boolean);
+  if (!canComplete) {
+    return fail(res, 'Month-close gates are not satisfied', 409, { gates });
+  }
+
+  statement.monthClose = {
+    ...(statement.monthClose ?? {}),
+    status: 'completed',
+    completedAt: nowIso(),
+    completedBy: Types.ObjectId.isValid(String(req.user.id)) ? new Types.ObjectId(String(req.user.id)) : undefined,
+    gates
+  };
+  await statement.save();
+
+  return ok(res, {
+    statementId: statement._id.toString(),
+    monthClose: {
+      status: statement.monthClose.status,
+      completedAt: statement.monthClose.completedAt,
+      completedBy: String(statement.monthClose.completedBy ?? req.user.id),
+      gates
+    }
+  });
 };
 
 export const getStatementChecks = async (req: Request, res: Response) => {
@@ -1325,6 +1585,9 @@ export const reprocessStatement = async (req: Request, res: Response) => {
       stageTimestamps: {
         uploadedAt: nowIso()
       }
+    } as any;
+    statement.monthClose = {
+      status: 'open'
     } as any;
     statement.issues = [] as any;
     statement.hash = undefined;

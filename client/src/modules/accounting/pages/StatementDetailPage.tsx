@@ -21,6 +21,8 @@ import {
 import type {
   BankStatementDetail,
   StatementCheck,
+  StatementTransaction,
+  StatementReviewStatus,
   StatementSuggestionItem,
   StatementSuggestionsResponse
 } from '@retailsync/shared';
@@ -33,6 +35,9 @@ import { formatDate } from '../../../utils/date';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { hasPermission } from '../../../utils/permissions';
 import { accountingApi } from '../api';
+import { MonthCloseGatePanel, StatementArtifactsPanel, StatementStageTimeline } from '../components';
+import { useMonthCloseWorkspaceState } from '../hooks/useMonthCloseWorkspaceState';
+import { useStatementProcessingStatus } from '../hooks/useStatementProcessingStatus';
 
 type StatementViewerTab =
   | 'pdf'
@@ -42,7 +47,10 @@ type StatementViewerTab =
   | 'transactions'
   | 'checksCleared'
   | 'sections'
-  | 'extractedChecks';
+  | 'extractedChecks'
+  | 'classificationOutput'
+  | 'suggestionsOutput'
+  | 'processingSummary';
 
 type ArtifactKind = 'blob' | 'text';
 type StepState = 'done' | 'active' | 'waiting' | 'failed';
@@ -200,7 +208,10 @@ const getStatementArtifactItems = (statement: BankStatementDetail) => {
     ['Transactions table', artifacts.transactionsTablePath],
     ['Checks cleared table', artifacts.checksClearedTablePath],
     ['Transaction sections', artifacts.transactionSectionsPath],
-    ['Extracted checks', artifacts.extractedChecksPath]
+    ['Extracted checks', artifacts.extractedChecksPath],
+    ['Classification output', artifacts.classificationOutputPath],
+    ['Suggestions output', artifacts.suggestionsOutputPath],
+    ['Processing summary', artifacts.processingSummaryPath]
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
 };
 
@@ -278,6 +289,33 @@ const getStatementViewerArtifacts = (
           path: artifacts.extractedChecksPath,
           kind: 'text',
           emptyMessage: 'No extracted checks artifact is available yet.'
+        }
+      : null,
+    artifacts?.classificationOutputPath
+      ? {
+          key: 'classificationOutput',
+          label: 'Classification Output',
+          path: artifacts.classificationOutputPath,
+          kind: 'text',
+          emptyMessage: 'Classification output is not ready yet.'
+        }
+      : null,
+    artifacts?.suggestionsOutputPath
+      ? {
+          key: 'suggestionsOutput',
+          label: 'Suggestions Output',
+          path: artifacts.suggestionsOutputPath,
+          kind: 'text',
+          emptyMessage: 'Suggestions output is not ready yet.'
+        }
+      : null,
+    artifacts?.processingSummaryPath
+      ? {
+          key: 'processingSummary',
+          label: 'Processing Summary',
+          path: artifacts.processingSummaryPath,
+          kind: 'text',
+          emptyMessage: 'Processing summary is not ready yet.'
         }
       : null
   ].filter((entry): entry is ArtifactDescriptor<StatementViewerTab> => Boolean(entry));
@@ -363,20 +401,6 @@ const getStatementProcessSteps = (statement: BankStatementDetail) => [
   }
 ];
 
-const getStepChipColor = (state: StepState) => {
-  if (state === 'done') return 'success';
-  if (state === 'active') return 'primary';
-  if (state === 'failed') return 'error';
-  return 'default';
-};
-
-const getStepChipLabel = (state: StepState) => {
-  if (state === 'done') return 'Done';
-  if (state === 'active') return 'In progress';
-  if (state === 'failed') return 'Failed';
-  return 'Waiting';
-};
-
 const getSelectedCheckPathItems = (check: StatementCheck | null) => {
   if (!check) return [];
 
@@ -387,12 +411,6 @@ const getSelectedCheckPathItems = (check: StatementCheck | null) => {
     ['OCR JSON', check.artifacts?.ocrJsonPath],
     ['Structured JSON', check.gcs.structuredPath]
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
-};
-
-const getSuggestionBucketLabel = (item: StatementSuggestionItem) => {
-  if (item.proposedTxnType) return item.proposedTxnType;
-  if (item.source === 'check') return 'Check review';
-  return item.direction === 'credit' ? 'Credit review' : 'Debit review';
 };
 
 const getSuggestionBucketSummary = (summary: StatementSuggestionsResponse['summary']) => [
@@ -420,10 +438,12 @@ export const StatementDetailPage = () => {
   const [statementViewerTab, setStatementViewerTab] = useState<StatementViewerTab>('transactions');
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<StatementSuggestionsResponse | null>(null);
+  const [entries, setEntries] = useState<StatementTransaction[]>([]);
   const [artifactText, setArtifactText] = useState<Record<string, string>>({});
   const [artifactBlobUrls, setArtifactBlobUrls] = useState<Record<string, string>>({});
   const [artifactLoading, setArtifactLoading] = useState<Record<string, boolean>>({});
   const [artifactErrors, setArtifactErrors] = useState<Record<string, string>>({});
+  const [mutating, setMutating] = useState(false);
   const blobUrlsRef = useRef<Record<string, string>>({});
 
   const load = async () => {
@@ -431,14 +451,16 @@ export const StatementDetailPage = () => {
     setLoading(true);
     setError(null);
     try {
-      const [statementResponse, checksResponse, suggestionsResponse] = await Promise.all([
+      const [statementResponse, checksResponse, suggestionsResponse, entriesResponse] = await Promise.all([
         accountingApi.getStatement(statementId),
         accountingApi.listStatementChecks(statementId),
-        accountingApi.getStatementSuggestions(statementId)
+        accountingApi.getStatementSuggestions(statementId),
+        accountingApi.listStatementEntries(statementId)
       ]);
       setStatement(statementResponse.data.data);
       setChecks(checksResponse.data.data.checks);
       setSuggestions(suggestionsResponse.data.data);
+      setEntries(entriesResponse.data.data.entries);
     } catch (apiError) {
       setError(extractApiErrorMessage(apiError, 'Failed to load statement'));
     } finally {
@@ -450,10 +472,11 @@ export const StatementDetailPage = () => {
     if (!statementId || !statement) return;
 
     try {
-      const [statusResponse, checksResponse, suggestionsResponse] = await Promise.all([
+      const [statusResponse, checksResponse, suggestionsResponse, entriesResponse] = await Promise.all([
         accountingApi.getStatementStatus(statementId),
         accountingApi.listStatementChecks(statementId),
-        accountingApi.getStatementSuggestions(statementId)
+        accountingApi.getStatementSuggestions(statementId),
+        accountingApi.listStatementEntries(statementId)
       ]);
 
       setStatement((current) =>
@@ -470,6 +493,7 @@ export const StatementDetailPage = () => {
       );
       setChecks(checksResponse.data.data.checks);
       setSuggestions(suggestionsResponse.data.data);
+      setEntries(entriesResponse.data.data.entries);
     } catch {
       // Keep the currently loaded page visible if background polling fails once.
     }
@@ -480,22 +504,12 @@ export const StatementDetailPage = () => {
     void load();
   }, [canView, statementId]);
 
-  useEffect(() => {
-    if (!statementId || !canView || !statement) return;
-    const inFlight =
-      statement.status === 'extracting' ||
-      statement.status === 'structuring' ||
-      statement.status === 'checks_queued';
-    if (!inFlight) return;
-
-    const interval = window.setInterval(() => {
-      void refreshProcessingPanel();
-    }, 3000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [statementId, canView, statement]);
+  useStatementProcessingStatus({
+    status: statement?.status,
+    enabled: Boolean(statementId && canView),
+    pollMs: 3000,
+    onPoll: refreshProcessingPanel
+  });
 
   useEffect(() => {
     blobUrlsRef.current = artifactBlobUrls;
@@ -557,6 +571,52 @@ export const StatementDetailPage = () => {
           severity: 'error'
         })
       );
+    }
+  };
+
+  const updateSuggestionReviewStatus = async (
+    suggestion: StatementSuggestionItem,
+    reviewStatus: StatementReviewStatus
+  ) => {
+    if (!statementId || mutating) return;
+    setMutating(true);
+    try {
+      await accountingApi.updateStatementSuggestionReview(
+        statementId,
+        suggestion.id,
+        suggestion.source,
+        reviewStatus
+      );
+      dispatch(showSnackbar({ message: 'Suggestion updated', severity: 'success' }));
+      await refreshProcessingPanel();
+    } catch (apiError) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Failed to update suggestion'),
+          severity: 'error'
+        })
+      );
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  const completeMonth = async () => {
+    if (!statementId || mutating) return;
+    setMutating(true);
+    try {
+      await accountingApi.completeStatementMonth(statementId);
+      dispatch(showSnackbar({ message: 'Month marked complete', severity: 'success' }));
+      await load();
+    } catch (apiError) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Month cannot be completed yet'),
+          severity: 'error'
+        })
+      );
+    } finally {
+      setMutating(false);
     }
   };
 
@@ -700,16 +760,7 @@ export const StatementDetailPage = () => {
     () => getSelectedCheckPathItems(selectedCheck),
     [selectedCheck]
   );
-  const suggestionGroups = useMemo(() => {
-    const groups = new Map<string, StatementSuggestionItem[]>();
-    for (const item of suggestions?.items ?? []) {
-      const key = getSuggestionBucketLabel(item);
-      const current = groups.get(key) ?? [];
-      current.push(item);
-      groups.set(key, current);
-    }
-    return [...groups.entries()];
-  }, [suggestions]);
+  const { suggestionGroups, monthCloseGates, canCompleteMonth } = useMonthCloseWorkspaceState(statement, suggestions);
 
   const renderViewerBody = () => {
     if (!currentArtifact) {
@@ -859,6 +910,34 @@ export const StatementDetailPage = () => {
 
     return (
       <Stack spacing={2}>
+        <Paper variant="outlined" sx={{ p: 1.5 }}>
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">Extracted entries</Typography>
+            {entries.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                Entries are not ready yet.
+              </Typography>
+            ) : (
+              entries.slice(0, 50).map((entry) => (
+                <Paper key={entry.id} variant="outlined" sx={{ p: 1, bgcolor: 'background.default' }}>
+                  <Stack direction="row" justifyContent="space-between" spacing={1}>
+                    <Stack>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {entry.description}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {entry.postDate} • {entry.classification} • {entry.reviewStatus}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      {formatMoney(entry.amount)}
+                    </Typography>
+                  </Stack>
+                </Paper>
+              ))
+            )}
+          </Stack>
+        </Paper>
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
           {getSuggestionBucketSummary(suggestions.summary).map(([label, count]) => (
             <Chip key={label} size="small" variant="outlined" label={`${label} ${count}`} />
@@ -911,6 +990,26 @@ export const StatementDetailPage = () => {
                         Why: {item.reasons.join(' • ')}
                       </Typography>
                     ) : null}
+                    {canEdit ? (
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => void updateSuggestionReviewStatus(item, 'approved')}
+                          disabled={mutating}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => void updateSuggestionReviewStatus(item, 'excluded')}
+                          disabled={mutating}
+                        >
+                          Exclude
+                        </Button>
+                      </Stack>
+                    ) : null}
                   </Stack>
                 </Paper>
               ))}
@@ -957,6 +1056,9 @@ export const StatementDetailPage = () => {
                   <Typography variant="body2" color="text.secondary">
                     Month {statement.statementMonth} • {formatProgressSummary(statement.progress)}
                   </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Month close: {formatStatusLabel(statement.monthClose?.status ?? 'open')}
+                  </Typography>
                 </Stack>
                 <Stack direction="row" spacing={1}>
                   <Button variant="outlined" onClick={() => navigate('/dashboard/accounting/statements')}>
@@ -984,6 +1086,16 @@ export const StatementDetailPage = () => {
                   >
                     Open Ledger Review
                   </Button>
+                  {canEdit ? (
+                    <Button
+                      variant="contained"
+                      color="success"
+                      onClick={() => void completeMonth()}
+                      disabled={!canCompleteMonth || statement.monthClose?.status === 'completed' || mutating}
+                    >
+                      {statement.monthClose?.status === 'completed' ? 'Month Completed' : 'Complete Month'}
+                    </Button>
+                  ) : null}
                 </Stack>
               </Stack>
 
@@ -1159,45 +1271,20 @@ export const StatementDetailPage = () => {
                         <Button size="small" variant="outlined" onClick={() => void refreshProcessingPanel()}>
                           Refresh live status
                         </Button>
-                        <Stack spacing={1}>
-                          {processSteps.map((step) => (
-                            <Paper
-                              key={step.key}
-                              variant="outlined"
-                              sx={{
-                                p: 1.25,
-                                bgcolor: step.state === 'active' ? 'action.hover' : 'background.default',
-                                borderColor:
-                                  step.state === 'active'
-                                    ? 'primary.main'
-                                    : step.state === 'failed'
-                                      ? 'error.main'
-                                      : 'divider'
-                              }}
-                            >
-                              <Stack spacing={0.75}>
-                                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-                                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                                    {step.label}
-                                  </Typography>
-                                  <Chip
-                                    size="small"
-                                    color={getStepChipColor(step.state)}
-                                    label={getStepChipLabel(step.state)}
-                                  />
-                                </Stack>
-                                <Typography variant="caption" color="text.secondary">
-                                  {step.detail}
-                                </Typography>
-                                {step.timestamp ? (
-                                  <Typography variant="caption" color="text.secondary">
-                                    Updated {formatDate(step.timestamp, 'short')}
-                                  </Typography>
-                                ) : null}
-                              </Stack>
-                            </Paper>
-                          ))}
-                        </Stack>
+                        <StatementStageTimeline
+                          title="Pipeline stages"
+                          subtitle="Step-by-step runtime status for this statement."
+                          steps={processSteps.map((step) => ({
+                            key: step.key,
+                            title: step.label,
+                            detail: step.timestamp
+                              ? `${step.detail} Updated ${formatDate(step.timestamp, 'short')}`
+                              : step.detail,
+                            state: step.state
+                          }))}
+                        />
+                        <Divider />
+                        <MonthCloseGatePanel gates={monthCloseGates} />
                         <Divider />
                         <Stack spacing={0.75}>
                           <Typography variant="subtitle2">Processing activity</Typography>
@@ -1349,54 +1436,18 @@ export const StatementDetailPage = () => {
               <AccordionDetails>
                 <Grid container spacing={2}>
                   <Grid size={{ xs: 12, md: 6 }}>
-                    <Stack spacing={1}>
-                      <Typography variant="subtitle2">Statement artifacts</Typography>
-                      {artifactItems.map(([label, value]) => (
-                        <Paper
-                          key={`${label}:${value}`}
-                          variant="outlined"
-                          sx={{ p: 1, bgcolor: 'background.default' }}
-                        >
-                          <Typography variant="caption" color="text.secondary">
-                            {label}
-                          </Typography>
-                          <Typography
-                            variant="body2"
-                            sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}
-                          >
-                            {value}
-                          </Typography>
-                        </Paper>
-                      ))}
-                    </Stack>
+                    <StatementArtifactsPanel
+                      title="Statement artifacts"
+                      items={artifactItems}
+                      emptyMessage="No statement artifacts available."
+                    />
                   </Grid>
                   <Grid size={{ xs: 12, md: 6 }}>
-                    <Stack spacing={1}>
-                      <Typography variant="subtitle2">Selected check artifacts</Typography>
-                      {technicalCheckItems.length > 0 ? (
-                        technicalCheckItems.map(([label, value]) => (
-                          <Paper
-                            key={`${label}:${value}`}
-                            variant="outlined"
-                            sx={{ p: 1, bgcolor: 'background.default' }}
-                          >
-                            <Typography variant="caption" color="text.secondary">
-                              {label}
-                            </Typography>
-                            <Typography
-                              variant="body2"
-                              sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}
-                            >
-                              {value}
-                            </Typography>
-                          </Paper>
-                        ))
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          Select a check with saved artifacts to inspect its raw storage paths.
-                        </Typography>
-                      )}
-                    </Stack>
+                    <StatementArtifactsPanel
+                      title="Selected check artifacts"
+                      items={technicalCheckItems}
+                      emptyMessage="Select a check with saved artifacts to inspect its raw storage paths."
+                    />
                   </Grid>
                 </Grid>
               </AccordionDetails>

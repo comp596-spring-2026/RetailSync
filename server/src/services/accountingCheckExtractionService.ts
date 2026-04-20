@@ -4,7 +4,7 @@ import {
   buildCheckOcrPath,
   buildCheckStructuredPath
 } from './accountingStorageService';
-import { ocrImageWithVision, type OcrPageObservation } from '../integrations/google/visionOcr.client';
+import type { OcrPageObservation } from '../integrations/google/visionOcr.client';
 import {
   renderAndPersistCheckCrop,
   renderCheckCropFromPdf,
@@ -18,7 +18,7 @@ export type StatementCheckExtracted = {
   payeeName?: string;
   amount?: number;
   memo?: string;
-  source: 'ocr' | 'deterministic' | 'legacy';
+  source: 'ocr' | 'deterministic' | 'legacy' | 'pdf_text';
 };
 
 export type StatementCheckConfidence = {
@@ -49,6 +49,8 @@ export type RunStatementCheckExtractionArgs = {
   cropBox: CheckCropBox;
   checkKey: string;
   pageContext?: string;
+  /** When set, check field parsing uses this statement PDF page text instead of any cloud OCR. */
+  internalPdfPageText?: string;
   bucketName?: string;
   rootPrefix?: string;
   cropRenderCommand?: string;
@@ -264,15 +266,32 @@ export const runStatementCheckExtraction = async (args: RunStatementCheckExtract
         cropImagePath: undefined
       };
 
-  const ocr = await ocrImageWithVision({
-    imageBuffer: renderedCrop.crop.buffer,
-    mimeType: 'image/png'
-  });
+  const cropTextInput =
+    String(args.internalPdfPageText ?? '').trim().length > 0
+      ? String(args.internalPdfPageText).trim()
+      : String(args.pageContext ?? '').trim();
 
-  const { extracted, reasons } = extractCheckFieldsFromOcr({
-    cropText: ocr.text,
+  const ocr: OcrPageObservation = {
+    provider: 'vision',
+    text: cropTextInput,
+    blocks: [],
+    paragraphs: [],
+    words: [],
+    raw: { source: 'statement_pdf_text', pageNumber: args.pageNumber }
+  };
+
+  const { extracted: rawExtracted, reasons } = extractCheckFieldsFromOcr({
+    cropText: cropTextInput,
     pageContext: args.pageContext
   });
+
+  const usedStatementPdfText = String(args.internalPdfPageText ?? '').trim().length > 0;
+  const extracted =
+    usedStatementPdfText && rawExtracted.source === 'ocr'
+      ? { ...rawExtracted, source: 'pdf_text' as const }
+      : rawExtracted.source === 'ocr' && !usedStatementPdfText
+        ? { ...rawExtracted, source: 'deterministic' as const }
+        : rawExtracted;
 
   const structured = {
     schemaVersion: 'v1',

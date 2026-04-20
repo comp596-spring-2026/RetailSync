@@ -15,12 +15,14 @@ const {
   getStatementMock,
   listStatementChecksMock,
   getStatementSuggestionsMock,
+  listStatementEntriesMock,
   getStatementArtifactBlobMock,
   getStatementArtifactTextMock
 } = vi.hoisted(() => ({
   getStatementMock: vi.fn(),
   listStatementChecksMock: vi.fn(),
   getStatementSuggestionsMock: vi.fn(),
+  listStatementEntriesMock: vi.fn(),
   getStatementArtifactBlobMock: vi.fn(),
   getStatementArtifactTextMock: vi.fn()
 }));
@@ -30,6 +32,7 @@ vi.mock('../api', () => ({
     getStatement: (...args: unknown[]) => getStatementMock(...args),
     listStatementChecks: (...args: unknown[]) => listStatementChecksMock(...args),
     getStatementSuggestions: (...args: unknown[]) => getStatementSuggestionsMock(...args),
+    listStatementEntries: (...args: unknown[]) => listStatementEntriesMock(...args),
     getStatementArtifactBlob: (...args: unknown[]) => getStatementArtifactBlobMock(...args),
     getStatementArtifactText: (...args: unknown[]) => getStatementArtifactTextMock(...args)
   }
@@ -206,6 +209,29 @@ describe('StatementDetailPage', () => {
               status: 'ready',
               reasons: ['Exact amount match'],
               linkedCheckId: 'check-1'
+            }
+          ]
+        }
+      }
+    });
+
+    listStatementEntriesMock.mockResolvedValue({
+      data: {
+        data: {
+          statementId: 'statement-1',
+          entries: [
+            {
+              id: 'txn-1',
+              statementId: 'statement-1',
+              companyId: 'company-a',
+              postDate: '2026-03-08',
+              description: 'Staples payment',
+              merchant: 'Staples',
+              amount: 123.45,
+              type: 'debit',
+              classification: 'expense',
+              reviewStatus: 'proposed',
+              posting: { status: 'not_posted' }
             }
           ]
         }
@@ -481,7 +507,7 @@ describe('StatementDetailPage', () => {
     expect(screen.getByText(/Suggestions 3/i)).toBeInTheDocument();
     expect(screen.getByText(/Store deposit/i)).toBeInTheDocument();
     expect(screen.getByText(/^Check review$/i)).toBeInTheDocument();
-    expect(screen.getByText(/Staples payment/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Staples payment/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Needs classification/i).length).toBeGreaterThan(0);
   });
 });

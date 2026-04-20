@@ -60,6 +60,26 @@ const statementArtifactsSchema = new Schema(
   { _id: false }
 );
 
+const monthCloseGatesSchema = new Schema(
+  {
+    rowsReviewed: { type: Boolean, default: false },
+    noBlockingExtractionFailures: { type: Boolean, default: false },
+    noMandatoryUnknowns: { type: Boolean, default: false },
+    noPendingMandatorySuggestionDecisions: { type: Boolean, default: false }
+  },
+  { _id: false }
+);
+
+const monthCloseSchema = new Schema(
+  {
+    status: { type: String, enum: ['open', 'completed'], default: 'open' },
+    completedAt: { type: String, required: false },
+    completedBy: { type: Schema.Types.ObjectId, ref: 'User', required: false },
+    gates: { type: monthCloseGatesSchema, default: () => ({}) }
+  },
+  { _id: false }
+);
+
 const bankStatementSchema = new Schema(
   {
     companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
@@ -82,6 +102,7 @@ const bankStatementSchema = new Schema(
     },
     progress: { type: progressSchema, default: () => ({}) },
     artifacts: { type: statementArtifactsSchema, default: () => ({}) },
+    monthClose: { type: monthCloseSchema, default: () => ({}) },
     hash: { type: String, required: false, index: true },
     issues: { type: [String], default: [] },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true }

@@ -44,8 +44,22 @@ export const buildStatementTransactionSectionsPath = (rootPrefix: string) =>
 export const buildStatementExtractedChecksPath = (rootPrefix: string) =>
   buildStatementJsonPath(rootPrefix, 'tables/extracted-checks.json');
 
+export const buildStatementClassificationOutputPath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/classification-output.json');
+
+export const buildStatementSuggestionsOutputPath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/suggestions-output.json');
+
+export const buildStatementProcessingSummaryPath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/processing-summary.json');
+
 export const buildGeminiPath = (rootPrefix: string, fileName = 'normalized.v1.json') =>
   buildDerivedPath(rootPrefix, `gemini/${fileName}`);
+
+export const buildStatementInternalSuggestionPath = (rootPrefix: string, key: string) => {
+  const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return buildDerivedPath(rootPrefix, `suggestions/${safeKey}.json`);
+};
 
 export const buildCheckPath = (rootPrefix: string, checkKey: string, fileName = 'front.jpg') =>
   buildDerivedPath(rootPrefix, `checks/extracted/${checkKey}/${fileName}`);

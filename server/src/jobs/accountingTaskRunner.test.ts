@@ -83,9 +83,9 @@ vi.mock('../services/accountingPdfRenderService', () => ({
   renderAndPersistStatementPages: (...args: unknown[]) => renderAndPersistStatementPagesMock(...args)
 }));
 
-const ocrStatementPagesMock = vi.fn();
-vi.mock('../services/accountingStatementOcrService', () => ({
-  ocrStatementPages: (...args: unknown[]) => ocrStatementPagesMock(...args)
+const extractStatementPagesFromPdfBufferMock = vi.fn();
+vi.mock('../services/accountingPdfTextExtractionService', () => ({
+  extractStatementPagesFromPdfBuffer: (...args: unknown[]) => extractStatementPagesFromPdfBufferMock(...args)
 }));
 
 const runStatementCheckExtractionMock = vi.fn();
@@ -96,11 +96,6 @@ vi.mock('../services/accountingCheckExtractionService', () => ({
 const buildMatchingProposalMock = vi.fn();
 vi.mock('../services/matchingEngine', () => ({
   buildMatchingProposal: (...args: unknown[]) => buildMatchingProposalMock(...args)
-}));
-
-const runAccountingGeminiProposalMock = vi.fn();
-vi.mock('../services/accountingGeminiProposalService', () => ({
-  runAccountingGeminiProposal: (...args: unknown[]) => runAccountingGeminiProposalMock(...args)
 }));
 
 vi.mock('../services/quickbooksSyncService', () => ({
@@ -337,8 +332,8 @@ describe('accountingTaskRunner', () => {
       ]
     });
 
-    ocrStatementPagesMock.mockReset();
-    ocrStatementPagesMock.mockResolvedValue([
+    extractStatementPagesFromPdfBufferMock.mockReset();
+    extractStatementPagesFromPdfBufferMock.mockResolvedValue([
       {
         provider: 'vision',
         pageNumber: 1,
@@ -429,41 +424,6 @@ describe('accountingTaskRunner', () => {
       version: 'v1'
     });
 
-    runAccountingGeminiProposalMock.mockReset();
-    runAccountingGeminiProposalMock.mockImplementation(async (args: any) => {
-      const artifactKey = String(args.checkKey ?? 'statement');
-      const artifactBase = args.checkKey
-        ? `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${artifactKey}`
-        : `companies/company-1/statements/2026-01/statement-1/derived/gemini/${artifactKey}`;
-      return {
-        provider: 'gemini',
-        providerStatus: 'healthy',
-        degraded: false,
-        source: 'hybrid',
-        confidence: 0.91,
-        proposal: {
-          ...args.fallbackProposal,
-          confidence: 0.91,
-          reasons: [...(args.fallbackProposal?.reasons ?? []), 'Gemini approved'],
-          status: 'proposed',
-          version: 'v1'
-        },
-        fallbackProposal: args.fallbackProposal,
-        geminiProposal: {
-          qbTxnType: 'Check',
-          payeeName: 'ACME Supplies',
-          confidence: 0.91,
-          reasons: ['Gemini approved'],
-          version: 'v1'
-        },
-        reasons: [...(args.fallbackProposal?.reasons ?? []), 'Gemini approved'],
-        artifacts: {
-          promptPath: `${artifactBase}/proposal.prompt.v1.txt`,
-          rawPath: `${artifactBase}/proposal.raw.v1.json`,
-          normalizedPath: `${artifactBase}/proposal.normalized.v1.json`
-        }
-      };
-    });
   });
 
   it('persists statement, check, and progress artifacts through the pipeline', async () => {
@@ -537,7 +497,7 @@ describe('accountingTaskRunner', () => {
       'companies/company-1/statements/2026-01/statement-1/derived/gemini/normalized.v1.json'
     );
     expect(stores.transactions[0].sourceLocator.bbox).toEqual([10, 20, 200, 120]);
-    expect(runAccountingGeminiProposalMock).toHaveBeenCalledTimes(2);
+    expect(extractStatementPagesFromPdfBufferMock).toHaveBeenCalled();
     expect(buildMatchingProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({
         check: expect.objectContaining({
@@ -584,25 +544,22 @@ describe('accountingTaskRunner', () => {
       `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/ocr.json`
     );
     expect(check.artifacts.geminiPath).toBe(
-      `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/proposal.normalized.v1.json`
+      `companies/company-1/statements/2026-01/statement-1/derived/suggestions/${check._id}.json`
     );
     expect(check.extracted.source).toBe('ocr');
     expect(check.match.statementTransactionId).toBe('txn-1');
-    expect(check.match.reasons).toEqual(expect.arrayContaining(['Gemini approved']));
+    expect(check.match.reasons).toEqual(expect.arrayContaining(['mocked']));
     expect(stores.transactions[0].statementCheckId).toBe(check._id);
     expect(stores.transactions[0].evidence.checkCropPath).toBe(
       `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/front.png`
     );
     expect(stores.transactions[0].evidence.geminiPath).toBe(
-      `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/proposal.normalized.v1.json`
+      `companies/company-1/statements/2026-01/statement-1/derived/suggestions/${check._id}.json`
     );
-    expect(stores.transactions[0].proposal.reasons).toEqual(
-      expect.arrayContaining(['mocked', 'Gemini approved'])
-    );
+    expect(stores.transactions[0].proposal.reasons).toEqual(expect.arrayContaining(['mocked']));
     expect(stores.ledgerEntries[0].attachments.geminiPath).toBe(
-      `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/proposal.normalized.v1.json`
+      `companies/company-1/statements/2026-01/statement-1/derived/suggestions/${check._id}.json`
     );
-    expect(runAccountingGeminiProposalMock).toHaveBeenCalledTimes(3);
     expect(statement.progress.phase).toBe('ready_for_review');
     expect(statement.progress.completedChecks).toBe(1);
     expect(statement.progress.remainingChecks).toBe(0);

@@ -568,6 +568,89 @@ describe('Accounting e2e', () => {
   );
 
   it(
+    'enforces month-close gates and completes month when entries are resolved',
+    async () => {
+      const { accessToken, email } = await registerAndCreateCompany(app, 'MonthCloseSuite');
+      const { companyId, userId } = await extractCompanyContext(email);
+      const statementId = new Types.ObjectId().toString();
+
+      await BankStatement.create({
+        _id: statementId,
+        companyId,
+        statementMonth: '2026-04',
+        fileName: 'April Statement 2026.pdf',
+        source: 'upload',
+        status: 'ready_for_review',
+        gcs: {
+          rootPrefix: `companies/${companyId}/statements/2026/04/${statementId}`,
+          pdfPath: `companies/${companyId}/statements/2026/04/${statementId}/original/statement.pdf`
+        },
+        progress: {
+          phase: 'ready_for_review',
+          totalChecks: 0,
+          checksQueued: 0,
+          checksProcessing: 0,
+          checksReady: 0,
+          checksFailed: 0,
+          completedChecks: 0,
+          remainingChecks: 0
+        },
+        monthClose: {
+          status: 'open'
+        },
+        createdBy: userId
+      });
+
+      const entryId = new Types.ObjectId().toString();
+      await StatementTransactionModel.create({
+        _id: entryId,
+        statementId,
+        companyId,
+        postDate: '2026-04-01',
+        description: 'Office supply payment',
+        merchant: 'ACME',
+        amount: 120,
+        type: 'debit',
+        classification: 'unknown',
+        reviewStatus: 'proposed',
+        proposal: {
+          qbTxnType: 'Expense',
+          confidence: 0.8,
+          reasons: ['rule'],
+          status: 'proposed',
+          version: 'v1'
+        }
+      });
+
+      await request(app)
+        .post(`/api/accounting/statements/${statementId}/complete-month`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(409);
+
+      await request(app)
+        .patch(`/api/accounting/statements/${statementId}/entries/${entryId}/review`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ reviewStatus: 'approved' })
+        .expect(200);
+
+      await StatementTransactionModel.updateOne(
+        { _id: entryId, companyId },
+        { $set: { classification: 'expense', 'proposal.status': 'approved' } }
+      );
+
+      const complete = await request(app)
+        .post(`/api/accounting/statements/${statementId}/complete-month`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(complete.body.data.monthClose.status).toBe('completed');
+      expect(complete.body.data.monthClose.gates.rowsReviewed).toBe(true);
+      expect(complete.body.data.monthClose.gates.noMandatoryUnknowns).toBe(true);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
     'handles quickbooks tax endpoints with read/write RBAC',
     async () => {
       const { accessToken, email } = await registerAndCreateCompany(app, 'QuickbooksTaxSuite');

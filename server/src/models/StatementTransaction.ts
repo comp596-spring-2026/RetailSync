@@ -29,6 +29,27 @@ const statementTransactionSchema = new Schema(
     merchant: { type: String, required: false },
     amount: { type: Number, required: true },
     type: { type: String, enum: ['debit', 'credit'], required: true },
+    normalizedDescription: { type: String, required: false },
+    counterparty: { type: String, required: false },
+    classification: {
+      type: String,
+      enum: ['check', 'deposit', 'expense', 'payment', 'transfer', 'fee', 'adjustment', 'unknown'],
+      default: 'unknown'
+    },
+    classificationConfidence: { type: Number, required: false },
+    suggestedAction: {
+      type: String,
+      enum: [
+        'create_check',
+        'create_expense',
+        'create_receive_payment',
+        'create_deposit',
+        'create_transfer',
+        'link_existing',
+        'ignore'
+      ],
+      required: false
+    },
     balanceAfter: { type: Number, required: false },
     checkNumber: { type: String, required: false },
     sourceLocator: {

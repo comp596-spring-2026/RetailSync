@@ -105,12 +105,50 @@ export const statementArtifactsSchema = z.object({
   checksClearedTablePath: z.string().trim().optional(),
   transactionSectionsPath: z.string().trim().optional(),
   extractedChecksPath: z.string().trim().optional(),
+  classificationOutputPath: z.string().trim().optional(),
+  suggestionsOutputPath: z.string().trim().optional(),
+  processingSummaryPath: z.string().trim().optional(),
   geminiPath: z.string().trim().optional(),
   detectionEvidence: z.string().trim().optional(),
   detectedStatementMonth: statementMonthSchema.optional(),
   detectedStatementDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   autoAppliedStatementMonth: z.boolean().default(false),
   stageTimestamps: statementStageTimestampsSchema.default({})
+});
+
+export const statementEntryClassificationSchema = z.enum([
+  'check',
+  'deposit',
+  'expense',
+  'payment',
+  'transfer',
+  'fee',
+  'adjustment',
+  'unknown'
+]);
+
+export const statementSuggestionActionSchema = z.enum([
+  'create_check',
+  'create_expense',
+  'create_receive_payment',
+  'create_deposit',
+  'create_transfer',
+  'link_existing',
+  'ignore'
+]);
+
+export const statementMonthCloseGatesSchema = z.object({
+  rowsReviewed: z.boolean(),
+  noBlockingExtractionFailures: z.boolean(),
+  noMandatoryUnknowns: z.boolean(),
+  noPendingMandatorySuggestionDecisions: z.boolean()
+});
+
+export const statementMonthCloseSchema = z.object({
+  status: z.enum(['open', 'completed']).default('open'),
+  completedAt: z.string().trim().optional(),
+  completedBy: z.string().trim().optional(),
+  gates: statementMonthCloseGatesSchema
 });
 
 export const statementCheckStageTimestampsSchema = z.object({
@@ -137,7 +175,7 @@ export const statementCheckExtractedSchema = z.object({
   payeeName: z.string().trim().optional(),
   amount: z.number().optional(),
   memo: z.string().trim().optional(),
-  source: z.enum(['ocr', 'gemini', 'deterministic', 'legacy']).optional()
+  source: z.enum(['ocr', 'gemini', 'deterministic', 'legacy', 'pdf_text']).optional()
 });
 
 export const statementCheckProcessingSchema = z.object({
@@ -160,6 +198,11 @@ export const statementTransactionSchema = z.object({
   type: z.enum(['debit', 'credit']),
   balanceAfter: z.number().optional(),
   checkNumber: z.string().trim().optional(),
+  normalizedDescription: z.string().trim().optional(),
+  counterparty: z.string().trim().optional(),
+  classification: statementEntryClassificationSchema.default('unknown'),
+  classificationConfidence: z.number().min(0).max(1).optional(),
+  suggestedAction: statementSuggestionActionSchema.optional(),
   sourceLocator: z
     .object({
       pageNumber: z.number().int().positive().optional(),
@@ -307,6 +350,7 @@ export const bankStatementDetailSchema = bankStatementListItemSchema.extend({
   accountLast4: z.string().trim().optional(),
   gcs: statementGcsSchema,
   artifacts: statementArtifactsSchema.optional(),
+  monthClose: statementMonthCloseSchema.optional(),
   checks: z.array(statementCheckSchema),
   issues: z.array(z.string().trim()).default([])
 });
@@ -315,8 +359,20 @@ export const bankStatementStatusResponseSchema = z.object({
   statementId: z.string().trim().min(1),
   status: bankStatementStatusSchema,
   progress: statementProgressSchema,
+  gcs: statementGcsSchema.optional(),
   updatedAt: z.string().trim(),
   artifacts: statementArtifactsSchema.optional(),
+  checkImagePreview: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1),
+        status: statementCheckStatusSchema,
+        pageNumber: z.number().int().positive().optional(),
+        cropImagePath: z.string().trim().optional(),
+        frontPath: z.string().trim().optional()
+      })
+    )
+    .default([]),
   issues: z.array(z.string().trim()).default([])
 });
 
@@ -356,6 +412,15 @@ export const statementSuggestionsResponseSchema = z.object({
 
 export const listChecksQuerySchema = z.object({
   status: statementCheckStatusSchema.optional()
+});
+
+export const updateStatementEntryReviewSchema = z.object({
+  reviewStatus: statementReviewStatusSchema
+});
+
+export const updateStatementSuggestionReviewSchema = z.object({
+  source: z.enum(['transaction', 'check']),
+  reviewStatus: statementReviewStatusSchema
 });
 
 export const ledgerEntrySchema = z.object({
@@ -1256,6 +1321,10 @@ export type StatementReviewStatus = z.infer<typeof statementReviewStatusSchema>;
 export type StatementPostingStatus = z.infer<typeof statementPostingStatusSchema>;
 export type StatementCheckStatus = z.infer<typeof statementCheckStatusSchema>;
 export type StatementArtifacts = z.infer<typeof statementArtifactsSchema>;
+export type StatementMonthClose = z.infer<typeof statementMonthCloseSchema>;
+export type StatementMonthCloseGates = z.infer<typeof statementMonthCloseGatesSchema>;
+export type StatementEntryClassification = z.infer<typeof statementEntryClassificationSchema>;
+export type StatementSuggestionAction = z.infer<typeof statementSuggestionActionSchema>;
 export type StatementCheckArtifacts = z.infer<typeof statementCheckArtifactsSchema>;
 export type StatementCheckExtracted = z.infer<typeof statementCheckExtractedSchema>;
 export type StatementCheckProcessing = z.infer<typeof statementCheckProcessingSchema>;
@@ -1271,6 +1340,8 @@ export type BankStatementListItem = z.infer<typeof bankStatementListItemSchema>;
 export type BankStatementDetail = z.infer<typeof bankStatementDetailSchema>;
 export type StatementSuggestionItem = z.infer<typeof statementSuggestionItemSchema>;
 export type StatementSuggestionsResponse = z.infer<typeof statementSuggestionsResponseSchema>;
+export type UpdateStatementEntryReviewInput = z.infer<typeof updateStatementEntryReviewSchema>;
+export type UpdateStatementSuggestionReviewInput = z.infer<typeof updateStatementSuggestionReviewSchema>;
 export type StatementTransaction = z.infer<typeof statementTransactionSchema>;
 export type StatementCheck = z.infer<typeof statementCheckSchema>;
 export type LedgerEntry = z.infer<typeof ledgerEntrySchema>;

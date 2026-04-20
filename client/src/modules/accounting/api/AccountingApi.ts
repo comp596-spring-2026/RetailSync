@@ -44,7 +44,10 @@ import {
   QuickBooksWriteTxnType,
   QuickBooksWriteUpdateInput,
   StatementCheck,
+  StatementMonthClose,
+  StatementTransaction,
   StatementSuggestionsResponse,
+  StatementReviewStatus,
   RequestStatementUploadUrlInput
 } from '@retailsync/shared';
 import { api } from '../../../app/api/client';
@@ -95,6 +98,35 @@ export class AccountingApi {
     }>('/accounting/statements', { params });
   }
 
+  listStatementMonths() {
+    return api.get<{
+      data: {
+        months: Array<{
+          month: string;
+          statementCount: number;
+          latestStatementId: string;
+          latestStatus: string;
+          updatedAt: string;
+        }>;
+      };
+    }>('/accounting/statement-months');
+  }
+
+  getStatementMonthSummary(month: string) {
+    return api.get<{
+      data: {
+        month: string;
+        latestStatementId: string;
+        latestStatus: string;
+        statementCount: number;
+        entryCount: number;
+        unresolvedEntries: number;
+        unknownEntries: number;
+        monthCloseStatus: string;
+      };
+    }>(`/accounting/statement-months/${month}`);
+  }
+
   getStatement(id: string) {
     return api.get<{
       data: BankStatementDetail;
@@ -121,8 +153,19 @@ export class AccountingApi {
         statementId: string;
         status: BankStatementStatus;
         progress: StatementProgressPayload;
+        gcs?: {
+          rootPrefix: string;
+          pdfPath: string;
+        };
         updatedAt: string;
         artifacts?: BankStatementDetail['artifacts'];
+        checkImagePreview: Array<{
+          id: string;
+          status: string;
+          pageNumber?: number;
+          cropImagePath?: string;
+          frontPath?: string;
+        }>;
         issues: string[];
       };
     }>('/accounting/statements/' + id + '/status');
@@ -142,6 +185,42 @@ export class AccountingApi {
     return api.get<{
       data: StatementSuggestionsResponse;
     }>(`/accounting/statements/${id}/suggestions`);
+  }
+
+  listStatementEntries(id: string) {
+    return api.get<{
+      data: {
+        statementId: string;
+        entries: StatementTransaction[];
+      };
+    }>(`/accounting/statements/${id}/entries`);
+  }
+
+  updateStatementEntryReview(statementId: string, entryId: string, reviewStatus: StatementReviewStatus) {
+    return api.patch(`/accounting/statements/${statementId}/entries/${entryId}/review`, {
+      reviewStatus
+    });
+  }
+
+  updateStatementSuggestionReview(
+    statementId: string,
+    suggestionId: string,
+    source: 'transaction' | 'check',
+    reviewStatus: StatementReviewStatus
+  ) {
+    return api.patch(`/accounting/statements/${statementId}/suggestions/${suggestionId}/review`, {
+      source,
+      reviewStatus
+    });
+  }
+
+  completeStatementMonth(id: string) {
+    return api.post<{
+      data: {
+        statementId: string;
+        monthClose: StatementMonthClose;
+      };
+    }>(`/accounting/statements/${id}/complete-month`);
   }
 
   requestUploadUrl(payload: RequestStatementUploadUrlInput) {

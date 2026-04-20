@@ -12,27 +12,27 @@ import { LedgerEntryModel } from '../models/LedgerEntry';
 import { RunModel } from '../models/Run';
 import { StatementCheckModel } from '../models/StatementCheck';
 import { StatementTransactionModel } from '../models/StatementTransaction';
-import {
-  ocrStatementPages,
-  type CheckRegionCandidate,
-  type StatementPageObservation
-} from '../services/accountingStatementOcrService';
+import type { CheckRegionCandidate, StatementPageObservation } from '../services/accountingStatementOcrService';
+import { extractStatementPagesFromPdfBuffer } from '../services/accountingPdfTextExtractionService';
 import {
   buildCheckCropPath,
   buildCheckOcrPath,
   buildCheckStructuredPath,
   buildStatementChecksClearedTablePath,
+  buildStatementClassificationOutputPath,
   buildStatementExtractedChecksPath,
   buildGeminiPath,
   buildOcrPath,
   buildPageImagePath,
+  buildStatementProcessingSummaryPath,
+  buildStatementInternalSuggestionPath,
+  buildStatementSuggestionsOutputPath,
   buildStatementTransactionSectionsPath,
   buildStatementTransactionsTablePath,
   buildStatementOcrTextPath
 } from '../services/accountingStorageService';
 import { renderAndPersistStatementPages } from '../services/accountingPdfRenderService';
 import { runStatementCheckExtraction } from '../services/accountingCheckExtractionService';
-import { runAccountingGeminiProposal } from '../services/accountingGeminiProposalService';
 import { buildMatchingProposal } from '../services/matchingEngine';
 import {
   markQuickBooksSyncFailure,
@@ -250,6 +250,25 @@ type ParsedTransaction = {
   };
 };
 
+type StatementClassification =
+  | 'check'
+  | 'deposit'
+  | 'expense'
+  | 'payment'
+  | 'transfer'
+  | 'fee'
+  | 'adjustment'
+  | 'unknown';
+
+type StatementSuggestedAction =
+  | 'create_check'
+  | 'create_expense'
+  | 'create_receive_payment'
+  | 'create_deposit'
+  | 'create_transfer'
+  | 'link_existing'
+  | 'ignore';
+
 type StatementPageObservationWithRegions = StatementPageObservation & {
   checkRegions?: CheckRegionCandidate[];
 };
@@ -258,51 +277,63 @@ const parseMoney = (value: string) => Number(String(value).replace(/[$,]/g, '').
 
 const normalizeText = (value: string) => String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
 
+const classifyStatementTransaction = (txn: ParsedTransaction): {
+  classification: StatementClassification;
+  confidence: number;
+  suggestedAction: StatementSuggestedAction;
+} => {
+  const text = normalizeText(`${txn.description} ${txn.merchant ?? ''}`);
+  if (txn.checkNumber) {
+    return { classification: 'check', confidence: 0.95, suggestedAction: 'create_check' };
+  }
+  if (/\btransfer\b|\bach\b.*\btransfer\b/.test(text)) {
+    return { classification: 'transfer', confidence: 0.88, suggestedAction: 'create_transfer' };
+  }
+  if (/\bdeposit\b|\bcredit\b|\bcash\s+dep\b/.test(text) || txn.type === 'credit') {
+    return { classification: 'deposit', confidence: 0.78, suggestedAction: 'create_deposit' };
+  }
+  if (/\bfee\b|\bservice\s+charge\b|\boverdraft\b/.test(text)) {
+    return { classification: 'fee', confidence: 0.86, suggestedAction: 'create_expense' };
+  }
+  if (/\badjustment\b|\breversal\b/.test(text)) {
+    return { classification: 'adjustment', confidence: 0.72, suggestedAction: 'ignore' };
+  }
+  if (/\bpayment\b|\bautopay\b/.test(text)) {
+    return {
+      classification: 'payment',
+      confidence: 0.75,
+      suggestedAction: 'create_expense'
+    };
+  }
+  return {
+    classification: 'unknown',
+    confidence: 0.4,
+    suggestedAction: 'link_existing'
+  };
+};
+
 const buildGeminiProposalKey = (value: string) => value.replace(/[^a-zA-Z0-9._-]/g, '_');
 
 const buildStatementTransactionGeminiKey = (txn: ParsedTransaction) =>
   buildGeminiProposalKey(txn.localId);
 
-const runGeminiProposalForMatching = async (args: {
+type MatchingProposalResult = Awaited<ReturnType<typeof buildMatchingProposal>>;
+
+const persistInternalMatchingSuggestion = async (args: {
   bucketName: string;
   rootPrefix: string;
-  companyId: string;
-  description: string;
-  merchant?: string;
-  amount: number;
-  type: 'debit' | 'credit';
-  statementMonth?: string;
-  pageContext?: string;
-  check?: {
-    payeeName?: string;
-    amount?: number;
-    extracted?: {
-      checkNumber?: string;
-      date?: string;
-      payeeName?: string;
-      amount?: number;
-      memo?: string;
-    };
-  };
-  fallbackProposal: Awaited<ReturnType<typeof buildMatchingProposal>>;
-  checkKey?: string;
-  persistArtifacts?: boolean;
-}) =>
-  runAccountingGeminiProposal({
-    companyId: args.companyId,
-    description: args.description,
-    merchant: args.merchant,
-    amount: args.amount,
-    type: args.type,
-    statementMonth: args.statementMonth,
-    pageContext: args.pageContext,
-    check: args.check,
-    fallbackProposal: args.fallbackProposal,
-    checkKey: args.checkKey,
-    persistArtifacts: args.persistArtifacts ?? true,
-    bucketName: args.bucketName,
-    rootPrefix: args.rootPrefix
+  proposal: MatchingProposalResult;
+  key: string;
+}) => {
+  const suggestionPath = buildStatementInternalSuggestionPath(args.rootPrefix, args.key);
+  await saveJson(args.bucketName, suggestionPath, {
+    schemaVersion: 'v1',
+    source: 'internal_matching',
+    generatedAt: nowIso(),
+    proposal: args.proposal
   });
+  return { suggestionPath };
+};
 
 const scoreRegionForTransaction = (
   txn: ParsedTransaction,
@@ -536,6 +567,16 @@ const readStatementOcrPages = async (bucketName: string, ocrPath: string) => {
   };
 };
 
+const loadStatementPageTextFromStoredOcr = async (
+  bucketName: string,
+  ocrPath: string,
+  pageNumber: number
+) => {
+  const { pages } = await readStatementOcrPages(bucketName, ocrPath);
+  const match = pages.find((page) => Number(page.pageNumber) === Number(pageNumber));
+  return String(match?.text ?? '');
+};
+
 const updateStatementProgressFromChecks = async (companyId: string, statementId: string) => {
   const [queued, processing, ready, needsReview, failed, total] = await Promise.all([
     StatementCheckModel.countDocuments({ companyId, statementId, status: 'queued' }),
@@ -650,20 +691,14 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         rootPrefix,
         pdfBuffer
       });
-      const ocrPages = await ocrStatementPages(
-        rendered.pages.map((page) => ({
-          pageNumber: page.pageNo,
-          imageBuffer: page.buffer,
-          mimeType: 'image/png'
-        }))
-      );
+      const ocrPages = await extractStatementPagesFromPdfBuffer(pdfBuffer);
       const combinedText = ocrPages.map((page) => page.text).filter(Boolean).join('\n\n');
       const detection = detectStatementMonthEvidence(ocrPages);
 
       const ocrJsonPath = buildOcrPath(rootPrefix, 'docai.json');
       const ocrTextPath = buildStatementOcrTextPath(rootPrefix, 'text.txt');
       await saveJson(bucketName, ocrJsonPath, {
-        provider: 'vision',
+        provider: 'pdf_text',
         extractedAt: nowIso(),
         pages: ocrPages,
         combinedText,
@@ -729,6 +764,9 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       const transactionsTablePath = buildStatementTransactionsTablePath(rootPrefix);
       const checksClearedTablePath = buildStatementChecksClearedTablePath(rootPrefix);
       const transactionSectionsPath = buildStatementTransactionSectionsPath(rootPrefix);
+      const classificationOutputPath = buildStatementClassificationOutputPath(rootPrefix);
+      const suggestionsOutputPath = buildStatementSuggestionsOutputPath(rootPrefix);
+      const processingSummaryPath = buildStatementProcessingSummaryPath(rootPrefix);
       await saveJson(bucketName, normalizedPath, {
         schemaVersion: 'v1',
         statementId: payload.statementId,
@@ -758,9 +796,11 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       const pageImagePaths = Array.isArray(statement.artifacts?.pageImagePaths)
         ? statement.artifacts.pageImagePaths.map((value: unknown) => String(value))
         : [];
+      const classificationRows: Array<Record<string, unknown>> = [];
+      const suggestionRows: Array<Record<string, unknown>> = [];
 
       for (const txn of parsed) {
-        const fallbackProposal = await buildMatchingProposal({
+        const proposal = await buildMatchingProposal({
           companyId: payload.companyId,
           description: txn.description,
           merchant: txn.merchant,
@@ -781,41 +821,32 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
             : undefined
         });
 
-        const geminiResult = await runGeminiProposalForMatching({
+        const { suggestionPath } = await persistInternalMatchingSuggestion({
           bucketName,
           rootPrefix,
-          companyId: payload.companyId,
-          description: txn.description,
-          merchant: txn.merchant,
-          amount: txn.amount,
-          type: txn.type,
-          statementMonth: statementMonth || undefined,
-          pageContext: [txn.merchant, txn.description, txn.checkNumber].filter(Boolean).join(' '),
-          check: txn.checkNumber
-            ? {
-                payeeName: txn.merchant ?? txn.description,
-                amount: txn.amount,
-                extracted: {
-                  checkNumber: txn.checkNumber,
-                  date: txn.postDate,
-                  payeeName: txn.merchant ?? txn.description,
-                  amount: txn.amount,
-                  memo: txn.description
-                }
-              }
-            : undefined,
-          fallbackProposal,
-          checkKey: buildStatementTransactionGeminiKey(txn),
-          persistArtifacts: true
+          proposal,
+          key: buildStatementTransactionGeminiKey(txn)
         });
-
-        const proposal = geminiResult.proposal;
 
         const pageImagePath = resolveStatementPageImagePath(
           statement,
           rootPrefix,
           txn.sourceLocator.pageNumber
         );
+        const derived = classifyStatementTransaction(txn);
+        classificationRows.push({
+          localId: txn.localId,
+          classification: derived.classification,
+          confidence: derived.confidence,
+          suggestedAction: derived.suggestedAction
+        });
+        suggestionRows.push({
+          localId: txn.localId,
+          type: proposal.qbTxnType ?? null,
+          confidence: proposal.confidence ?? 0,
+          reasons: proposal.reasons ?? [],
+          path: suggestionPath
+        });
 
         const createdTxn = await StatementTransactionModel.create({
           statementId: payload.statementId,
@@ -825,13 +856,18 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
           merchant: txn.merchant,
           amount: txn.amount,
           type: txn.type,
+          normalizedDescription: normalizeText(txn.description),
+          counterparty: txn.merchant || undefined,
+          classification: derived.classification,
+          classificationConfidence: derived.confidence,
+          suggestedAction: derived.suggestedAction,
           checkNumber: txn.checkNumber,
           statementCheckId: undefined,
           sourceLocator: txn.sourceLocator,
           evidence: {
             statementPdfPath: pdfPath,
             pageImagePath,
-            geminiPath: geminiResult.artifacts.normalizedPath
+            geminiPath: suggestionPath
           },
           proposal: {
             ...proposal,
@@ -856,7 +892,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
           attachments: {
             statementPdfPath: pdfPath,
             statementPageImagePath: pageImagePath,
-            geminiPath: geminiResult.artifacts.normalizedPath
+            geminiPath: suggestionPath
           },
           confidence: {
             overall: proposal.confidence,
@@ -880,6 +916,9 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         transactionsTablePath,
         checksClearedTablePath,
         transactionSectionsPath,
+        classificationOutputPath,
+        suggestionsOutputPath,
+        processingSummaryPath,
         geminiPath: normalizedPath,
         stageTimestamps: {
           structuringAt: statement.artifacts?.stageTimestamps?.structuringAt ?? nowIso()
@@ -899,7 +938,23 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       artifacts.transactionsTable = transactionsTablePath;
       artifacts.checksClearedTable = checksClearedTablePath;
       artifacts.transactionSections = transactionSectionsPath;
+      artifacts.classificationOutput = classificationOutputPath;
+      artifacts.suggestionsOutput = suggestionsOutputPath;
+      artifacts.processingSummary = processingSummaryPath;
       artifacts.statementOcrText = ocrTextPath;
+
+      await Promise.all([
+        saveJson(bucketName, classificationOutputPath, classificationRows),
+        saveJson(bucketName, suggestionsOutputPath, suggestionRows),
+        saveJson(bucketName, processingSummaryPath, {
+          statementId: payload.statementId,
+          stage: 'statement_generate_suggestions',
+          extractedRows: parsed.length,
+          checksDetected: checksClearedRows.length,
+          generatedSuggestions: suggestionRows.length,
+          generatedAt: nowIso()
+        })
+      ]);
       return { artifacts };
     }
     case 'checks.spawn': {
@@ -1096,12 +1151,20 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       }
 
       const pdfBuffer = await downloadFileBuffer(bucketName, String(parentStatement?.gcs?.pdfPath ?? ''));
+      const statementOcrPath = String(parentStatement?.artifacts?.ocrPath ?? '');
+      const pageNo = Number(check.artifacts?.pageNumber ?? statementTxn?.sourceLocator?.pageNumber ?? 1);
+      const internalPdfPageText =
+        statementOcrPath.length > 0
+          ? await loadStatementPageTextFromStoredOcr(bucketName, statementOcrPath, pageNo)
+          : '';
+
       const extraction = await runStatementCheckExtraction({
         pdfBuffer,
-        pageNumber: Number(check.artifacts?.pageNumber ?? statementTxn?.sourceLocator?.pageNumber ?? 1),
+        pageNumber: pageNo,
         cropBox,
         checkKey: check._id.toString(),
         pageContext: [statementTxn?.merchant, statementTxn?.description].filter(Boolean).join(' '),
+        internalPdfPageText,
         bucketName,
         rootPrefix,
         persistArtifacts: true
@@ -1172,7 +1235,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         type: 'debit' as const
       };
 
-      const fallbackProposal = await buildMatchingProposal({
+      const proposal = await buildMatchingProposal({
         companyId: payload.companyId,
         description: proposalSource.description,
         merchant: proposalSource.merchant ?? undefined,
@@ -1191,35 +1254,15 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         }
       });
 
-      const geminiResult = await runGeminiProposalForMatching({
+      const { suggestionPath: checkSuggestionPath } = await persistInternalMatchingSuggestion({
         bucketName,
         rootPrefix,
-        companyId: payload.companyId,
-        description: proposalSource.description,
-        merchant: proposalSource.merchant ?? undefined,
-        amount: proposalSource.amount,
-        type: proposalSource.type,
-        statementMonth: parentStatement?.statementMonth ?? statementTxn?.postDate?.slice(0, 7) ?? undefined,
-        pageContext: [proposalSource.merchant, proposalSource.description, extracted.checkNumber].filter(Boolean).join(' '),
-        check: {
-          payeeName: extracted.payeeName ?? undefined,
-          amount: extracted.amount ?? undefined,
-          extracted: {
-            checkNumber: extracted.checkNumber ?? undefined,
-            date: extracted.date ?? undefined,
-            payeeName: extracted.payeeName ?? undefined,
-            amount: extracted.amount ?? undefined,
-            memo: extracted.memo ?? undefined
-          }
-        },
-        fallbackProposal,
-        checkKey: check._id.toString(),
-        persistArtifacts: true
+        proposal,
+        key: check._id.toString()
       });
-      const proposal = geminiResult.proposal;
 
       mergeCheckArtifacts(check, {
-        geminiPath: geminiResult.artifacts.normalizedPath ?? check.artifacts?.geminiPath ?? undefined
+        geminiPath: checkSuggestionPath ?? check.artifacts?.geminiPath ?? undefined
       });
 
       check.match = {
@@ -1229,7 +1272,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         reasons: Array.from(
           new Set([
             ...extraction.reasons,
-            ...(geminiResult.reasons ?? []),
+            ...proposal.reasons,
             statementTxn ? 'Matched from statement transaction candidate' : 'No strong transaction candidate found'
           ])
         )
@@ -1248,7 +1291,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
                   pageImagePath: statementTxn.evidence?.pageImagePath ?? resolveStatementPageImagePath(parentStatement, rootPrefix, statementTxn.sourceLocator?.pageNumber),
                   checkCropPath: frontPath,
                   ocrPath,
-                  geminiPath: geminiResult.artifacts.normalizedPath ?? undefined
+                  geminiPath: checkSuggestionPath ?? undefined
                 },
                 proposal: {
                   ...proposal,
@@ -1271,7 +1314,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
                 'attachments.checkBackPath': check.gcs?.backPath ?? null,
                 'attachments.checkCropPath': frontPath,
                 'attachments.ocrPath': ocrPath,
-                'attachments.geminiPath': geminiResult.artifacts.normalizedPath ?? undefined,
+                'attachments.geminiPath': checkSuggestionPath ?? undefined,
                 confidence,
                 proposal: {
                   ...proposal,
@@ -1348,33 +1391,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
           }
         });
 
-        const geminiResult = await runGeminiProposalForMatching({
-          bucketName,
-          rootPrefix: String(currentStatement.gcs?.rootPrefix ?? ''),
-          companyId: payload.companyId,
-          description: txn.description,
-          merchant: txn.merchant ?? undefined,
-          amount: txn.amount,
-          type: txn.type,
-          statementMonth: currentStatement.statementMonth ?? currentStatement.artifacts?.detectedStatementMonth ?? undefined,
-          pageContext: [txn.merchant, txn.description].filter(Boolean).join(' '),
-          check: {
-            payeeName: check?.extracted?.payeeName ?? check?.autoFill?.payeeName ?? undefined,
-            amount: check?.extracted?.amount ?? check?.autoFill?.amount ?? undefined,
-            extracted: check?.extracted
-              ? {
-                  checkNumber: check.extracted.checkNumber ?? undefined,
-                  date: check.extracted.date ?? undefined,
-                  payeeName: check.extracted.payeeName ?? undefined,
-                  amount: check.extracted.amount ?? undefined,
-                  memo: check.extracted.memo ?? undefined
-                }
-              : undefined
-          },
-          fallbackProposal,
-          persistArtifacts: false
-        });
-        const proposal = geminiResult.proposal;
+        const proposal = fallbackProposal;
 
         txn.proposal = {
           ...proposal,

@@ -151,7 +151,7 @@ describe('StatementsPage', () => {
       </Provider>
     );
 
-    expect(await screen.findByText(/Processing now/i)).toBeInTheDocument();
+    expect(await screen.findByText(/In Progress/i)).toBeInTheDocument();
     expect(screen.getByText(/Open workspace/i)).toBeInTheDocument();
     expect(screen.getByText(/2 done • 3 left across 5 checks/i)).toBeInTheDocument();
     expect(screen.getByText(/^5 checks$/i)).toBeInTheDocument();

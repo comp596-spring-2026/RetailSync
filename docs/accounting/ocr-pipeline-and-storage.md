@@ -1,6 +1,6 @@
 # OCR Pipeline and Storage (Current Implementation)
 
-Last updated: 2026-03-16
+Last updated: 2026-04-19
 
 This document explains how statement upload, extraction, parsing, check processing, saving, review, and posting work in the current codebase.
 
@@ -13,6 +13,18 @@ What that means in practice:
 1. `statement.extract` does not call a live external OCR provider today.
 2. It downloads the uploaded PDF from GCS, counts pages from PDF markers, extracts printable text from the PDF bytes, and saves placeholder page images.
 3. Artifact names such as `ocr/docai.json` and `gemini/normalized.v1.json` are storage conventions only; they do not mean Document AI or Gemini is running in the current worker path.
+4. Internal matching suggestions are now persisted under `derived/suggestions/*.json` and used by month-close review gates.
+
+## 1A) Month-close API additions
+
+The statement detail workspace now exposes month-close operations without introducing a separate route tree:
+
+- `GET /api/accounting/statements/:id/entries`
+- `PATCH /api/accounting/statements/:id/entries/:entryId/review`
+- `PATCH /api/accounting/statements/:id/suggestions/:suggestionId/review`
+- `POST /api/accounting/statements/:id/complete-month`
+
+Completion is blocked until all server-side gates pass.
 
 ## 2) Upload and deterministic object paths
 
