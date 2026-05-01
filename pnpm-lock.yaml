@@ -156,6 +156,9 @@ importers:
       pdf-parse:
         specifier: ^1.1.1
         version: 1.1.1
+      pdf.js-extract:
+        specifier: ^1.0.1
+        version: 1.0.1
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
@@ -1846,6 +1849,9 @@ packages:
   dom-helpers@5.2.1:
     resolution: {integrity: sha512-nRCa7CK3VTrM2NmGkIy4cbK7IZlgBE/PYMn55rrXefr5xXDP0LdtfPnblFDoVdcAfslJ7or6iqAUnx0CCGIWQA==}
 
+  dommatrix@0.1.1:
+    resolution: {integrity: sha512-45CQT2bjnN9DXF07PXgG7hfQ2r8a6trrupNuTizRzfLHWWujdebAx8Xry0CB5uVBQlQY/m0TE/Whe5nrua+lsQ==}
+
   dotenv@16.6.1:
     resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
     engines: {node: '>=12'}
@@ -2621,6 +2627,10 @@ packages:
   pdf-parse@1.1.1:
     resolution: {integrity: sha512-v6ZJ/efsBpGrGGknjtq9J/oC8tZWq0KWL5vQrk2GlzLEQPUDB1ex+13Rmidl1neNN358Jn9EHZw5y07FFtaC7A==}
     engines: {node: '>=6.8.1'}
+
+  pdf.js-extract@1.0.1:
+    resolution: {integrity: sha512-2uWbXGPpYb0qJ/XAuNChlO/IlixtbsaBTm+oxKb7uDne0a7WN60n4jFq9IvsUGoYYDUnUiR/QIcNhA1wXCjWkw==}
+    engines: {node: '>= 20.0.0'}
 
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
@@ -4750,6 +4760,8 @@ snapshots:
       '@babel/runtime': 7.28.6
       csstype: 3.2.3
 
+  dommatrix@0.1.1: {}
+
   dotenv@16.6.1: {}
 
   dunder-proto@1.0.1:
@@ -5632,6 +5644,10 @@ snapshots:
       node-ensure: 0.0.0
     transitivePeerDependencies:
       - supports-color
+
+  pdf.js-extract@1.0.1:
+    dependencies:
+      dommatrix: 0.1.1
 
   pend@1.2.0: {}
 

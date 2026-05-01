@@ -1,19 +1,20 @@
 # OCR Pipeline and Storage (Current Implementation)
 
-Last updated: 2026-04-19
+Last updated: 2026-04-29
 
 This document explains how statement upload, extraction, parsing, check processing, saving, review, and posting work in the current codebase.
 
 ## 1) Important implementation note
 
-The current statement OCR path is a fallback pipeline implemented inside `server/src/jobs/accountingTaskRunner.ts`.
+The current statement OCR path is a local PDF-first pipeline implemented inside `server/src/jobs/accountingTaskRunner.ts`.
 
 What that means in practice:
 
-1. `statement.extract` does not call a live external OCR provider today.
-2. It downloads the uploaded PDF from GCS, counts pages from PDF markers, extracts printable text from the PDF bytes, and saves placeholder page images.
-3. Artifact names such as `ocr/docai.json` and `gemini/normalized.v1.json` are storage conventions only; they do not mean Document AI or Gemini is running in the current worker path.
-4. Internal matching suggestions are now persisted under `derived/suggestions/*.json` and used by month-close review gates.
+1. `statement.extract` downloads the uploaded PDF from GCS, renders real page PNGs with the configured PDF renderer, extracts PDF text, and saves OCR artifacts.
+2. `statement.structure` reads the saved OCR JSON, runs regex and coordinate-aware parsing, saves normalized tables, writes ledger/transaction rows, and creates suggestion artifacts.
+3. `check.process` renders each check crop from the original PDF, saves crop/ocr/structured files, then enriches `StatementCheck`, `StatementTransaction`, and `LedgerEntry`.
+4. Artifact names such as `ocr/docai.json` and `gemini/normalized.v1.json` are storage conventions. They preserve a future provider boundary even when the current worker uses local PDF text and deterministic parsing.
+5. Gemini-assisted matching is optional. If the API key is missing or Gemini is rate limited, the worker persists fallback proposal artifacts and keeps the statement usable.
 
 ## 1A) Month-close API additions
 
@@ -67,25 +68,26 @@ sequenceDiagram
   API->>Q: enqueue statement.extract
 
   Q->>W: statement.extract
-  W->>G: save pages/page-*.png placeholders
+  W->>G: save pages/page-*.png
   W->>G: save ocr/docai.json + ocr/text.txt
   W->>M: update BankStatement status
 
   Q->>W: statement.structure
-  W->>G: read ocr/text.txt
-  W->>G: save gemini/normalized.v1.json
+  W->>G: read ocr/docai.json
+  W->>G: save normalized tables + suggestions
   W->>M: rebuild StatementTransaction + LedgerEntry
 
   Q->>W: checks.spawn
-  W->>G: save checks/extracted/<checkKey>/front.jpg placeholders
   W->>M: create StatementCheck rows
 
   par per check
     Q->>W: check.process
-    W->>G: save checks/extracted/<checkId>/ocr.json
+    W->>G: save crop + ocr + structured artifacts
     W->>G: save checks/extracted/<checkId>/structured.v1.json
     W->>M: update StatementCheck + patch LedgerEntry/StatementTransaction
   end
+
+  W->>G: finalize ocr/json/tables/extracted-checks.json once
 
   UI->>API: approve/exclude in ledger
   API->>M: update LedgerEntry and mirrors
@@ -111,15 +113,33 @@ companies/<companyId>/statements/<yyyy>/<mm>/<statementId>/
     ocr/
       docai.json
       text.txt
+      json/
+        tables/
+          transactions.json
+          checks-cleared.json
+          transaction-sections.json
+          extracted-checks.json
+          classification-output.json
+          suggestions-output.json
+          processing-summary.json
+          structured-statement.v1.json
+          evidence.v1.json
+          validation-report.v1.json
+          pdf-layout.v1.json
     gemini/
       normalized.v1.json
     checks/
       extracted/
         <checkKey>/
-          front.jpg
-        <checkId>/
+          front.png
+          ocr.txt
           ocr.json
           structured.v1.json
+          proposal.prompt.v1.txt
+          proposal.raw.v1.json
+          proposal.normalized.v1.json
+    suggestions/
+      <transaction-or-check-id>.json
 ```
 
 What each file means:
@@ -127,13 +147,17 @@ What each file means:
 | Path | Written by | Meaning |
 | --- | --- | --- |
 | `original/statement.pdf` | client direct upload | source document |
-| `derived/pages/page-*.png` | `statement.extract` | placeholder page images so downstream artifacts have stable references |
-| `derived/ocr/docai.json` | `statement.extract` | fallback extraction metadata and text preview |
+| `derived/pages/page-*.png` | `statement.extract` | rendered statement page images from the uploaded PDF |
+| `derived/ocr/docai.json` | `statement.extract` | page text, page regions, combined text, and statement-month detection evidence |
 | `derived/ocr/text.txt` | `statement.extract` | extracted printable text used by structuring |
-| `derived/gemini/normalized.v1.json` | `statement.structure` | normalized transaction array generated from regex parsing |
-| `derived/checks/extracted/<checkKey>/front.jpg` | `checks.spawn` | placeholder image path for seeded check candidates |
+| `derived/ocr/json/tables/*.json` | `statement.structure` | normalized tables, sections, suggestions, validation, evidence, and layout data |
+| `derived/gemini/normalized.v1.json` | `statement.structure` | normalized transaction model retained for compatibility |
+| `derived/checks/extracted/<checkKey>/front.png` | `check.process` | rendered crop from the original statement PDF |
+| `derived/checks/extracted/<checkKey>/ocr.txt` | `check.process` | page/crop text used to autofill check fields |
 | `derived/checks/extracted/<checkId>/ocr.json` | `check.process` | check autofill and confidence payload |
 | `derived/checks/extracted/<checkId>/structured.v1.json` | `check.process` | structured check result payload |
+| `derived/checks/extracted/<checkId>/proposal.*` | `check.process` | Gemini prompt/raw/normalized proposal artifacts or deterministic fallback |
+| `derived/ocr/json/tables/extracted-checks.json` | final check progress update | consolidated check result file written once per statement run |
 
 ### 4.2 MongoDB collections
 
@@ -175,56 +199,65 @@ Worker logic:
 1. load statement by `statementId`
 2. mark statement `extracting`
 3. download `original/statement.pdf`
-4. count pages with `parsePdfPageCount`
-5. extract printable text with `extractOcrFallbackText`
-6. write placeholder page PNGs with `savePngPlaceholderIfMissing`
+4. render and persist page PNGs via `renderAndPersistStatementPages`
+5. extract page text via `extractStatementPagesFromPdfBuffer`
+6. detect statement date/month evidence from extracted page text
 7. write `ocr/docai.json`
 8. write `ocr/text.txt`
 9. move statement to `structuring`
 
 Important current limitation:
 
-- page images are transparent placeholders
-- extraction is text-only fallback logic from the PDF buffer
+- extraction is PDF-text first; scanned-only statements need Vision/Document AI fallback work before they can be fully automated
+- rendered pages and check crops are real images, but field extraction still relies mostly on saved PDF text and deterministic parsing
 
 ### 5.3 `statement.structure`
 
 Worker logic:
 
-1. read `ocr/text.txt`
-2. parse candidate transactions with `parseTransactions`
-3. save normalized output to `gemini/normalized.v1.json`
-4. delete prior `StatementTransaction` rows for the statement
-5. delete prior `LedgerEntry` rows for the statement
-6. create new `StatementTransaction` rows
-7. create matching `LedgerEntry` rows
-8. seed proposal/confidence with `buildMatchingProposal`
-9. move statement to `checks_queued`
+1. read `ocr/docai.json`
+2. parse candidate transactions with section-aware helpers
+3. run PDF layout extraction when available
+4. save normalized output to `gemini/normalized.v1.json`
+5. save table artifacts under `derived/ocr/json/tables/`
+6. delete prior `StatementTransaction` rows for the statement
+7. delete prior `LedgerEntry` rows for the statement
+8. create new `StatementTransaction` rows
+9. create matching `LedgerEntry` rows
+10. seed proposal/confidence with `buildMatchingProposal`
+11. move statement to `checks_queued` or `needs_parser_review` depending on validation results
 
 Current parser characteristics:
 
 - regex-driven
-- capped to the first 500 non-empty lines
-- detects dates, signed amounts, and optional `check #1234`
-- infers `debit` vs `credit` from sign
+- uses statement section labels such as electronic credits, electronic debits, checks cleared, daily balances, beginning balance, and ending balance
+- coordinate-aware extraction can add check-table rows and daily balance rows when PDF layout is available
+- non-posting rows such as balances/totals are marked so they do not become QuickBooks suggestions
 
 ### 5.4 `checks.spawn`
 
 Worker logic:
 
 1. delete prior `StatementCheck` rows for the statement
-2. load statement transactions ordered by date
+2. load statement transactions ordered by date/check number
 3. classify check candidates when either:
    - `checkNumber` exists, or
    - text contains `check`, `pay to the order`, `micr`, `cheque`, or `payroll`
 4. create `StatementCheck` rows with initial `queued` status
-5. save placeholder `front.jpg` paths
+5. persist the deterministic consolidated extracted-checks path on the statement
 6. update statement progress counts
-7. enqueue one `check.process` job per check
+7. enqueue one staggered `check.process` job per check
 
 If no candidates are found:
 
 - statement moves directly to `ready_for_review`
+
+Rate-limit behavior:
+
+- `checks.spawn` no longer writes the consolidated `extracted-checks.json` file.
+- `check.process` does not rewrite `extracted-checks.json` per check.
+- the consolidated file is finalized once after all checks reach a terminal state.
+- check jobs are staggered when dispatched to Cloud Tasks so external APIs and GCS are not hit in one burst.
 
 ### 5.5 `check.process`
 
@@ -240,13 +273,14 @@ Worker logic:
    - amount
    - memo
 5. generate confidence block
-6. save `ocr.json`
-7. save `structured.v1.json`
-8. update `StatementCheck`
-9. re-run `buildMatchingProposal` using the check payee/amount as extra signal
-10. patch the linked `StatementTransaction`
-11. patch the linked `LedgerEntry`
-12. recompute statement progress and final readiness
+6. render and save `front.png`
+7. save `ocr.txt`, `ocr.json`, and `structured.v1.json`
+8. persist Gemini prompt/raw/normalized proposal artifacts when proposal persistence is enabled
+9. update `StatementCheck`
+10. re-run `buildMatchingProposal` using the check payee/amount as extra signal
+11. patch the linked `StatementTransaction`
+12. patch the linked `LedgerEntry`
+13. recompute statement progress and final readiness
 
 Status rule:
 
@@ -338,6 +372,14 @@ Effects:
 2. tax `Recover Payment` uses `clientRequestId` tags and checks for an existing QuickBooks transaction before creating a new one
 3. tax `Journal Adjustment` does the same for `JournalEntry`
 
+### 8.4 429 and quota handling
+
+1. GCS writes to `extracted-checks.json` are consolidated and retried with exponential backoff.
+2. GCS 429/error text detection handles `rate limit`, `rateLimitExceeded`, `too many requests`, and quota-exceeded variants.
+3. Gemini calls retry transient 429/5xx/network failures before falling back to deterministic proposals.
+4. QuickBooks calls retry transient 429/5xx/network failures and honor `Retry-After` when Intuit returns it.
+5. A real exhausted quota still degrades gracefully: the saved artifacts explain the provider failure and the deterministic proposal remains available for review.
+
 ## 9) Failure and observability
 
 Every async accounting job creates a `Run` row.
@@ -374,3 +416,11 @@ If you need to trace the runtime from code, read these files in order:
 5. `server/src/services/matchingEngine.ts`
 6. `server/src/controllers/ledgerController.ts`
 7. `server/src/services/quickbooksSyncService.ts`
+
+## 11) Improvement plan
+
+1. Add scanned-PDF fallback: route image-only pages through Vision OCR or Document AI and store provider-specific confidence by page.
+2. Add provider selection telemetry: record whether each statement page used PDF text, Vision, Document AI, or manual review fallback.
+3. Improve check-table extraction: use coordinate tables first, then OCR text, then transaction-row hints.
+4. Add artifact health checks: verify the original PDF, page PNGs, OCR JSON/text, structured tables, check crops, and consolidated checks file before marking a statement ready.
+5. Add a manual correction loop: let reviewers edit check number/date/payee/amount and save the corrected fields back to `StatementCheck` plus the consolidated artifact.

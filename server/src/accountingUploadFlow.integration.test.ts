@@ -226,6 +226,22 @@ maybeDescribe('accounting upload flow with bundled PDF', () => {
 
     expect(textArtifactResponse.headers['content-type']).toContain('text/plain');
     expect(textArtifactResponse.text.length).toBeGreaterThan(0);
+
+    const entriesResponse = await request(app)
+      .get(`/api/accounting/statements/${statementId}/entries`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    expect(Array.isArray(entriesResponse.body.data.entries)).toBe(true);
+
+    const suggestionsResponse = await request(app)
+      .get(`/api/accounting/statements/${statementId}/suggestions`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    expect(suggestionsResponse.body.data).toBeTruthy();
+    expect(Array.isArray(suggestionsResponse.body.data.items)).toBe(true);
+    expect(suggestionsResponse.body.data.summary).toBeTruthy();
   });
 
   it('persists a failed statement row when the uploaded PDF cannot be read back from storage', async () => {

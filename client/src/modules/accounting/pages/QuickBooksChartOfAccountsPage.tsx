@@ -220,18 +220,18 @@ export const QuickBooksChartOfAccountsPage = () => {
         warning={workspaceWarning}
       >
         <Stack
-          sx={{
-            display: 'grid',
-            gap: 1.5,
-            gridTemplateColumns: {
-              xs: '1fr',
-              sm: 'repeat(2, minmax(0, 1fr))',
-              xl: 'repeat(4, minmax(0, 1fr))'
-            }
-          }}
+          direction="row"
+          spacing={1.5}
+          useFlexGap
+          flexWrap="nowrap"
+          sx={{ overflowX: 'auto' }}
         >
           {summary.map((item) => (
-            <Paper key={item.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2.5 }}>
+            <Paper
+              key={item.label}
+              variant="outlined"
+              sx={{ p: 1.5, borderRadius: 2.5, minWidth: 180, flex: '1 1 0' }}
+            >
               <Stack spacing={0.35}>
                 <Typography variant="caption" color="text.secondary">
                   {item.label}

@@ -1,0 +1,12 @@
+---
+description: RetailSync CI and release specialist guidance
+globs: .github/workflows/**,README.md,RELEASE.md,docs/testing/**,docs/status.md
+alwaysApply: false
+---
+
+# RetailSync CI and release
+
+- Follow `.agents/ci-release/AGENTS.md`.
+- Keep CI output readable.
+- Keep verification language honest.
+- Treat platform differences, secrets, and workflow assumptions as first-class concerns.

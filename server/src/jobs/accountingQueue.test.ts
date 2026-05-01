@@ -5,17 +5,19 @@ const getClientMock = vi.fn();
 const getAccessTokenMock = vi.fn();
 const runAccountingTaskMock = vi.fn();
 
+const envState = {
+  internalTasksEndpoint: 'https://tasks.internal.retailsync.dev/api/internal/tasks/run',
+  gcpProjectId: 'test-project',
+  gcpRegion: 'us-west1',
+  tasksOidcServiceAccountEmail: 'tasks@example.com',
+  tasksQueuePipeline: 'accounting-pipeline',
+  tasksQueueSync: 'accounting-sync',
+  serviceSecret: 'secret',
+  tasksMode: 'cloud'
+};
+
 vi.mock('../config/env', () => ({
-  env: {
-    internalTasksEndpoint: 'http://localhost:4000/api/internal/tasks/run',
-    gcpProjectId: 'test-project',
-    gcpRegion: 'us-west1',
-    tasksOidcServiceAccountEmail: 'tasks@example.com',
-    tasksQueuePipeline: 'accounting-pipeline',
-    tasksQueueSync: 'accounting-sync',
-    serviceSecret: 'secret',
-    tasksMode: 'cloud'
-  }
+  env: envState
 }));
 
 vi.mock('googleapis', () => ({
@@ -39,13 +41,14 @@ describe('accountingQueue', () => {
     getAccessTokenMock.mockReset();
     runAccountingTaskMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
+    envState.internalTasksEndpoint = 'https://tasks.internal.retailsync.dev/api/internal/tasks/run';
   });
 
   it('normalizes the legacy internal tasks endpoint for pipeline jobs', async () => {
     const { resolveAccountingTaskEndpoint } = await import('./accountingQueue');
 
     expect(resolveAccountingTaskEndpoint('statement.extract')).toBe(
-      'http://localhost:4000/api/tasks/pipeline'
+      'https://tasks.internal.retailsync.dev/api/tasks/pipeline'
     );
   });
 
@@ -53,7 +56,7 @@ describe('accountingQueue', () => {
     const { resolveAccountingTaskEndpoint } = await import('./accountingQueue');
 
     expect(resolveAccountingTaskEndpoint('quickbooks.post_approved')).toBe(
-      'http://localhost:4000/api/tasks/sync'
+      'https://tasks.internal.retailsync.dev/api/tasks/sync'
     );
   });
 
@@ -80,6 +83,41 @@ describe('accountingQueue', () => {
     expect(result.mode).toBe('cloud');
     expect(result.status).toBe('queued');
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4000/api/tasks/pipeline');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://tasks.internal.retailsync.dev/api/tasks/pipeline'
+    );
+  });
+
+  it('runs the task chain in-process when the internal endpoint is a loopback address', async () => {
+    envState.internalTasksEndpoint = 'http://localhost:4000/api/internal/tasks/run';
+    runAccountingTaskMock.mockResolvedValue({
+      taskId: 'task-1',
+      companyId: 'company-1',
+      statementId: 'statement-1',
+      jobType: 'statement.extract'
+    });
+
+    vi.resetModules();
+    const { enqueueAccountingJob } = await import('./accountingQueue');
+
+    const result = await enqueueAccountingJob({
+      companyId: 'company-1',
+      statementId: 'statement-1',
+      jobType: 'statement.extract',
+      meta: { requestedBy: 'user-1' }
+    });
+
+    expect(result.mode).toBe('cloud');
+    expect(result.status).toBe('queued');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getClientMock).not.toHaveBeenCalled();
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(runAccountingTaskMock).toHaveBeenCalledTimes(1);
+    expect(runAccountingTaskMock.mock.calls[0]?.[0]).toMatchObject({
+      companyId: 'company-1',
+      statementId: 'statement-1',
+      jobType: 'statement.extract'
+    });
   });
 });

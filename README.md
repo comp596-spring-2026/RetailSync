@@ -69,6 +69,266 @@ RetailSync/
   docs/          # Status, architecture, wireframes, testing docs
 ```
 
+## System Architecture
+
+RetailSync's top-level infrastructure runs on a modern serverless stack utilizing Firebase, Google Cloud Run, and Google AI Services.
+
+- **D2 Architectural Definition**: [docs/retailsync-architecture.d2](./docs/retailsync-architecture.d2)
+
+<details>
+<summary><b>View D2 Architecture Code</b></summary>
+
+```d2
+vars: {
+  d2-config: {
+    layout-engine: elk
+    theme-id: 300
+  }
+}
+
+direction: right
+
+classes: {
+  user: {
+    shape: person
+    style: {
+      fill: "#ffffff"
+      stroke: "#334155"
+      stroke-width: 2
+      font-color: "#0f172a"
+      shadow: true
+    }
+  }
+
+  frontend: {
+    style: {
+      fill: "#eff6ff"
+      stroke: "#3b82f6"
+      stroke-width: 2
+      font-color: "#1e3a8a"
+      border-radius: 12
+      shadow: true
+    }
+  }
+
+  backend: {
+    style: {
+      fill: "#f0fdf4"
+      stroke: "#22c55e"
+      stroke-width: 2
+      font-color: "#14532d"
+      border-radius: 12
+      shadow: true
+    }
+  }
+
+  database: {
+    style: {
+      fill: "#faf5ff"
+      stroke: "#a855f7"
+      stroke-width: 2
+      font-color: "#581c87"
+      border-radius: 12
+      shadow: true
+    }
+  }
+
+  infra: {
+    style: {
+      fill: "#f8fafc"
+      stroke: "#64748b"
+      stroke-width: 2
+      font-color: "#334155"
+      border-radius: 12
+      shadow: true
+    }
+  }
+
+  ai: {
+    style: {
+      fill: "#fff1f2"
+      stroke: "#e11d48"
+      stroke-width: 2
+      font-color: "#881337"
+      border-radius: 12
+      shadow: true
+    }
+  }
+
+  integration: {
+    style: {
+      fill: "#fff7ed"
+      stroke: "#f97316"
+      stroke-width: 2
+      font-color: "#7c2d12"
+      border-radius: 12
+      shadow: true
+    }
+  }
+
+  group: {
+    style: {
+      fill: "#ffffff"
+      stroke: "#cbd5e1"
+      stroke-width: 1
+      border-radius: 18
+      shadow: true
+    }
+  }
+}
+
+title: RetailSync - Real System Architecture {
+  shape: text
+  near: top-center
+  style: {
+    bold: true
+    font-size: 32
+    font-color: "#1e293b"
+  }
+}
+
+subtitle: End-to-end flow of the platform from client-side SPA to cloud infrastructure and AI integration. {
+  shape: text
+  near: top-center
+  style: {
+    font-size: 16
+    font-color: "#475569"
+  }
+}
+
+admin: {
+  label: "Admin User"
+  class: user
+}
+
+retailer: {
+  label: "Retail Manager"
+  class: user
+}
+
+frontend_layer: {
+  label: "Frontend Layer"
+  class: group
+  direction: down
+
+  firebase_hosting: {
+    label: "Firebase Hosting"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/firebase/firebase-plain.svg"
+    class: group
+    direction: down
+
+    react_app: {
+      label: "React SPA (Vite/TS)"
+      icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/vitejs/vitejs-original.svg"
+      class: frontend
+    }
+  }
+}
+
+backend_layer: {
+  label: "Backend Layer"
+  class: group
+  direction: down
+
+  cloud_run: {
+    label: "Google Cloud Run"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg"
+    class: group
+    direction: down
+
+    express_server: {
+      label: "Node.js / Express Server"
+      icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/nodejs/nodejs-original.svg"
+      class: backend
+    }
+  }
+}
+
+database_layer: {
+  label: "Database Layer"
+  class: group
+  direction: down
+
+  mongo_db: {
+    label: "MongoDB"
+    shape: cylinder
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/mongodb/mongodb-original.svg"
+    class: database
+  }
+
+}
+
+gcp_infrastructure: {
+  label: "Google Cloud Infrastructure"
+  class: group
+  direction: down
+
+  cloud_tasks: {
+    label: "Cloud Tasks (Queues)"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg"
+    class: infra
+  }
+
+  gcs_bucket: {
+    label: "Cloud Storage (GCS)"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg"
+    class: infra
+  }
+
+}
+
+ai_services: {
+  label: "Google AI Services"
+  class: group
+  direction: down
+
+  gemini_vision: {
+    label: "Gemini Vision API (OCR)"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/google/google-original.svg"
+    class: ai
+  }
+
+  gemini_api: {
+    label: "Gemini API (Reasoning)"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/google/google-original.svg"
+    class: ai
+  }
+}
+
+third_party_layer: {
+  label: "Third-Party Integrations"
+  class: group
+  direction: down
+
+
+  google_auth: {
+    label: "Google Auth (SSO)"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/google/google-original.svg"
+    class: integration
+  }
+}
+
+# --- Connections ---
+
+admin -> frontend_layer.firebase_hosting.react_app: "uses"
+retailer -> frontend_layer.firebase_hosting.react_app: "uses"
+
+frontend_layer.firebase_hosting.react_app -> backend_layer.cloud_run.express_server: "API requests"
+
+backend_layer.cloud_run.express_server -> third_party_layer.google_auth: "Authenticates"
+
+backend_layer.cloud_run.express_server -> gcp_infrastructure.cloud_tasks: "Enqueues pipeline jobs"
+backend_layer.cloud_run.express_server -> gcp_infrastructure.gcs_bucket: "Uploads PDFs & Extracts Data"
+
+gcp_infrastructure.cloud_tasks -> backend_layer.cloud_run.express_server: "Triggers Webhooks"
+
+backend_layer.cloud_run.express_server -> database_layer.mongo_db: "Read/Write data"
+backend_layer.cloud_run.express_server -> ai_services.gemini_vision: "OCR Processing"
+backend_layer.cloud_run.express_server -> ai_services.gemini_api: "Proposals & POS Assistant"
+```
+
+</details>
+
 ## Routing Summary
 
 ```mermaid

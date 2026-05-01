@@ -1,0 +1,13 @@
+---
+description: RetailSync QuickBooks specialist guidance
+globs: client/src/modules/quickbooks/**,client/src/modules/accounting/pages/QuickBooks*.tsx,server/src/controllers/quickbooks*.ts,server/src/controllers/settings/quickbooksSettingsController.ts,server/src/routes/quickbooksIntegrationRoutes.ts,server/src/integrations/quickbooks/**,server/src/services/quickbooks*.ts
+alwaysApply: false
+---
+
+# RetailSync QuickBooks workspace
+
+- Follow `.agents/quickbooks/AGENTS.md`.
+- Keep QuickBooks as its own workspace, not an accounting tab.
+- Organize work by operational group: accounts, contacts, sales, money, operations, reports, tax.
+- Preserve provider safety, idempotency, and external ID integrity.
+- Keep create/edit/delete flows visible and testable where supported.

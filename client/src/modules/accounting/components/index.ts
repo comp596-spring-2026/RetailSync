@@ -2,6 +2,7 @@ export * from './AccountingTabs';
 export * from './MonthCloseGatePanel';
 export * from './QuickBooksTabs';
 export * from './RequireQuickBooksConnection';
+export * from './StatementMonthCalendar';
 export * from './StatementStageTimeline';
 export * from './StatementArtifactsPanel';
 export * from './StatementWorkflowCard';

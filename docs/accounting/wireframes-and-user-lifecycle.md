@@ -15,14 +15,14 @@ Shared shell:
 
 Primary routes:
 
-| Route | Page component | Purpose |
-| --- | --- | --- |
-| `/dashboard/accounting/statements` | `StatementsPage.tsx` | statement intake and processing queue |
+| Route                                           | Page component            | Purpose                                                           |
+| ----------------------------------------------- | ------------------------- | ----------------------------------------------------------------- |
+| `/dashboard/accounting/statements`              | `StatementsPage.tsx`      | statement intake and processing queue                             |
 | `/dashboard/accounting/statements/:statementId` | `StatementDetailPage.tsx` | per-statement month-close review, suggestions, and check progress |
-| `/dashboard/accounting/ledger` | `LedgerPage.tsx` | canonical review and posting surface |
-| `/dashboard/accounting/quickbooks` | `QuickBooksSyncPage.tsx` | OAuth connection, reference refresh, post-approved trigger |
-| `/dashboard/accounting/tax` | `TaxDashboardPage.tsx` | live QuickBooks tax/reporting tools |
-| `/dashboard/accounting/observability` | `ObservabilityPage.tsx` | health, failed runs, debug actions |
+| `/dashboard/accounting/ledger`                  | `LedgerPage.tsx`          | canonical review and posting surface                              |
+| `/dashboard/accounting/quickbooks`              | `QuickBooksSyncPage.tsx`  | OAuth connection, reference refresh, post-approved trigger        |
+| `/dashboard/accounting/tax`                     | `TaxDashboardPage.tsx`    | live QuickBooks tax/reporting tools                               |
+| `/dashboard/accounting/observability`           | `ObservabilityPage.tsx`   | health, failed runs, debug actions                                |
 
 ```mermaid
 flowchart LR
@@ -67,14 +67,14 @@ flowchart TD
 
 The task brief uses conceptual stage names; runtime status still uses statement status values.
 
-| Conceptual stage | Current runtime status/events |
-| --- | --- |
-| `statement_ingest` | upload URL + `POST /statements` create record (`uploaded`) |
-| `statement_extract_text` | `statement.extract` (`extracting`) |
-| `statement_extract_rows` | early `statement.structure` (`structuring`) |
-| `statement_classify_rows` | `statement.structure` classification output artifacts |
-| `statement_generate_suggestions` | `statement.structure` suggestion output artifacts |
-| `statement_finalize_artifacts` | end of `statement.structure` + checks pipeline (`checks_queued` / `ready_for_review`) |
+| Conceptual stage                 | Current runtime status/events                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------- |
+| `statement_ingest`               | upload URL + `POST /statements` create record (`uploaded`)                            |
+| `statement_extract_text`         | `statement.extract` (`extracting`)                                                    |
+| `statement_extract_rows`         | early `statement.structure` (`structuring`)                                           |
+| `statement_classify_rows`        | `statement.structure` classification output artifacts                                 |
+| `statement_generate_suggestions` | `statement.structure` suggestion output artifacts                                     |
+| `statement_finalize_artifacts`   | end of `statement.structure` + checks pipeline (`checks_queued` / `ready_for_review`) |
 
 ## 3) Statements list
 
@@ -87,7 +87,7 @@ Main UI pieces:
 
 - filter toolbar: month, status, search, apply
 - primary action: `Upload PDF`
-- stage lanes: `Queued`, `In Progress`, `Needs Attention`, `Ready`
+- stage lanes: `Queued`, `Running`, `Attention`, `Ready`
 - statement workflow cards with compact progress chips and primary/secondary actions
 - row actions: `Open workspace`, `Open ledger`, `Reprocess`, `Delete`
 - auto-polling every 3 seconds while rows are in `extracting`, `structuring`, or `checks_queued`
@@ -103,8 +103,8 @@ Main UI pieces:
 
 [Workflow Lanes]
   Queued
-  In Progress
-  Needs Attention
+  Running
+  Attention
   Ready
 
 [Statement workflow card]
@@ -146,6 +146,7 @@ File:
 Main UI pieces:
 
 - header card with file name, update time, status, progress counts, month-close status
+- explicit `Now / Next` guidance in the page header copy
 - issues alert for statement-level warnings/failures
 - extracted entries section (month-close)
 - suggestion review section with approve/exclude actions
@@ -172,6 +173,7 @@ Main UI pieces:
 [Optional issues alert]
 
 [Month-close sections]
+  [Now & Next summary]
   [Extracted entries table]
   [Suggestion review panel]
   [Completion gates checklist]
@@ -420,15 +422,15 @@ flowchart TD
 
 ## 9) Component ownership map
 
-| Concern | Main client files | Main server files |
-| --- | --- | --- |
-| Workspace shell | `client/src/modules/accounting/components/AccountingTabs.tsx` | n/a |
-| Statements intake | `StatementsPage.tsx`, `UploadStatementDialog.tsx` | `accountingController.ts`, `accountingRoutes.ts` |
-| Statement processing + month-close detail | `StatementDetailPage.tsx` | `accountingController.ts`, `accountingTaskRunner.ts`, `StatementCheck.ts`, `BankStatement.ts`, `StatementTransaction.ts` |
-| Ledger review/posting | `LedgerPage.tsx` | `ledgerController.ts`, `ledgerRoutes.ts`, `LedgerEntry.ts`, `quickbooksSyncService.ts` |
-| QuickBooks connection/sync | `QuickBooksSyncPage.tsx` | `quickbooksController.ts`, `quickbooksIntegrationRoutes.ts`, `quickbooksService.ts`, `quickbooksSyncService.ts` |
-| Tax tools | `TaxDashboardPage.tsx` | `quickbooksTaxController.ts`, `quickbooksTaxService.ts` |
-| Observability | `ObservabilityPage.tsx` | `accountingObservabilityController.ts`, `Run.ts` |
+| Concern                                   | Main client files                                             | Main server files                                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Workspace shell                           | `client/src/modules/accounting/components/AccountingTabs.tsx` | n/a                                                                                                                      |
+| Statements intake                         | `StatementsPage.tsx`, `UploadStatementDialog.tsx`             | `accountingController.ts`, `accountingRoutes.ts`                                                                         |
+| Statement processing + month-close detail | `StatementDetailPage.tsx`                                     | `accountingController.ts`, `accountingTaskRunner.ts`, `StatementCheck.ts`, `BankStatement.ts`, `StatementTransaction.ts` |
+| Ledger review/posting                     | `LedgerPage.tsx`                                              | `ledgerController.ts`, `ledgerRoutes.ts`, `LedgerEntry.ts`, `quickbooksSyncService.ts`                                   |
+| QuickBooks connection/sync                | `QuickBooksSyncPage.tsx`                                      | `quickbooksController.ts`, `quickbooksIntegrationRoutes.ts`, `quickbooksService.ts`, `quickbooksSyncService.ts`          |
+| Tax tools                                 | `TaxDashboardPage.tsx`                                        | `quickbooksTaxController.ts`, `quickbooksTaxService.ts`                                                                  |
+| Observability                             | `ObservabilityPage.tsx`                                       | `accountingObservabilityController.ts`, `Run.ts`                                                                         |
 
 ## 10) Practical reading order
 

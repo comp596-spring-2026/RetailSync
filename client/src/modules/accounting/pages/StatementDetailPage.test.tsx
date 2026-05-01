@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { configureStore } from '@reduxjs/toolkit';
@@ -16,6 +17,9 @@ const {
   listStatementChecksMock,
   getStatementSuggestionsMock,
   listStatementEntriesMock,
+  getStatementStatusMock,
+  listStatementRulesMock,
+  createStatementRuleFromTransactionMock,
   getStatementArtifactBlobMock,
   getStatementArtifactTextMock
 } = vi.hoisted(() => ({
@@ -23,6 +27,9 @@ const {
   listStatementChecksMock: vi.fn(),
   getStatementSuggestionsMock: vi.fn(),
   listStatementEntriesMock: vi.fn(),
+  getStatementStatusMock: vi.fn(),
+  listStatementRulesMock: vi.fn(),
+  createStatementRuleFromTransactionMock: vi.fn(),
   getStatementArtifactBlobMock: vi.fn(),
   getStatementArtifactTextMock: vi.fn()
 }));
@@ -33,6 +40,10 @@ vi.mock('../api', () => ({
     listStatementChecks: (...args: unknown[]) => listStatementChecksMock(...args),
     getStatementSuggestions: (...args: unknown[]) => getStatementSuggestionsMock(...args),
     listStatementEntries: (...args: unknown[]) => listStatementEntriesMock(...args),
+    getStatementStatus: (...args: unknown[]) => getStatementStatusMock(...args),
+    listStatementRules: (...args: unknown[]) => listStatementRulesMock(...args),
+    createStatementRuleFromTransaction: (...args: unknown[]) => createStatementRuleFromTransactionMock(...args),
+    getStatementStreamUrl: vi.fn(() => 'http://localhost/accounting/statements/statement-1/stream'),
     getStatementArtifactBlob: (...args: unknown[]) => getStatementArtifactBlobMock(...args),
     getStatementArtifactText: (...args: unknown[]) => getStatementArtifactTextMock(...args)
   }
@@ -234,6 +245,57 @@ describe('StatementDetailPage', () => {
               posting: { status: 'not_posted' }
             }
           ]
+        }
+      }
+    });
+
+    getStatementStatusMock.mockResolvedValue({
+      data: {
+        data: {
+          statementId: 'statement-1',
+          status: 'checks_queued',
+          progress: {
+            phase: 'checks_queued',
+            totalChecks: 5,
+            checksQueued: 2,
+            checksProcessing: 1,
+            checksReady: 2,
+            checksFailed: 0,
+            completedChecks: 2,
+            remainingChecks: 3
+          },
+          liveMetrics: {
+            entryCount: 1,
+            debitCount: 1,
+            creditCount: 0,
+            startingBalance: null,
+            endingBalance: null
+          },
+          updatedAt: '2026-03-18T18:51:49.113Z',
+          artifacts: {
+            ocrTextPath: 'companies/company-a/statements/2026/03/statement-1/derived/ocr/text.txt'
+          },
+          checkImagePreview: [],
+          issues: []
+        }
+      }
+    });
+
+    listStatementRulesMock.mockResolvedValue({
+      data: {
+        data: {
+          statementId: 'statement-1',
+          rules: []
+        }
+      }
+    });
+
+    createStatementRuleFromTransactionMock.mockResolvedValue({
+      data: {
+        data: {
+          rule: {
+            id: 'rule-1'
+          }
         }
       }
     });
@@ -440,6 +502,8 @@ describe('StatementDetailPage', () => {
   });
 
   it('renders the embedded viewer workspace and processing activity', async () => {
+    const user = userEvent.setup();
+
     render(
       <Provider store={createStore()}>
         <MemoryRouter initialEntries={['/dashboard/accounting/statements/statement-1']}>
@@ -450,42 +514,28 @@ describe('StatementDetailPage', () => {
       </Provider>
     );
 
-    expect(await screen.findByText(/Phase: checks queued/i)).toBeInTheDocument();
-    expect(screen.getByText(/Process checklist/i)).toBeInTheDocument();
-    expect(screen.getByText(/Statement workspace/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Workspace$/i)).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /Overview/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Artifacts/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /Suggestions/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Source PDF/i })).toBeInTheDocument();
-    expect(screen.getByText(/Open artifact:/i)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /File Manager/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Reprocess$/i })).toBeInTheDocument();
-    expect(screen.getAllByText(/2 done • 3 left/i)).toHaveLength(2);
-    expect(screen.getByText(/Queued 2/i)).toBeInTheDocument();
-    expect(screen.getByText(/Processing 1/i)).toBeInTheDocument();
-    expect(screen.getByText(/Ready 2/i)).toBeInTheDocument();
-    expect(screen.getByText(/Failed 0/i)).toBeInTheDocument();
-    expect(screen.getByText(/Upload saved/i)).toBeInTheDocument();
-    expect(screen.getByText(/OCR extraction/i)).toBeInTheDocument();
-    expect(screen.getByText(/Structure transactions/i)).toBeInTheDocument();
-    expect(screen.getByText(/Queue check review/i)).toBeInTheDocument();
-    expect(screen.getByText(/Ready for review/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Refresh live status/i })).toBeInTheDocument();
-    expect(screen.getByText(/Select a check to anchor the review context/i)).toBeInTheDocument();
-    expect(screen.getByText(/Source: ocr/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Crop ready/i)).toHaveLength(3);
-    expect(screen.getAllByText(/OCR ready/i)).toHaveLength(3);
-    expect(screen.getAllByText(/Structured ready/i)).toHaveLength(3);
-    expect(screen.getByText(/Retries 2/i)).toBeInTheDocument();
-    expect(screen.getByText(/Vision OCR timed out/i)).toBeInTheDocument();
-    expect(screen.getByText(/^Gemini-assisted$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^Check to Staples$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^Deterministic fallback$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^Expense for Office Depot$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^AI degraded$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^Transfer to Savings$/i)).toBeInTheDocument();
-    expect(screen.getByText(/Why: Exact amount match/i)).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /Select check/i }).length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Back$/i })).toBeInTheDocument();
+    expect(within(screen.getByTestId('overview-card-entries')).getByText(/^Entries$/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId('overview-card-entries')).getByText(/^1$/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId('overview-card-checks')).getByText(/^Checks$/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId('overview-card-checks')).getByText(/^3$/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: /File Manager/i }));
+    expect(screen.getByRole('button', { name: /Structured Tables 4/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: /Suggestions/i }));
+    expect(screen.getByRole('tab', { name: /Review/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Credits/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Debits/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Checks/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Filters/i })).toBeInTheDocument();
+    expect(screen.getByText(/Showing/i)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Review/i }).length).toBeGreaterThan(0);
   });
 
   it('shows grouped suggestion buckets for the statement review workflow', async () => {
@@ -501,13 +551,15 @@ describe('StatementDetailPage', () => {
       </Provider>
     );
 
-    await screen.findByText(/Statement workspace/i);
+    await screen.findByText(/^Workspace$/i);
     await user.click(screen.getByRole('tab', { name: /Suggestions/i }));
 
-    expect(screen.getByText(/Suggestions 3/i)).toBeInTheDocument();
-    expect(screen.getByText(/Store deposit/i)).toBeInTheDocument();
-    expect(screen.getByText(/^Check review$/i)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Suggestions/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/Store deposit/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('tab', { name: /Review/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Credits/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Debits/i })).toBeInTheDocument();
     expect(screen.getAllByText(/Staples payment/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Needs classification/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Showing/i)).toBeInTheDocument();
   });
 });

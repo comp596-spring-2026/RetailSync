@@ -26,18 +26,23 @@ const getTimelineChipLabel = (state: TimelineStepState) => {
 export const StatementStageTimeline = ({
   title,
   subtitle,
-  steps
+  steps,
+  detailMode = 'always'
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   steps: StatementTimelineStep[];
+  /** Show step detail only for active/failed rows, or always (default). */
+  detailMode?: 'always' | 'active';
 }) => (
   <Paper variant="outlined" sx={{ p: 1.5 }}>
     <Stack spacing={1}>
       <Typography variant="subtitle2">{title}</Typography>
-      <Typography variant="body2" color="text.secondary">
-        {subtitle}
-      </Typography>
+      {subtitle ? (
+        <Typography variant="body2" color="text.secondary">
+          {subtitle}
+        </Typography>
+      ) : null}
       <Stack spacing={0.75}>
         {steps.map((step) => (
           <Paper
@@ -61,9 +66,11 @@ export const StatementStageTimeline = ({
                 </Typography>
                 <Chip size="small" color={getTimelineChipColor(step.state)} label={getTimelineChipLabel(step.state)} />
               </Stack>
-              <Typography variant="caption" color="text.secondary">
-                {step.detail}
-              </Typography>
+              {(detailMode === 'always' || step.state === 'active' || step.state === 'failed') && (
+                <Typography variant="caption" color="text.secondary">
+                  {step.detail}
+                </Typography>
+              )}
             </Stack>
           </Paper>
         ))}

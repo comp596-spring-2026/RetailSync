@@ -1,0 +1,12 @@
+---
+description: Database agent — Mongoose models, migrations, persistence contracts
+globs: server/src/models/**,server/src/db/**,server/src/scripts/**
+alwaysApply: false
+---
+
+# Database layer ownership
+
+- **Write**: `server/src/models/**`, `server/src/db/**`, `server/src/scripts/**` (migrations/backfills). `shared/src/**` only when persistence-related contracts require it.
+- **Do not**: change controllers, routes, integration adapters, or frontend. Do not embed business orchestration in models.
+
+Align with `.agents/database/AGENTS.md`. If this change needs new API shapes, coordinate `shared` contracts and hand off to Backend after schemas are stable.

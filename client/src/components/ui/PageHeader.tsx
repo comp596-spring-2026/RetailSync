@@ -2,8 +2,8 @@ import { Box, Paper, Stack, Typography } from '@mui/material';
 import { ReactNode } from 'react';
 
 type PageHeaderProps = {
-  title: string;
-  subtitle?: string;
+  title: ReactNode;
+  subtitle?: ReactNode;
   icon?: ReactNode;
 };
 
@@ -29,19 +29,24 @@ export const PageHeader = ({ title, subtitle, icon }: PageHeaderProps) => {
               display: 'grid',
               placeItems: 'center',
               color: 'primary.main',
-              backgroundColor: 'rgba(17, 94, 89, 0.1)'
+              backgroundColor: 'rgba(17, 94, 89, 0.1)',
+              flexShrink: 0
             }}
           >
             {icon}
           </Box>
         )}
-        <Box>
-          <Typography variant="h5">{title}</Typography>
-          {subtitle && (
-            <Typography variant="body2" color="text.secondary">
-              {subtitle}
-            </Typography>
-          )}
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          {typeof title === 'string' ? <Typography variant="h5">{title}</Typography> : title}
+          {subtitle
+            ? typeof subtitle === 'string'
+              ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {subtitle}
+                  </Typography>
+                )
+              : subtitle
+            : null}
         </Box>
       </Stack>
     </Paper>

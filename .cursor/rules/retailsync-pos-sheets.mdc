@@ -1,0 +1,13 @@
+---
+description: RetailSync POS and Google Sheets specialist guidance
+globs: client/src/modules/pos/**,client/src/modules/settings/components/googleSheets/**,client/src/modules/settings/pages/SettingsPage.tsx,server/src/controllers/posController.ts,server/src/controllers/google*.ts,server/src/controllers/settings/*google*.ts,server/src/routes/posRoutes.ts,server/src/routes/google*.ts,server/src/jobs/syncSheets.ts,server/src/utils/googleSheetsSettings.ts,server/src/utils/sheetsSourceResolver.ts,server/src/integrations/google/**
+alwaysApply: false
+---
+
+# RetailSync POS and Google Sheets
+
+- Follow `.agents/pos-sheets/AGENTS.md`.
+- Respect shared-vs-OAuth source behavior.
+- Do not hardcode mapping logic in UI.
+- Keep preview, mapping, and commit states explicit and testable.
+- Avoid noisy diagnostics leaking into tests or CI.

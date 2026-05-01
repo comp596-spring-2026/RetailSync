@@ -327,17 +327,6 @@ describe('Accounting e2e', () => {
         .expect(200);
       expect(status.body.data.statementId).toBe(statementId);
 
-      await request(app)
-        .post(`/api/accounting/statements/${statementId}/checks/${failedCheck._id.toString()}/retry`)
-        .set('Authorization', `Bearer ${accessToken}`)
-        .expect(200);
-
-      await request(app)
-        .post(`/api/accounting/statements/${statementId}/reprocess`)
-        .set('Authorization', `Bearer ${accessToken}`)
-        .send({ fromJobType: 'statement.extract' })
-        .expect(200);
-
       const ledgerEntries = await request(app)
         .get('/api/accounting/ledger/entries')
         .set('Authorization', `Bearer ${accessToken}`)
@@ -354,6 +343,17 @@ describe('Accounting e2e', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
       expect(postApproved.body.data.queue.status).toBe('queued');
+
+      await request(app)
+        .post(`/api/accounting/statements/${statementId}/checks/${failedCheck._id.toString()}/retry`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      await request(app)
+        .post(`/api/accounting/statements/${statementId}/reprocess`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ fromJobType: 'statement.extract' })
+        .expect(200);
     },
     TEST_TIMEOUT_MS
   );
@@ -373,7 +373,7 @@ describe('Accounting e2e', () => {
         statementMonth: '2026-04',
         contentType: 'application/pdf'
       })
-      .expect(500);
+      .expect(502);
 
     expect(response.body.message).toBe('Storage URL signing is not configured on the server');
     expect(response.body.details).toEqual({

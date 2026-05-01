@@ -13,10 +13,15 @@ import {
   getStatementSuggestions,
   getStatementStatus,
   getStatementStream,
+  listRulesForStatement,
+  createRuleForStatement,
+  updateRuleForStatement,
+  createRuleFromStatementTransaction,
   getUploadUrl,
   listStatementMonths,
   listStatements,
   reprocessStatement,
+  resolveTransferSuggestion,
   updateStatementEntryReview,
   updateStatementSuggestionReview,
   retryStatementCheck
@@ -46,6 +51,14 @@ router.get('/statements/:id/status', requirePermission('bankStatements', 'view')
 router.get('/statements/:id/checks', requirePermission('bankStatements', 'view'), getStatementChecks);
 router.get('/statements/:id/entries', requirePermission('bankStatements', 'view'), listStatementEntries);
 router.get('/statements/:id/suggestions', requirePermission('bankStatements', 'view'), getStatementSuggestions);
+router.get('/statements/:id/rules', requirePermission('bankStatements', 'view'), listRulesForStatement);
+router.post('/statements/:id/rules', requirePermission('bankStatements', 'edit'), createRuleForStatement);
+router.patch('/statements/:id/rules/:ruleId', requirePermission('bankStatements', 'edit'), updateRuleForStatement);
+router.post(
+  '/statements/:id/rules/from-transaction/:transactionId',
+  requirePermission('bankStatements', 'edit'),
+  createRuleFromStatementTransaction
+);
 router.patch(
   '/statements/:id/entries/:entryId/review',
   requirePermission('bankStatements', 'edit'),
@@ -55,6 +68,11 @@ router.patch(
   '/statements/:id/suggestions/:suggestionId/review',
   requirePermission('bankStatements', 'edit'),
   updateStatementSuggestionReview
+);
+router.patch(
+  '/statements/:id/suggestions/:suggestionId/transfer-resolution',
+  requirePermission('bankStatements', 'edit'),
+  resolveTransferSuggestion
 );
 router.post(
   '/statements/:id/complete-month',

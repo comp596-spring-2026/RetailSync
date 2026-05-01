@@ -296,6 +296,34 @@ export const QuickBooksAccountRegisterPage = () => {
   const [pageSize, setPageSize] = useState(25);
   const [sortModel, setSortModel] = useState<QuickBooksHubSortModel>([{ field: 'date', sort: 'desc' }]);
   const [search, setSearch] = useState('');
+  const [accountName, setAccountName] = useState<string | null>(null);
+  const [accountType, setAccountType] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!accountId || !canView || !isConnected) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await accountingApi.getQuickbooksHubChartOfAccounts({
+          page: 1,
+          pageSize: 200,
+          status: 'active',
+          sort: 'name'
+        });
+        if (cancelled) return;
+        const match = response.data.data.items.find((row) => row.qbId === accountId);
+        if (match) {
+          setAccountName(match.name ?? null);
+          setAccountType(match.type ?? null);
+        }
+      } catch {
+        // Silent — header will fall back to the account ID.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, canView, isConnected]);
 
   const load = useCallback(async () => {
     if (!accountId) return;
@@ -339,7 +367,7 @@ export const QuickBooksAccountRegisterPage = () => {
     <Stack spacing={2}>
       <PageHeader
         title="QuickBooks Account Register"
-        subtitle={`Review register rows for account ${accountId}.`}
+        subtitle={`Review register rows for ${accountName ?? `account ${accountId}`}.`}
         icon={<AccountBalanceWalletOutlinedIcon />}
       />
       <QuickBooksTabs />
@@ -352,9 +380,14 @@ export const QuickBooksAccountRegisterPage = () => {
         <Paper sx={{ p: 2 }}>
           <Stack spacing={0.5}>
             <Typography variant="body2" color="text.secondary">
-              Account ID
+              Account
             </Typography>
-            <Typography variant="h6">{accountId}</Typography>
+            <Typography variant="h6">{accountName ?? accountId}</Typography>
+            {accountType ? (
+              <Typography variant="caption" color="text.secondary">
+                {accountType}
+              </Typography>
+            ) : null}
           </Stack>
         </Paper>
         <SmartTable
@@ -649,27 +682,6 @@ export const QuickBooksTransactionDetailPage = () => {
               {detailField('To Account', detail?.toAccountName ?? detail?.toAccountId)}
             </Box>
           </Stack>
-        </Paper>
-
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            Raw Payload
-          </Typography>
-          <Typography
-            component="pre"
-            variant="caption"
-            sx={{
-              m: 0,
-              p: 2,
-              borderRadius: 1,
-              backgroundColor: 'rgba(15, 23, 42, 0.04)',
-              overflow: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word'
-            }}
-          >
-            {detail ? JSON.stringify(detail.raw, null, 2) : loading ? 'Loading...' : 'No payload available'}
-          </Typography>
         </Paper>
       </RequireQuickBooksConnection>
     </Stack>

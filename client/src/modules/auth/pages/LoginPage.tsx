@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Alert, Button, Divider, Link as MuiLink, Stack, TextField, Typography } from '@mui/material';
+import { Button, Divider, Link as MuiLink, Stack, TextField, Typography } from '@mui/material';
 import GoogleIcon from '@mui/icons-material/Google';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -26,22 +26,46 @@ const resolveGoogleOrigin = () => {
   return apiBase.endsWith('/api') ? apiBase.slice(0, -4) : apiBase.replace(/\/api$/, '');
 };
 
-const reasonMessages: Record<string, string> = {
-  unauthorized: 'Your session expired. Sign in again to continue.',
-  'password-reset-sent': 'If the email exists, a password reset link has been sent.',
-  'password-reset-complete': 'Your password was updated. Sign in with the new password.',
-  'verification-required': 'Please verify your email before signing in.',
-  verified: 'Your email was verified. You can sign in now.',
-  'verification-sent': 'A verification link has been sent to your inbox.'
+type ReasonToast = {
+  message: string;
+  severity: 'info' | 'success' | 'warning' | 'error';
+};
+
+const reasonToasts: Record<string, ReasonToast> = {
+  unauthorized: {
+    message: 'Your session expired. Sign in again to continue.',
+    severity: 'warning'
+  },
+  'password-reset-sent': {
+    message: 'If the email exists, a password reset link has been sent.',
+    severity: 'info'
+  },
+  'password-reset-complete': {
+    message: 'Your password was updated. Sign in with the new password.',
+    severity: 'success'
+  },
+  'verification-required': {
+    message: 'Please verify your email before signing in.',
+    severity: 'warning'
+  },
+  verified: {
+    message: 'Your email was verified. You can sign in now.',
+    severity: 'success'
+  },
+  'verification-sent': {
+    message: 'A verification link has been sent to your inbox.',
+    severity: 'info'
+  }
 };
 
 export const LoginPage = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const { loading, runAction } = useAsyncAction();
   const reason = params.get('reason') ?? '';
   const email = params.get('email') ?? '';
+  const toastedReasonRef = useRef<string | null>(null);
 
   const {
     register,
@@ -56,6 +80,20 @@ export const LoginPage = () => {
   useEffect(() => {
     reset((current) => ({ ...current, email: email || current.email }));
   }, [email, reset]);
+
+  useEffect(() => {
+    if (!reason) return;
+    if (toastedReasonRef.current === reason) return;
+    const toast = reasonToasts[reason];
+    if (!toast) return;
+    toastedReasonRef.current = reason;
+    dispatch(showSnackbar({ message: toast.message, severity: toast.severity }));
+    // Clear the ?reason=... param so refreshing / navigating back does not
+    // re-display the toast and does not leave it hanging in the URL.
+    const next = new URLSearchParams(params);
+    next.delete('reason');
+    setParams(next, { replace: true });
+  }, [reason, params, setParams, dispatch]);
 
   const onSubmit = async (values: LoginForm) => {
     await runAction(
@@ -90,7 +128,6 @@ export const LoginPage = () => {
       hideHeader
     >
       <Stack spacing={2.25}>
-        {reason && reasonMessages[reason] && <Alert severity="info">{reasonMessages[reason]}</Alert>}
         <Stack spacing={2} component="form" onSubmit={handleSubmit(onSubmit)}>
           <TextField
             label="Email"

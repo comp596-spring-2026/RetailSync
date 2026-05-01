@@ -51,6 +51,48 @@ This workspace is not tab-based anymore.
 +---------------------------------------------------------------------------------------------+
 ```
 
+## Money Write Form Sketch
+
+The money editor is a full-page operational form for:
+- deposits
+- checks
+- expenses
+- transfers
+
+```text
++---------------------------------------------------------------------------------------------+
+| QuickBooks Checks / Deposits / Expenses / Transfers                                         |
+|                                                                                             |
+| Main Information                                                                            |
+| [ Date                         ] [ Amount                         ]                         |
+|                                                                                             |
+| Money Movement                                                                              |
+| [ Bank / Deposit / From Account ] [ Category / To Account        ]                         |
+|                                                                                             |
+| Payee                                                                                        |
+| [ Vendor ]                                                                                  |
+|                                                                                             |
+| Notes                                                                                        |
+| [ Memo                                                                        ]             |
+|                                                                                             |
+|                                               +-------------------------------------------+ |
+|                                               | Review                                    | |
+|                                               | Money out of / Deposit to / From account | |
+|                                               | Category / To account                    | |
+|                                               | Payee                                    | |
+|                                               | Amount                                   | |
+|                                               +-------------------------------------------+ |
+|                                                                                             |
+|                                                            [ Cancel ] [ Save / Create ]     |
++---------------------------------------------------------------------------------------------+
+```
+
+Usability rules for money writes:
+- account selectors should prefer bank-like accounts for bank/from/deposit fields
+- category selectors should prefer non-bank accounts and still fall back to all accounts if reference data is sparse
+- each selected account should show type/detail context without requiring users to remember QuickBooks IDs
+- the save payload should remain the typed QuickBooks contract for `check`, `expense`, `deposit`, and `transfer`
+
 ## Information Architecture
 
 - `Accounts`: chart of accounts and account registers

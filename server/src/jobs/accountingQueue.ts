@@ -198,6 +198,40 @@ const isMissingDefaultCredentialsError = (error: unknown) =>
   error instanceof Error &&
   error.message.toLowerCase().includes('could not load the default credentials');
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
+
+const isLoopbackTaskEndpoint = () => {
+  if (!env.internalTasksEndpoint) return false;
+  try {
+    const url = new URL(env.internalTasksEndpoint);
+    return LOOPBACK_HOSTS.has(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+};
+
+const runInlineTaskChainInBackground = (args: EnqueueAccountingJobArgs, taskId: string) => {
+  const ctx = {
+    taskId,
+    companyId: args.companyId,
+    statementId: args.statementId,
+    checkId: args.checkId,
+    jobType: args.jobType
+  };
+  // eslint-disable-next-line no-console
+  console.info('[accounting.queue] running task chain in background', ctx);
+  setImmediate(() => {
+    runInlineTaskChain(args).catch((error) => {
+      // eslint-disable-next-line no-console
+      console.error('[accounting.queue] background task chain failed', {
+        ...ctx,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+    });
+  });
+};
+
 const runInlineTaskChain = async (args: EnqueueAccountingJobArgs) => {
   const firstTaskId = makeTaskId(args.jobType);
   let nextPayload: {
@@ -242,6 +276,22 @@ const runInlineTaskChain = async (args: EnqueueAccountingJobArgs) => {
 };
 
 const dispatchCloudTask = async (args: EnqueueAccountingJobArgs, taskId: string) => {
+  if (isLoopbackTaskEndpoint()) {
+    // Google Cloud Tasks cannot reach loopback addresses. In local dev, fire
+    // the task chain in-process so the pipeline actually progresses instead of
+    // sitting forever in "extracting".
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[accounting.queue] internal tasks endpoint is loopback; running task chain in-process instead of Cloud Tasks',
+      { endpoint: env.internalTasksEndpoint, jobType: args.jobType }
+    );
+    runInlineTaskChainInBackground(args, taskId);
+    return {
+      queueName: resolveQueueName(args.jobType),
+      taskName: taskId
+    };
+  }
+
   if (shouldUseCloudTasksApi()) {
     try {
       return await dispatchTaskViaCloudTasksApi(args, taskId);

@@ -1096,27 +1096,6 @@ const QuickBooksWriteDetailSections = ({
           )}
         </Paper>
       ) : null}
-
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          Raw Payload
-        </Typography>
-        <Typography
-          component="pre"
-          variant="caption"
-          sx={{
-            m: 0,
-            p: 2,
-            borderRadius: 1,
-            backgroundColor: 'rgba(15, 23, 42, 0.04)',
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word'
-          }}
-        >
-          {JSON.stringify(detail.raw, null, 2)}
-        </Typography>
-      </Paper>
     </Stack>
   );
 };

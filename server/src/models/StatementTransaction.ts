@@ -29,6 +29,43 @@ const statementTransactionSchema = new Schema(
     merchant: { type: String, required: false },
     amount: { type: Number, required: true },
     type: { type: String, enum: ['debit', 'credit'], required: true },
+    rowType: {
+      type: String,
+      enum: [
+        'section_header',
+        'beginning_balance',
+        'ending_balance',
+        'daily_balance',
+        'summary_total',
+        'deposit',
+        'electronic_credit',
+        'other_credit',
+        'electronic_debit',
+        'check_cleared',
+        'noise'
+      ],
+      required: false
+    },
+    section: {
+      type: String,
+      enum: [
+        'account_summary',
+        'deposits',
+        'electronic_credits',
+        'other_credits',
+        'electronic_debits',
+        'checks_cleared',
+        'daily_balances',
+        'unknown'
+      ],
+      required: false
+    },
+    transactionFamily: {
+      type: String,
+      enum: ['transfer', 'vendor_payment', 'tax_payment', 'software', 'refund', 'check', 'settlement', 'other'],
+      required: false
+    },
+    isPostingCandidate: { type: Boolean, default: true },
     normalizedDescription: { type: String, required: false },
     counterparty: { type: String, required: false },
     classification: {
@@ -55,6 +92,8 @@ const statementTransactionSchema = new Schema(
     sourceLocator: {
       pageNumber: { type: Number, required: false },
       rowIndex: { type: Number, required: false },
+      section: { type: String, required: false },
+      sourceText: { type: String, required: false },
       bbox: { type: [Number], default: undefined }
     },
     evidence: {

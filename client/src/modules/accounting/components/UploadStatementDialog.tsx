@@ -8,28 +8,33 @@ import {
   DialogContent,
   DialogTitle,
   LinearProgress,
+  MenuItem,
   Paper,
   Stack,
   TextField,
   Typography
 } from '@mui/material';
-import AutoFixHighOutlinedIcon from '@mui/icons-material/AutoFixHighOutlined';
+import AccountBalanceOutlinedIcon from '@mui/icons-material/AccountBalanceOutlined';
 import CalendarMonthOutlinedIcon from '@mui/icons-material/CalendarMonthOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
-import type { BankStatementStatus, DetectStatementMonthResponse } from '@retailsync/shared';
+import type {
+  BankStatementStatus,
+  DetectStatementMonthResponse,
+  QuickBooksHubChartAccount
+} from '@retailsync/shared';
 import axios from 'axios';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { accountingApi } from '../api';
-import { useStatementUploadFlow } from '../hooks/useStatementUploadFlow';
-import { StatementStageTimeline } from './StatementStageTimeline';
+import { formatStatementMonthShort } from '../utils/statementDisplay';
 
 type UploadStatementDialogProps = {
   open: boolean;
   onClose: () => void;
   onUploaded: () => Promise<void>;
+  onSaveError?: (message: string) => void;
 };
 
 type PreparedUpload = {
@@ -90,22 +95,18 @@ type StatementCheckImagePreview = {
   frontPath?: string;
 };
 
-const getDetectionMessage = (
+const getDetectionSummaryLine = (
   detection: DetectStatementMonthResponse,
   statementMonth: string,
 ) => {
   if (!detection.statementMonth) {
-    return detection.summary || 'RetailSync could not confidently identify the statement month.';
+    return detection.summary?.trim() || 'Could not detect the month — pick it above.';
   }
-
-  const monthLabel = formatStatementMonthLabel(detection.statementMonth);
+  const short = formatStatementMonthShort(detection.statementMonth);
   if (detection.statementMonth === statementMonth) {
-    return detection.autoApply
-      ? `Applied the ${monthLabel} month from the PDF. You can still adjust it before upload.`
-      : `This looks like a ${monthLabel} statement. You can adjust the month before upload if needed.`;
+    return `${short} from the PDF${detection.autoApply ? ' (applied)' : ''}.`;
   }
-
-  return detection.summary || `This looks like a ${monthLabel} statement.`;
+  return `Detected ${short} — use the button or keep ${formatStatementMonthShort(statementMonth)}.`;
 };
 
 const getStorageUploadFailureMessage = (requestUrl: string) => {
@@ -162,7 +163,7 @@ const getProcessingSummary = (status: BankStatementStatus | null) => {
 const isProcessingStatusActive = (status: BankStatementStatus | null) =>
   status === 'uploaded' || status === 'extracting' || status === 'structuring' || status === 'checks_queued';
 
-export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadStatementDialogProps) => {
+export const UploadStatementDialog = ({ open, onClose, onUploaded, onSaveError }: UploadStatementDialogProps) => {
   const [statementMonth, setStatementMonth] = useState(currentMonth());
   const [statementMonthTouched, setStatementMonthTouched] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -187,10 +188,27 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
   const [dragActive, setDragActive] = useState(false);
   const [preparedUpload, setPreparedUpload] = useState<PreparedUpload | null>(null);
   const [activeStatementId, setActiveStatementId] = useState<string | null>(null);
+  const [existingMonthConflict, setExistingMonthConflict] = useState<{
+    statementCount: number;
+    latestStatus: string;
+  } | null>(null);
+  const [bankAccounts, setBankAccounts] = useState<QuickBooksHubChartAccount[]>([]);
+  const [bankAccountsLoading, setBankAccountsLoading] = useState(false);
+  const [bankAccountsError, setBankAccountsError] = useState<string | null>(null);
+  const [bankAccountId, setBankAccountId] = useState<string>('');
   const statementMonthTouchedRef = useRef(false);
   const detectionRequestIdRef = useRef(0);
   const processingRequestIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const mountedRef = useRef(true);
+  const finalizingBackgroundRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -216,6 +234,9 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setDragActive(false);
     setPreparedUpload(null);
     setActiveStatementId(null);
+    setExistingMonthConflict(null);
+    setBankAccountId('');
+    setBankAccountsError(null);
     statementMonthTouchedRef.current = false;
     detectionRequestIdRef.current += 1;
     processingRequestIdRef.current += 1;
@@ -225,32 +246,92 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     statementMonthTouchedRef.current = statementMonthTouched;
   }, [statementMonthTouched]);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const loadBankAccounts = async () => {
+      setBankAccountsLoading(true);
+      setBankAccountsError(null);
+      try {
+        const response = await accountingApi.getQuickbooksHubChartOfAccounts({
+          type: 'Bank',
+          status: 'active',
+          page: 1,
+          pageSize: 100,
+          sort: 'name'
+        });
+        if (cancelled) return;
+        const items = response.data.data.items ?? [];
+        setBankAccounts(items);
+        setBankAccountId((current) => {
+          if (current) return current;
+          return items.length === 1 ? items[0].id : '';
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setBankAccountsError(
+          extractApiErrorMessage(
+            error,
+            'Could not load bank accounts from QuickBooks. You can continue without selecting one.'
+          )
+        );
+      } finally {
+        if (!cancelled) {
+          setBankAccountsLoading(false);
+        }
+      }
+    };
+    void loadBankAccounts();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const run = async () => {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(statementMonth)) {
+        setExistingMonthConflict(null);
+        return;
+      }
+      try {
+        const res = await accountingApi.getStatementMonthSummary(statementMonth);
+        if (!cancelled) {
+          setExistingMonthConflict({
+            statementCount: res.data.data.statementCount,
+            latestStatus: res.data.data.latestStatus
+          });
+        }
+      } catch (error: unknown) {
+        const status =
+          error &&
+          typeof error === 'object' &&
+          'response' in error &&
+          (error as { response?: { status?: number } }).response?.status;
+        if (status === 404) {
+          if (!cancelled) setExistingMonthConflict(null);
+          return;
+        }
+        if (!cancelled) setExistingMonthConflict(null);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, statementMonth]);
+
   const uploadDisabled = useMemo(() => {
     if (uploading) return true;
     if (finalizing) return true;
-    if (processingStatement) return true;
     if (detectingStatementMonth) return true;
     if (!file) return true;
     if (!statementMonth) return true;
     return false;
-  }, [detectingStatementMonth, file, finalizing, processingStatement, processingTimedOut, statementMonth, uploading]);
+  }, [detectingStatementMonth, file, finalizing, statementMonth, uploading]);
 
-  const workflowStepsWithState = useStatementUploadFlow({
-    fileSelected: Boolean(file),
-    detectingStatementMonth,
-    statementMonth,
-    uploading,
-    finalizing,
-    preparedUpload: Boolean(preparedUpload),
-    activeStatementId: Boolean(activeStatementId),
-    processingStatement,
-    processingTimedOut,
-    processingStatus,
-    submitError,
-    detection
-  });
-
-  const busy = uploading || finalizing || processingStatement;
+  const busy = uploading || finalizing;
 
   const waitForExtractionAdvance = async (
     statementId: string,
@@ -412,6 +493,43 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setStatementMonthTouched(true);
   };
 
+  const finalizeStatementInBackground = async (payload: PreparedUpload) => {
+    finalizingBackgroundRef.current = true;
+    try {
+      const created = await accountingApi.createStatement({
+        statementId: payload.statementId,
+        fileName: payload.fileName,
+        statementMonth: payload.statementMonth,
+        gcsPath: payload.gcsPath,
+        source: 'upload',
+        bankAccountId: bankAccountId || undefined
+      });
+      if (mountedRef.current) {
+        setActiveStatementId(created.data.data.statement.id);
+        setPreparedUpload(null);
+      }
+      void onUploaded().catch(() => {
+        // Background list refresh failures should not bubble up.
+      });
+    } catch (error) {
+      const message = extractApiErrorMessage(
+        error,
+        'The PDF upload finished, but RetailSync could not create the statement. Please try uploading again.'
+      );
+      if (onSaveError) {
+        onSaveError(message);
+      } else if (mountedRef.current) {
+        setSubmitError(message);
+      }
+    } finally {
+      finalizingBackgroundRef.current = false;
+      if (mountedRef.current) {
+        setFinalizing(false);
+        setSubmitStageMessage(null);
+      }
+    }
+  };
+
   const submit = async () => {
     if (!file) return;
 
@@ -420,7 +538,6 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
     setProcessingTimedOut(false);
     setProcessingIssues([]);
     setProcessingProgress(null);
-    let finalizingAttempt = false;
 
     try {
       let payload = preparedUpload;
@@ -457,45 +574,15 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
         setPreparedUpload(payload);
       }
 
-      finalizingAttempt = true;
+      // PDF is safely in storage — close the dialog immediately and finalize
+      // the statement record in the background. The user no longer has to wait
+      // on a second backend round-trip with a loading spinner.
       setUploading(false);
       setFinalizing(true);
-      setSubmitStageMessage('Saving the uploaded statement and starting processing…');
-
-      const created = await accountingApi.createStatement({
-        statementId: payload.statementId,
-        fileName: file.name,
-        statementMonth,
-        gcsPath: payload.gcsPath,
-        source: 'upload'
-      });
-      setActiveStatementId(created.data.data.statement.id);
-
-      await onUploaded();
-      const result = await waitForExtractionAdvance(
-        created.data.data.statement.id,
-        created.data.data.statement.status,
-        {
-          phase: created.data.data.statement.status,
-          totalChecks: created.data.data.statement.progress.totalChecks,
-          checksQueued: created.data.data.statement.progress.checksQueued,
-          checksProcessing: created.data.data.statement.progress.checksProcessing,
-          checksReady: created.data.data.statement.progress.checksReady,
-          checksFailed: created.data.data.statement.progress.checksFailed,
-          completedChecks: created.data.data.statement.progress.completedChecks,
-          remainingChecks: created.data.data.statement.progress.remainingChecks,
-        }
-      );
-
-      if (result.kind === 'advanced') {
-        setPreparedUpload(null);
-        onClose();
-        return;
-      }
-
-      if (result.kind === 'failed') {
-        setSubmitError(result.issues[0] || 'Statement upload finished, but extraction failed.');
-      }
+      setSubmitStageMessage(null);
+      onClose();
+      void finalizeStatementInBackground(payload);
+      return;
     } catch (error) {
       const maybeAxiosError = error as {
         response?: unknown;
@@ -515,14 +602,8 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
 
       setSubmitError(
         storageUploadFailureMessage ??
-          extractApiErrorMessage(
-            error,
-            finalizingAttempt
-              ? 'The PDF upload finished, but RetailSync could not create the statement. Retry from this dialog.'
-              : 'Failed to upload statement'
-          ),
+          extractApiErrorMessage(error, 'Failed to upload statement'),
       );
-    } finally {
       setUploading(false);
       setFinalizing(false);
       setSubmitStageMessage(null);
@@ -601,13 +682,9 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
 
   return (
     <Dialog open={open} onClose={busy ? undefined : onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Upload Bank Statement</DialogTitle>
+      <DialogTitle>Upload bank statement</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            Drop in a bank statement PDF and RetailSync will detect the statement month before upload.
-          </Typography>
-
           <Paper
             variant="outlined"
             aria-label="Statement PDF drop zone"
@@ -647,10 +724,10 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
               <Stack spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }}>
                 <UploadFileOutlinedIcon color={dragActive ? 'primary' : 'action'} />
                 <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                  {file ? 'Statement PDF ready' : 'Drag and drop a PDF here'}
+                  {file ? 'PDF selected' : 'Drop a PDF here'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" textAlign={{ sm: 'center' }}>
-                  {file ? 'Month detection runs automatically after you pick a PDF.' : 'Or browse for a PDF from your computer.'}
+                  {file ? 'We suggest a statement month below; change it if needed.' : 'Or use the button to choose a file.'}
                 </Typography>
               </Stack>
 
@@ -672,11 +749,11 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                     <Stack direction="row" spacing={1.25} alignItems="flex-start">
                       <DescriptionOutlinedIcon color="action" sx={{ mt: 0.25 }} />
                       <Stack spacing={0.25}>
-                        <Typography variant="body2" sx={{ fontWeight: 700, wordBreak: 'break-word' }}>
-                          {file.name}
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          {formatStatementMonthShort(statementMonth)} bank statement
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {formatFileSize(file.size)} • PDF
+                          {formatFileSize(file.size)} · PDF
                         </Typography>
                       </Stack>
                     </Stack>
@@ -709,7 +786,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                 disabled={busy}
                 startIcon={<UploadFileOutlinedIcon />}
               >
-                {file ? 'Choose another PDF' : 'Choose PDF'}
+                {file ? 'Replace PDF' : 'Choose PDF'}
               </Button>
 
               <input
@@ -727,7 +804,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
           </Paper>
 
           <TextField
-            label="Statement Month"
+            label="Statement month"
             type="month"
             value={statementMonth}
             onChange={(event) => {
@@ -736,7 +813,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
             }}
             disabled={busy}
             InputLabelProps={{ shrink: true }}
-            helperText="RetailSync will auto-detect the month when confidence is high. You can override it anytime."
+            helperText="We read the period from the PDF when we can; change this field if it is wrong."
             InputProps={{
               startAdornment: (
                 <Box
@@ -754,15 +831,57 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
             }}
           />
 
-          {detectingStatementMonth ? (
-            <Alert severity="info">
-              Detecting the statement month…
+
+
+          {existingMonthConflict ? (
+            <Alert severity="warning">
+              {formatStatementMonthLabel(statementMonth)} already has{' '}
+              {existingMonthConflict.statementCount === 1 ? 'a statement' : `${existingMonthConflict.statementCount} statements`}{' '}
+              (latest: {formatStatementStatusLabel(existingMonthConflict.latestStatus as BankStatementStatus)}). Uploading
+              replaces the existing statement for this month.
             </Alert>
+          ) : null}
+
+          {detectingStatementMonth ? (
+            <Typography variant="body2" color="text.secondary">
+              Reading the statement month from the PDF…
+            </Typography>
+          ) : null}
+
+          {!detectingStatementMonth && detection ? (
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }} flexWrap="wrap" useFlexGap>
+              <Typography variant="body2" color="text.secondary">
+                {getDetectionSummaryLine(detection, statementMonth)}
+              </Typography>
+              {detection.statementMonth && !detection.autoApply && detection.statementMonth !== statementMonth ? (
+                <Button size="small" variant="outlined" onClick={applyDetectedMonth}>
+                  Use {formatStatementMonthShort(detection.statementMonth)}
+                </Button>
+              ) : null}
+            </Stack>
+          ) : null}
+
+          {!detectingStatementMonth && detectionError ? (
+            <Alert severity="warning">{detectionError}</Alert>
           ) : null}
 
           {submitStageMessage ? (
             <Alert severity="info">{submitStageMessage}</Alert>
           ) : null}
+
+          {submitError ? <Alert severity="error">{submitError}</Alert> : null}
+
+          {(uploading || finalizing) && (
+            <Stack spacing={1}>
+              <LinearProgress
+                variant={uploading ? 'determinate' : 'indeterminate'}
+                value={uploading ? uploadProgress : undefined}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {uploading ? `Uploading ${uploadProgress}%` : 'Saving statement…'}
+              </Typography>
+            </Stack>
+          )}
 
           {processingStatement || processingTimedOut ? (
             <Alert
@@ -779,9 +898,11 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                   direction={{ xs: 'column', sm: 'row' }}
                   spacing={1}
                   alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  flexWrap="wrap"
+                  useFlexGap
                 >
                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                    {processingStatement ? 'Processing statement' : 'Extraction still running'}
+                    {processingStatement ? 'Processing' : 'Still running'}
                   </Typography>
                   {processingStatus ? (
                     <Chip
@@ -791,25 +912,24 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                     />
                   ) : null}
                   {processingProgress ? (
-                    <Chip size="small" label={`Phase: ${formatStatementStatusLabel(processingProgress.phase)}`} variant="outlined" />
+                    <Chip
+                      size="small"
+                      label={`Phase: ${formatStatementStatusLabel(processingProgress.phase)}`}
+                      variant="outlined"
+                    />
                   ) : null}
                 </Stack>
                 <Typography variant="body2">
                   {processingTimedOut
-                    ? 'Upload finished and processing continues in the background.'
+                    ? 'Upload finished. You can close this dialog; status updates on the statements list.'
                     : getProcessingSummary(processingStatus)}
                 </Typography>
                 {processingWaitingForBackend ? (
                   <Typography variant="caption" color="text.secondary">
-                    Waiting for backend update...
+                    Waiting for a status update…
                   </Typography>
                 ) : null}
-                {(processingTimedOut || isProcessingStatusActive(processingStatus)) && !processingWaitingForBackend ? (
-                  <Typography variant="caption" color="text.secondary">
-                    Live status updates run quietly in the background every few seconds.
-                  </Typography>
-                ) : null}
-                {processingProgress ? (
+                {processingProgress && processingProgress.totalChecks > 0 ? (
                   <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                     <Chip size="small" label={`Done ${processingProgress.completedChecks}`} variant="outlined" />
                     <Chip size="small" label={`Left ${processingProgress.remainingChecks}`} variant="outlined" />
@@ -822,97 +942,42 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
                 {processingStatement ? <LinearProgress /> : null}
                 {processingIssues.length > 0 ? (
                   <Typography variant="caption" color="text.secondary">
-                    Latest issue: {processingIssues[0]}
+                    {processingIssues[0]}
                   </Typography>
                 ) : null}
+              </Stack>
+            </Alert>
+          ) : null}
+
+          {isDevelopment &&
+          (processingOriginalStatementPath || processingCheckImagePreview.length > 0) ? (
+            <Paper variant="outlined" sx={{ p: 1.25 }}>
+              <Stack spacing={0.75}>
+                <Typography variant="subtitle2">Debug artifacts</Typography>
                 {processingOriginalStatementPath ? (
                   <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-                    Original statement: {processingOriginalStatementPath}
+                    PDF: {processingOriginalStatementPath}
                   </Typography>
                 ) : null}
                 {processingCheckImagePreview.length > 0 ? (
-                  <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-                    Check images ready: {processingCheckImagePreview.length} (latest:{' '}
-                    {processingCheckImagePreview[processingCheckImagePreview.length - 1]?.cropImagePath ??
-                      processingCheckImagePreview[processingCheckImagePreview.length - 1]?.frontPath ??
-                      'n/a'}
-                    )
+                  <Typography variant="caption" color="text.secondary">
+                    Check image previews: {processingCheckImagePreview.length}
                   </Typography>
                 ) : null}
               </Stack>
-            </Alert>
+            </Paper>
           ) : null}
 
-          {!detectingStatementMonth && detection ? (
-            <Alert
-              severity={detection.statementMonth ? 'success' : 'info'}
-              action={
-                detection.statementMonth && !detection.autoApply && detection.statementMonth !== statementMonth ? (
-                  <Button color="inherit" size="small" onClick={applyDetectedMonth}>
-                    Use {detection.statementMonth}
-                  </Button>
-                ) : undefined
-              }
-              icon={<AutoFixHighOutlinedIcon fontSize="inherit" />}
-            >
-              <Stack spacing={0.75}>
-                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                  {detection.statementMonth ? (
-                    <Chip
-                      size="small"
-                      label={formatStatementMonthLabel(detection.statementMonth)}
-                      color="success"
-                      variant="outlined"
-                    />
-                  ) : null}
-                  {detection.autoApply ? (
-                    <Chip size="small" label="Auto-applied" color="success" variant="outlined" />
-                  ) : null}
-                </Stack>
-                <Typography variant="body2">
-                  {getDetectionMessage(detection, statementMonth)}
-                </Typography>
-              </Stack>
-            </Alert>
-          ) : null}
-
-          {!detectingStatementMonth && detectionError ? (
-            <Alert severity="warning">{detectionError}</Alert>
-          ) : null}
-
-          <StatementStageTimeline
-            title="Workflow"
-            subtitle="Uploading a statement starts a background pipeline. You can close this dialog while processing continues."
-            steps={workflowStepsWithState}
-          />
-
-          {submitError ? <Alert severity="error">{submitError}</Alert> : null}
-
-          <Typography variant="body2" color="text.secondary">
-            Uploaded file is stored in secure object storage and processed in background jobs.
-          </Typography>
           {activeStatementId ? (
             <Alert severity="success">
-              Upload successful. Background processing started for statement {activeStatementId}. You can close this dialog anytime and continue working.
+              Upload received. You can close this and follow progress from Bank Statements or open the workspace.
             </Alert>
           ) : null}
-
-          {(uploading || finalizing) && (
-            <Stack spacing={1}>
-              <LinearProgress
-                variant={uploading ? 'determinate' : 'indeterminate'}
-                value={uploading ? uploadProgress : undefined}
-              />
-              <Typography variant="caption" color="text.secondary">
-                {uploading ? `Uploading ${uploadProgress}%` : 'Creating statement record…'}
-              </Typography>
-            </Stack>
-          )}
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={busy}>
-          {processingStatement || processingTimedOut ? 'Close (keep processing)' : 'Cancel'}
+          Cancel
         </Button>
         {activeStatementId && !busy && (processingTimedOut || processingStatus === 'failed') ? (
           <Button onClick={() => void refreshProcessingStatus()} variant="outlined">
@@ -925,15 +990,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded }: UploadState
           </Button>
         ) : null}
         <Button onClick={() => void submit()} variant="contained" disabled={uploadDisabled}>
-          {uploading
-            ? 'Uploading...'
-            : finalizing
-              ? 'Saving...'
-            : processingStatement
-              ? 'Waiting for extraction...'
-              : preparedUpload
-                ? 'Retry Save'
-              : 'Upload & Start'}
+          {uploading ? 'Uploading...' : 'Upload & Start'}
         </Button>
       </DialogActions>
     </Dialog>

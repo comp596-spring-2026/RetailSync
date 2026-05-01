@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import {
   quickBooksAccountRegisterQuerySchema,
   quickBooksHubChartOfAccountsQuerySchema,
+  quickBooksHubChartAccountCreateInputSchema,
   quickBooksContactCreateInputSchema,
   quickBooksContactUpdateInputSchema,
   quickBooksHubEntitiesQuerySchema,
@@ -37,6 +38,7 @@ import {
   getQuickBooksAccountRegister,
   getQuickBooksTransactionDetail,
   listQuickBooksHubChartOfAccounts,
+  createQuickBooksHubChartAccount,
   listQuickBooksHubEntities,
   listQuickBooksHubOperations,
   listQuickBooksLiveTransactions,
@@ -213,6 +215,29 @@ export const getQuickBooksHubChartOfAccounts = async (req: Request, res: Respons
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'QuickBooks hub chart of accounts fetch failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const postQuickBooksHubChartOfAccounts = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const parsed = quickBooksHubChartAccountCreateInputSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  try {
+    const account = await createQuickBooksHubChartAccount({
+      companyId,
+      name: parsed.data.name,
+      accountNumber: parsed.data.accountNumber,
+      detailType: parsed.data.detailType
+    });
+    return ok(res, { account }, 201);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks hub chart account create failed';
     return fail(res, message, mapQuickBooksTaxErrorStatus(message));
   }
 };

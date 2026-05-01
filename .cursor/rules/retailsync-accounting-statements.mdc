@@ -1,0 +1,13 @@
+---
+description: RetailSync accounting statements specialist guidance
+globs: client/src/modules/accounting/pages/StatementsPage.tsx,client/src/modules/accounting/pages/StatementDetailPage.tsx,client/src/modules/accounting/components/UploadStatementDialog.tsx,server/src/controllers/accountingController.ts,server/src/routes/accountingRoutes.ts,server/src/jobs/accountingTaskRunner.ts,server/src/jobs/accountingQueue.ts,server/src/models/BankStatement.ts,server/src/models/StatementTransaction.ts,server/src/models/LedgerEntry.ts
+alwaysApply: false
+---
+
+# RetailSync accounting statements
+
+- Follow `.agents/accounting-statements/AGENTS.md`.
+- Visible accounting is statements-first.
+- Keep upload, processing, retry, and detail review coherent.
+- Do not reintroduce legacy accounting tabs unless explicitly requested.
+- Any pipeline behavior change must be backed by targeted tests.

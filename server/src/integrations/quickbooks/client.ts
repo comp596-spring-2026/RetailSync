@@ -167,6 +167,7 @@ type QuickBooksRequestAttemptError = {
   kind: 'network' | 'response' | 'auth';
   message: string;
   status?: number;
+  retryAfterMs?: number;
 };
 
 const isQuickBooksRequestAttemptError = (
@@ -181,6 +182,32 @@ const isQuickBooksRequestAttemptError = (
 
 const toQuickBooksErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
+
+const parseRetryAfterMs = (value: string | null) => {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(30_000, seconds * 1000);
+  }
+
+  const dateMs = Date.parse(value);
+  if (!Number.isNaN(dateMs)) {
+    return Math.min(30_000, Math.max(0, dateMs - Date.now()));
+  }
+
+  return undefined;
+};
+
+const quickBooksRetryDelayMs = (error: unknown, attempt: number) => {
+  if (
+    isQuickBooksRequestAttemptError(error) &&
+    typeof error.retryAfterMs === 'number' &&
+    Number.isFinite(error.retryAfterMs)
+  ) {
+    return error.retryAfterMs;
+  }
+  return Math.min(5000, 350 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 150);
+};
 
 const fetchQuickBooksAttempt = async ({
   companyId,
@@ -248,7 +275,11 @@ const fetchQuickBooksAttempt = async ({
       throw {
         kind: 'response',
         message: `quickbooks_api_failed:${result.response.status}:${fault ?? (result.raw || 'unknown')}`,
-        status: result.response.status
+        status: result.response.status,
+        retryAfterMs:
+          result.response.status === 429
+            ? parseRetryAfterMs(result.response.headers.get('retry-after'))
+            : undefined
       } satisfies QuickBooksRequestAttemptError;
     }
 
@@ -338,10 +369,10 @@ export const requestQuickBooksApi = async ({
 
   try {
     return await withRetries({
-      attempts: 3,
+      attempts: 4,
       shouldRetry: (error, attempt) =>
         Boolean(
-          attempt < 3 &&
+          attempt < 4 &&
             isQuickBooksRequestAttemptError(error) &&
             (error.kind === 'network' ||
               (error.kind === 'response' &&
@@ -349,7 +380,7 @@ export const requestQuickBooksApi = async ({
                 QUICKBOOKS_RETRYABLE_STATUS.has(error.status)))
         ),
       onRetry: async (_error, attempt) => {
-        await sleep(250 * 2 ** (attempt - 1));
+        await sleep(quickBooksRetryDelayMs(_error, attempt));
       },
       run: async (attempt) =>
         fetchQuickBooksAttempt({
@@ -523,6 +554,52 @@ export const listQuickBooksAccounts = async (companyId: string) => {
   }
 
   return allAccounts;
+};
+
+export const createQuickBooksAccount = async (args: {
+  companyId: string;
+  name: string;
+  accountType: 'Bank';
+  accountSubType: 'Checking' | 'Savings' | 'CashOnHand';
+  accountNumber?: string;
+}) => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/account`,
+    query: {
+      minorversion: 75
+    },
+    body: {
+      Name: args.name,
+      AccountType: args.accountType,
+      AccountSubType: args.accountSubType,
+      ...(args.accountNumber ? { AcctNum: args.accountNumber } : {})
+    }
+  })) as Record<string, unknown>;
+
+  const raw = (payload.Account as Record<string, unknown> | undefined) ?? null;
+  const id = raw ? String(raw.Id ?? '').trim() : '';
+  const name = raw ? String(raw.Name ?? '').trim() : '';
+  if (!id || !name) {
+    throw new Error('quickbooks_account_create_missing_fields');
+  }
+
+  return {
+    id,
+    name,
+    code:
+      raw && typeof raw.AcctNum === 'string' && raw.AcctNum.trim()
+        ? raw.AcctNum.trim()
+        : null,
+    accountType: raw && typeof raw.AccountType === 'string' ? raw.AccountType.trim() : 'Bank',
+    active: raw ? raw.Active !== false : true
+  };
 };
 
 const pickDisplayName = (row: Record<string, unknown>) => {

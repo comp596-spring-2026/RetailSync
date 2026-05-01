@@ -1,0 +1,12 @@
+---
+description: RetailSync settings workspace and integration configuration specialist guidance
+globs: client/src/modules/settings/**,server/src/controllers/settings/**,server/src/routes/settingsRoutes.ts
+alwaysApply: false
+---
+
+# RetailSync settings and integrations
+
+- Follow `.agents/settings-integrations/AGENTS.md`.
+- Settings owns integration configuration quality.
+- Keep QuickBooks operational workflows out of Settings.
+- Keep Google Sheets setup understandable without drifting into POS analytics concerns.

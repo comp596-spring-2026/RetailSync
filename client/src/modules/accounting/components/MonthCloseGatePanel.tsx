@@ -28,3 +28,37 @@ export const MonthCloseGatePanel = ({ gates }: { gates: MonthCloseGateState }) =
     ))}
   </Stack>
 );
+
+export const MonthCloseGatePanelWithState = ({
+  gates,
+  evaluating
+}: {
+  gates: MonthCloseGateState;
+  evaluating: boolean;
+}) => (
+  <Stack spacing={0.75}>
+    <Typography variant="subtitle2">Completion gates</Typography>
+    <Typography variant="caption" color="text.secondary">
+      {evaluating
+        ? 'Gates are still being evaluated while processing is active.'
+        : 'All gates must pass before month close can be completed.'}
+    </Typography>
+    {[
+      ['Rows reviewed', gates.rowsReviewed],
+      ['No blocking extraction failures', gates.noBlockingExtractionFailures],
+      ['No mandatory unknown entries', gates.noMandatoryUnknowns],
+      ['No pending mandatory suggestion decisions', gates.noPendingMandatorySuggestionDecisions]
+    ].map(([label, passed]) => (
+      <Paper key={String(label)} variant="outlined" sx={{ p: 1, bgcolor: 'background.default' }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Typography variant="body2">{String(label)}</Typography>
+          <Chip
+            size="small"
+            color={passed && !evaluating ? 'success' : 'default'}
+            label={evaluating ? 'Evaluating' : passed ? 'Passed' : 'Pending'}
+          />
+        </Stack>
+      </Paper>
+    ))}
+  </Stack>
+);

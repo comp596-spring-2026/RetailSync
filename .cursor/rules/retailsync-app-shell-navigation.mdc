@@ -1,0 +1,12 @@
+---
+description: RetailSync app shell and route ownership specialist guidance
+globs: client/src/app/App.tsx,client/src/app/layout/**,client/src/app/guards/**,client/src/modules/**/pages/index.ts
+alwaysApply: false
+---
+
+# RetailSync app shell and navigation
+
+- Follow `.agents/app-shell-navigation/AGENTS.md`.
+- Preserve current workspace truth from `.agents/PROJECT-TRUTH.md`.
+- Prefer canonical routes with explicit redirects from legacy aliases.
+- Do not let hidden or retired workspaces drift back into the visible shell.

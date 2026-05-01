@@ -1,0 +1,12 @@
+---
+description: Integrations agent — third-party APIs, OAuth, sync jobs, retries
+globs: server/src/integrations/**,server/src/jobs/**,server/src/services/quickbooks*.ts,server/src/utils/sheets*.ts,server/src/utils/googleSheetsSettings.ts,server/src/utils/sheetsSourceResolver.ts
+alwaysApply: false
+---
+
+# Integrations layer ownership
+
+- **Write**: `server/src/integrations/**`, integration-focused `server/src/jobs/**`, and the QuickBooks/Sheets service utilities listed in `.agents/integrations/AGENTS.md`.
+- **Do not**: change Mongoose schemas; build UI; store secrets outside established patterns; call providers from controllers—expose via services the Backend orchestrates.
+
+All sync paths need explicit idempotency, retry behavior, and use of external IDs. Align with `.agents/integrations/AGENTS.md`.

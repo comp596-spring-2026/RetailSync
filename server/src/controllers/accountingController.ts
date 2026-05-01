@@ -7,6 +7,10 @@ import {
   detectStatementMonthResponseSchema,
   listBankStatementsQuerySchema,
   listChecksQuerySchema,
+  createStatementRuleSchema,
+  updateStatementRuleSchema,
+  statementRuleSchema,
+  resolveTransferSuggestionSchema,
   updateStatementEntryReviewSchema,
   updateStatementSuggestionReviewSchema,
   reprocessBankStatementSchema,
@@ -22,18 +26,29 @@ import { env } from '../config/env';
 import { getStorageClient } from '../integrations/google/storage.client';
 import { enqueueAccountingJob } from '../jobs/accountingQueue';
 import { BankStatement } from '../models/BankStatement';
+import { ChartOfAccountModel } from '../models/ChartOfAccount';
 import { LedgerEntryModel } from '../models/LedgerEntry';
 import { RunModel } from '../models/Run';
 import { StatementTransactionModel } from '../models/StatementTransaction';
 import { StatementCheckModel } from '../models/StatementCheck';
+import { StatementRuleModel } from '../models/StatementRule';
+import { createQuickBooksHubChartAccount } from '../services/quickbooksTaxService';
 import {
   buildStatementPdfPath,
   buildStatementRootPrefix
 } from '../services/accountingStorageService';
 import { detectStatementMonthFromPdf } from '../services/accountingPdfAnalysisService';
+import { evaluateStatementRules, listStatementRules } from '../services/statementRuleService';
 import { fail, ok } from '../utils/apiResponse';
 
 const storage = getStorageClient();
+
+const parseMaskedAccountHint = (value: string): string | undefined => {
+  const match = value.match(/(?:x{2,}|\*{2,})\s*(\d{3,4})/i);
+  if (match?.[1]) return `xxx${match[1]}`;
+  const explicitTail = value.match(/\b(\d{4})\b/);
+  return explicitTail?.[1] ? `xxx${explicitTail[1]}` : undefined;
+};
 
 const sanitizeFileName = (name: string) => name.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 
@@ -438,6 +453,62 @@ const buildStatementProgress = (statement: any) => {
   };
 };
 
+const buildStatementLiveMetrics = async (statementId: string, companyId: unknown) => {
+  const transactions = await StatementTransactionModel.find({
+    statementId,
+    companyId
+  })
+    .select('type amount balanceAfter postDate')
+    .sort({ postDate: 1, createdAt: 1 })
+    .lean();
+
+  const entryCount = transactions.length;
+  const debitCount = transactions.filter((txn: any) => String(txn.type) === 'debit').length;
+  const creditCount = transactions.filter((txn: any) => String(txn.type) === 'credit').length;
+
+  const balanceRows = transactions.filter(
+    (txn: any) => typeof txn.balanceAfter === 'number' && Number.isFinite(txn.balanceAfter)
+  );
+  const startingBalance = balanceRows.length > 0 ? Number(balanceRows[0].balanceAfter) : null;
+  const endingBalance = balanceRows.length > 0 ? Number(balanceRows[balanceRows.length - 1].balanceAfter) : null;
+
+  return {
+    entryCount,
+    debitCount,
+    creditCount,
+    startingBalance,
+    endingBalance
+  };
+};
+
+const serializeStatementRule = (rule: any) =>
+  statementRuleSchema.parse({
+    id: String(rule._id),
+    statementId: String(rule.statementId),
+    companyId: String(rule.companyId),
+    name: String(rule.name ?? ''),
+    enabled: Boolean(rule.enabled),
+    hardness: rule.hardness === 'hard' ? 'hard' : 'soft',
+    conditions: {
+      contains: rule.conditions?.contains ?? undefined,
+      direction: rule.conditions?.direction ?? undefined,
+      minAmount: rule.conditions?.minAmount ?? undefined,
+      maxAmount: rule.conditions?.maxAmount ?? undefined,
+      dateFrom: rule.conditions?.dateFrom ?? undefined,
+      dateTo: rule.conditions?.dateTo ?? undefined
+    },
+    action: {
+      type: rule.action?.type,
+      proposedTxnType: rule.action?.proposedTxnType ?? undefined,
+      bankAccountId: rule.action?.bankAccountId ?? undefined,
+      payeeName: rule.action?.payeeName ?? undefined,
+      categoryAccountId: rule.action?.categoryAccountId ?? undefined,
+      memo: rule.action?.memo ?? undefined
+    },
+    createdAt: rule.createdAt instanceof Date ? rule.createdAt.toISOString() : String(rule.createdAt),
+    updatedAt: rule.updatedAt instanceof Date ? rule.updatedAt.toISOString() : String(rule.updatedAt)
+  });
+
 const buildStatementArtifacts = (statement: any) => {
   const artifacts = statement.artifacts ?? {};
   if (!artifacts || Object.keys(artifacts).length === 0) {
@@ -457,6 +528,9 @@ const buildStatementArtifacts = (statement: any) => {
     classificationOutputPath: artifacts.classificationOutputPath ?? undefined,
     suggestionsOutputPath: artifacts.suggestionsOutputPath ?? undefined,
     processingSummaryPath: artifacts.processingSummaryPath ?? undefined,
+    structuredStatementPath: artifacts.structuredStatementPath ?? undefined,
+    evidencePath: artifacts.evidencePath ?? undefined,
+    validationReportPath: artifacts.validationReportPath ?? undefined,
     geminiPath: artifacts.geminiPath ?? undefined,
     detectionEvidence: artifacts.detectionEvidence ?? undefined,
     detectedStatementMonth: artifacts.detectedStatementMonth ?? undefined,
@@ -467,6 +541,7 @@ const buildStatementArtifacts = (statement: any) => {
       extractingAt: artifacts.stageTimestamps?.extractingAt ?? undefined,
       structuringAt: artifacts.stageTimestamps?.structuringAt ?? undefined,
       checksQueuedAt: artifacts.stageTimestamps?.checksQueuedAt ?? undefined,
+      parserReviewAt: artifacts.stageTimestamps?.parserReviewAt ?? undefined,
       readyForReviewAt: artifacts.stageTimestamps?.readyForReviewAt ?? undefined,
       failedAt: artifacts.stageTimestamps?.failedAt ?? undefined
     }
@@ -668,7 +743,8 @@ const toListItem = (statement: any) =>
     confidence: undefined,
     issuesCount: Array.isArray(statement.issues) ? statement.issues.length : 0,
     updatedAt: statement.updatedAt instanceof Date ? statement.updatedAt.toISOString() : String(statement.updatedAt),
-    createdAt: statement.createdAt instanceof Date ? statement.createdAt.toISOString() : String(statement.createdAt)
+    createdAt: statement.createdAt instanceof Date ? statement.createdAt.toISOString() : String(statement.createdAt),
+    bankAccountId: statement.bankAccountId ?? undefined
   });
 
 const toDetailItem = async (statement: any) => {
@@ -701,6 +777,7 @@ const toDetailItem = async (statement: any) => {
       pdfPath: statement.gcs?.pdfPath
     },
     artifacts: buildStatementArtifacts(statement),
+    validationReport: statement.validationReport ?? undefined,
     monthClose: {
       status: statement.monthClose?.status ?? 'open',
       completedAt: statement.monthClose?.completedAt ?? undefined,
@@ -715,6 +792,30 @@ const toDetailItem = async (statement: any) => {
 };
 
 const buildStatementSuggestions = async (statement: any) => {
+  const firstNonBlank = (...values: Array<unknown>): string => {
+    for (const value of values) {
+      if (value == null) continue;
+      const text = String(value).trim();
+      if (text.length > 0) return text;
+    }
+    return '';
+  };
+
+  const mapTransferResolutionStatus = (args: {
+    family?: string;
+    proposedTxnType?: string;
+    hint?: string;
+    resolvedId?: string;
+    isExternal?: boolean;
+  }) => {
+    const isTransfer = args.family === 'transfer' || args.proposedTxnType === 'Transfer';
+    if (!isTransfer) return undefined;
+    if (args.isExternal) return 'possible_external_transfer' as const;
+    if (args.resolvedId) return 'matched_transfer_ready' as const;
+    if (args.hint) return 'needs_internal_account_match' as const;
+    return 'needs_review' as const;
+  };
+
   const [transactions, checks] = await Promise.all([
     StatementTransactionModel.find({
       statementId: statement._id.toString(),
@@ -729,54 +830,234 @@ const buildStatementSuggestions = async (statement: any) => {
       .sort({ createdAt: 1 })
       .lean()
   ]);
+  const bankAccounts = await ChartOfAccountModel.find({
+    companyId: statement.companyId,
+    type: 'asset'
+  })
+    .select('_id name qbAccountId code')
+    .lean();
+  const accountByMask = new Map<string, string>();
+  for (const account of bankAccounts) {
+    const text = `${account.name ?? ''} ${account.code ?? ''} ${account.qbAccountId ?? ''}`;
+    const mask = parseMaskedAccountHint(text);
+    if (mask && !accountByMask.has(mask)) {
+      accountByMask.set(mask, String(account._id));
+    }
+  }
+  const rules = await listStatementRules(String(statement._id), String(statement.companyId));
+  const postingCandidateTransactions = transactions.filter((txn: any) => {
+    if (txn.isPostingCandidate === false) return false;
+    const rowType = String(txn.rowType ?? '');
+    if (!rowType) return true;
+    return (
+      rowType === 'deposit' ||
+      rowType === 'electronic_credit' ||
+      rowType === 'other_credit' ||
+      rowType === 'electronic_debit' ||
+      rowType === 'check_cleared'
+    );
+  });
+  const getPostingMappingWarnings = (proposal: {
+    qbTxnType?: 'Expense' | 'Deposit' | 'Transfer' | 'Check';
+    bankAccountId?: string;
+    categoryAccountId?: string;
+  }) => {
+    const warnings: string[] = [];
+    if (!proposal.qbTxnType) return warnings;
+    if (
+      (proposal.qbTxnType === 'Expense' || proposal.qbTxnType === 'Deposit' || proposal.qbTxnType === 'Check') &&
+      !proposal.bankAccountId
+    ) {
+      warnings.push('Missing bank account mapping (Chart of Accounts) for QuickBooks posting');
+    }
+    if (
+      (proposal.qbTxnType === 'Expense' || proposal.qbTxnType === 'Deposit' || proposal.qbTxnType === 'Check') &&
+      !proposal.categoryAccountId
+    ) {
+      warnings.push('Missing category account mapping (Chart of Accounts) for QuickBooks posting');
+    }
+    return warnings;
+  };
 
-  const items = [
-    ...transactions.map((txn: any) => ({
-      id: String(txn._id),
-      source: 'transaction' as const,
-      date: txn.postDate ?? undefined,
-      description: String(txn.description ?? txn.merchant ?? 'Statement transaction'),
-      amount: Number(txn.amount ?? 0),
-      direction: txn.type === 'credit' ? 'credit' as const : 'debit' as const,
-      checkNumber: txn.checkNumber ?? undefined,
-      payeeName: txn.proposal?.payeeName ?? txn.merchant ?? undefined,
-      proposedTxnType: txn.proposal?.qbTxnType ?? undefined,
-      proposalConfidence:
-        typeof txn.proposal?.confidence === 'number' ? Number(txn.proposal.confidence) : undefined,
-      reviewStatus: txn.reviewStatus ?? undefined,
-      postingStatus: txn.posting?.status ?? undefined,
-      status: 'structured',
-      reasons: Array.isArray(txn.proposal?.reasons)
-        ? txn.proposal.reasons.map((reason: unknown) => String(reason))
-        : [],
-      linkedCheckId: txn.statementCheckId ? String(txn.statementCheckId) : undefined
-    })),
-    ...checks.map((check: any) => ({
-      id: String(check._id),
-      source: 'check' as const,
-      date: check.extracted?.date ?? check.autoFill?.date ?? undefined,
-      description: String(
-        check.extracted?.payeeName ??
+  const items: any[] = [
+    ...postingCandidateTransactions.map((txn: any) => {
+      const direction = txn.type === 'credit' ? 'credit' as const : 'debit' as const;
+      const ruleDescription = firstNonBlank(txn.description, txn.merchant);
+      const matchedRules = evaluateStatementRules(rules, {
+        source: 'transaction',
+        description: ruleDescription,
+        amount: Number(txn.amount ?? 0),
+        direction,
+        date: txn.postDate ?? undefined,
+        payeeName: txn.proposal?.payeeName ?? txn.merchant ?? undefined
+      });
+      const hardRule = matchedRules.find((rule) => rule.hardness === 'hard');
+      const softRule = matchedRules.find((rule) => rule.hardness === 'soft');
+      const selectedRule = hardRule ?? softRule;
+      const proposedTxnTypeFromRule =
+        selectedRule?.action?.type === 'suggestTxnType' ? selectedRule.action.proposedTxnType : undefined;
+      const bankAccountIdFromRule = selectedRule?.action?.bankAccountId;
+      const categoryAccountIdFromRule = selectedRule?.action?.categoryAccountId;
+      const payeeNameFromRule =
+        selectedRule?.action?.type === 'suggestPayee' ? selectedRule.action.payeeName : undefined;
+      const ruleReasons = matchedRules.map((rule) => `Matched ${rule.hardness} rule: ${rule.name}`);
+      const resolvedProposal = {
+        qbTxnType: proposedTxnTypeFromRule ?? txn.proposal?.qbTxnType ?? undefined,
+        bankAccountId: bankAccountIdFromRule ?? txn.proposal?.bankAccountId ?? undefined,
+        categoryAccountId: categoryAccountIdFromRule ?? txn.proposal?.categoryAccountId ?? undefined
+      };
+      const transferHint = parseMaskedAccountHint(String(txn.description ?? ''));
+      const flowText = String(txn.description ?? '').toLowerCase();
+      const directionRelativeToStatement =
+        txn.transactionFamily === 'transfer' || resolvedProposal.qbTxnType === 'Transfer'
+          ? flowText.includes('transfer from')
+            ? ('inbound' as const)
+            : ('outbound' as const)
+          : undefined;
+      const resolvedRelatedAccountId =
+        txn.proposal?.transferTargetAccountId ?? (transferHint ? accountByMask.get(transferHint) : undefined);
+      const transferResolutionStatus = mapTransferResolutionStatus({
+        family: txn.transactionFamily,
+        proposedTxnType: resolvedProposal.qbTxnType,
+        hint: transferHint,
+        resolvedId: resolvedRelatedAccountId,
+        isExternal: /external transfer|outside account/.test(flowText)
+      });
+
+      const rowTypeLabel = txn.rowType ? String(txn.rowType).replace(/_/g, ' ') : '';
+      const sectionLabel = txn.section ? String(txn.section).replace(/_/g, ' ') : '';
+      const fallbackDescription =
+        firstNonBlank(
+          txn.description,
+          txn.merchant,
+          txn.proposal?.payeeName,
+          txn.checkNumber ? `Check #${txn.checkNumber}` : '',
+          rowTypeLabel,
+          sectionLabel,
+        ) || 'Statement transaction';
+
+      return {
+        id: String(txn._id),
+        source: 'transaction' as const,
+        date: txn.postDate ?? undefined,
+        description: fallbackDescription,
+        amount: Number(txn.amount ?? 0),
+        direction,
+        rowType: txn.rowType ?? undefined,
+        section: txn.section ?? undefined,
+        transactionFamily: txn.transactionFamily ?? undefined,
+        directionRelativeToStatement,
+        statementAccountMask: statement.accountLast4 ? `xxx${String(statement.accountLast4)}` : undefined,
+        counterpartyBankHint: transferHint,
+        resolvedRelatedAccountId: resolvedRelatedAccountId ? String(resolvedRelatedAccountId) : undefined,
+        transferResolutionStatus,
+        checkNumber: txn.checkNumber ?? undefined,
+        sourcePage: txn.sourceLocator?.pageNumber ? Number(txn.sourceLocator.pageNumber) : undefined,
+        sourceText: txn.sourceLocator?.sourceText ?? undefined,
+        payeeName: payeeNameFromRule ?? txn.proposal?.payeeName ?? txn.merchant ?? undefined,
+        proposedTxnType: resolvedProposal.qbTxnType,
+        bankAccountId: resolvedProposal.bankAccountId,
+        categoryAccountId: resolvedProposal.categoryAccountId,
+        proposalConfidence:
+          typeof txn.proposal?.confidence === 'number'
+            ? Number(txn.proposal.confidence)
+            : selectedRule
+              ? selectedRule.hardness === 'hard'
+                ? 0.95
+                : 0.75
+              : undefined,
+        reviewStatus: txn.reviewStatus ?? undefined,
+        postingStatus: txn.posting?.status ?? undefined,
+        status: 'structured',
+        reasons: [
+          ...(Array.isArray(txn.proposal?.reasons)
+            ? txn.proposal.reasons.map((reason: unknown) => String(reason))
+            : []),
+          ...ruleReasons,
+          ...getPostingMappingWarnings(resolvedProposal),
+          ...(transferResolutionStatus === 'needs_internal_account_match'
+            ? [`No mapped destination/source account for ${transferHint ?? 'transfer counterpart'}`]
+            : []),
+          ...(transferResolutionStatus && transferResolutionStatus !== 'matched_transfer_ready'
+            ? ['Resolve account to continue before QuickBooks posting']
+            : [])
+        ],
+        linkedCheckId: txn.statementCheckId ? String(txn.statementCheckId) : undefined,
+        matchedRuleIds: matchedRules.map((rule) => rule.id),
+        matchedRuleNames: matchedRules.map((rule) => rule.name),
+        ruleHardness: selectedRule?.hardness
+      };
+    }),
+    ...checks.map((check: any) => {
+      const checkNumberLabel = firstNonBlank(
+        check.extracted?.checkNumber,
+        check.autoFill?.checkNumber,
+      );
+      const description =
+        firstNonBlank(
+          check.extracted?.payeeName,
+          check.autoFill?.payeeName,
+          check.extracted?.memo,
+          check.autoFill?.memo,
+        ) || `Check ${checkNumberLabel || String(check._id).slice(-6)}`;
+      const matchedRules = evaluateStatementRules(rules, {
+        source: 'check',
+        description,
+        amount: Number(check.extracted?.amount ?? check.autoFill?.amount ?? 0),
+        direction: 'debit',
+        date: check.extracted?.date ?? check.autoFill?.date ?? undefined,
+        payeeName: check.extracted?.payeeName ?? check.autoFill?.payeeName ?? undefined
+      });
+      const selectedRule = matchedRules.find((rule) => rule.hardness === 'hard') ?? matchedRules[0];
+      const ruleReasons = matchedRules.map((rule) => `Matched ${rule.hardness} rule: ${rule.name}`);
+      const resolvedProposal = {
+        qbTxnType:
+          (selectedRule?.action?.type === 'suggestTxnType' ? selectedRule.action.proposedTxnType : undefined) ??
+          undefined,
+        bankAccountId: selectedRule?.action?.bankAccountId ?? undefined,
+        categoryAccountId: selectedRule?.action?.categoryAccountId ?? undefined
+      };
+      return {
+        id: String(check._id),
+        source: 'check' as const,
+        date: check.extracted?.date ?? check.autoFill?.date ?? undefined,
+        description,
+        amount: Number(check.extracted?.amount ?? check.autoFill?.amount ?? 0),
+        direction: 'debit' as const,
+        rowType: 'check_cleared' as const,
+        section: 'checks_cleared' as const,
+        transactionFamily: 'check' as const,
+        checkNumber: check.extracted?.checkNumber ?? check.autoFill?.checkNumber ?? undefined,
+        sourcePage: check.artifacts?.pageNumber ?? undefined,
+        sourceText: check.extracted?.memo ?? undefined,
+        payeeName:
+          (selectedRule?.action?.type === 'suggestPayee' ? selectedRule.action.payeeName : undefined) ??
+          check.extracted?.payeeName ??
           check.autoFill?.payeeName ??
-          check.extracted?.memo ??
-          check.autoFill?.memo ??
-          `Check ${check.extracted?.checkNumber ?? check.autoFill?.checkNumber ?? String(check._id).slice(-6)}`
-      ),
-      amount: Number(check.extracted?.amount ?? check.autoFill?.amount ?? 0),
-      direction: 'debit' as const,
-      checkNumber: check.extracted?.checkNumber ?? check.autoFill?.checkNumber ?? undefined,
-      payeeName: check.extracted?.payeeName ?? check.autoFill?.payeeName ?? undefined,
-      proposedTxnType: undefined,
-      proposalConfidence:
-        typeof check.confidence?.overall === 'number' ? Number(check.confidence.overall) : undefined,
-      reviewStatus: undefined,
-      postingStatus: undefined,
-      status: String(check.status ?? 'queued'),
-      reasons: Array.isArray(check.match?.reasons)
-        ? check.match.reasons.map((reason: unknown) => String(reason))
-        : [],
-      linkedCheckId: String(check._id)
-    }))
+          undefined,
+        proposedTxnType: resolvedProposal.qbTxnType,
+        bankAccountId: resolvedProposal.bankAccountId,
+        categoryAccountId: resolvedProposal.categoryAccountId,
+        proposalConfidence:
+          selectedRule ? (selectedRule.hardness === 'hard' ? 0.95 : 0.75) : typeof check.confidence?.overall === 'number'
+            ? Number(check.confidence.overall)
+            : undefined,
+        reviewStatus: undefined,
+        postingStatus: undefined,
+        status: String(check.status ?? 'queued'),
+        reasons: [
+          ...(Array.isArray(check.match?.reasons)
+            ? check.match.reasons.map((reason: unknown) => String(reason))
+            : []),
+          ...ruleReasons,
+          ...getPostingMappingWarnings(resolvedProposal)
+        ],
+        linkedCheckId: String(check._id),
+        matchedRuleIds: matchedRules.map((rule) => rule.id),
+        matchedRuleNames: matchedRules.map((rule) => rule.name),
+        ruleHardness: selectedRule?.hardness
+      };
+    })
   ].sort((left, right) => {
     const leftDate = left.date ?? '';
     const rightDate = right.date ?? '';
@@ -793,7 +1074,29 @@ const buildStatementSuggestions = async (statement: any) => {
     expenses: items.filter((item) => item.proposedTxnType === 'Expense').length,
     transfers: items.filter((item) => item.proposedTxnType === 'Transfer').length,
     checksSuggested: items.filter((item) => item.proposedTxnType === 'Check').length,
-    uncategorized: items.filter((item) => !item.proposedTxnType).length
+    uncategorized: items.filter((item) => !item.proposedTxnType).length,
+    readyToPost: items.filter(
+      (item) =>
+        item.reviewStatus === 'approved' &&
+        item.postingStatus !== 'posted' &&
+        item.transferResolutionStatus !== 'needs_internal_account_match' &&
+        item.transferResolutionStatus !== 'needs_chart_of_accounts_account' &&
+        item.transferResolutionStatus !== 'needs_review'
+    ).length,
+    needsReview: items.filter(
+      (item) =>
+        item.reviewStatus !== 'approved' &&
+        item.reviewStatus !== 'excluded' &&
+        item.postingStatus !== 'posted'
+    ).length,
+    completed: items.filter((item) => item.postingStatus === 'posted').length,
+    excluded: items.filter((item) => item.reviewStatus === 'excluded').length,
+    unresolvedTransfers: items.filter(
+      (item) =>
+        item.transferResolutionStatus === 'needs_internal_account_match' ||
+        item.transferResolutionStatus === 'needs_chart_of_accounts_account' ||
+        item.transferResolutionStatus === 'needs_review'
+    ).length
   };
 
   return statementSuggestionsResponseSchema.parse({
@@ -975,6 +1278,9 @@ export const createStatement = async (req: Request, res: Response) => {
       statement = existing;
       statement.periodStart = parsed.data.periodStart;
       statement.periodEnd = parsed.data.periodEnd;
+      if (parsed.data.bankAccountId) {
+        statement.bankAccountId = parsed.data.bankAccountId;
+      }
       statement.status = 'uploaded';
       statement.hash = undefined;
       statement.issues = [];
@@ -1001,6 +1307,7 @@ export const createStatement = async (req: Request, res: Response) => {
         status: 'uploaded',
         periodStart: parsed.data.periodStart,
         periodEnd: parsed.data.periodEnd,
+        bankAccountId: parsed.data.bankAccountId ?? undefined,
         gcs: {
           rootPrefix: expectedRootPrefix,
           pdfPath: parsed.data.gcsPath
@@ -1125,8 +1432,7 @@ export const listStatements = async (req: Request, res: Response) => {
 
   const parsed = listBankStatementsQuerySchema.safeParse({
     month: typeof req.query.month === 'string' ? req.query.month : undefined,
-    status: typeof req.query.status === 'string' ? req.query.status : undefined,
-    search: typeof req.query.search === 'string' ? req.query.search : undefined
+    status: typeof req.query.status === 'string' ? req.query.status : undefined
   });
   if (!parsed.success) {
     return fail(res, 'Validation failed', 422, parsed.error.flatten());
@@ -1138,9 +1444,6 @@ export const listStatements = async (req: Request, res: Response) => {
   }
   if (parsed.data.status) {
     filter.status = parsed.data.status;
-  }
-  if (parsed.data.search) {
-    filter.fileName = { $regex: parsed.data.search, $options: 'i' };
   }
 
   try {
@@ -1159,7 +1462,7 @@ export const listStatementMonths = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
 
   const statements = await BankStatement.find({ companyId: req.companyId })
-    .select('_id statementMonth status updatedAt createdAt')
+    .select('_id statementMonth status updatedAt createdAt monthClose')
     .sort({ statementMonth: -1, createdAt: -1 })
     .lean();
 
@@ -1170,6 +1473,7 @@ export const listStatementMonths = async (req: Request, res: Response) => {
       statementCount: number;
       latestStatementId: string;
       latestStatus: string;
+      monthCloseStatus: string;
       updatedAt: string;
     }
   >();
@@ -1177,12 +1481,15 @@ export const listStatementMonths = async (req: Request, res: Response) => {
   for (const statement of statements) {
     const month = String(statement.statementMonth ?? '');
     if (!month) continue;
+    const monthCloseRaw = statement.monthClose as { status?: string } | undefined;
+    const monthCloseStatus = String(monthCloseRaw?.status ?? 'open');
     if (!byMonth.has(month)) {
       byMonth.set(month, {
         month,
         statementCount: 1,
         latestStatementId: String(statement._id),
         latestStatus: String(statement.status ?? 'uploaded'),
+        monthCloseStatus,
         updatedAt:
           statement.updatedAt instanceof Date
             ? statement.updatedAt.toISOString()
@@ -1277,16 +1584,19 @@ export const getStatementStatus = async (req: Request, res: Response) => {
       .sort({ createdAt: 1 })
       .limit(200)
       .lean();
+    const liveMetrics = await buildStatementLiveMetrics(statement._id.toString(), req.companyId);
 
     const payload = bankStatementStatusResponseSchema.parse({
       statementId: statement._id.toString(),
       status: statement.status,
       progress: buildStatementProgress(statement),
+      liveMetrics,
       gcs: {
         rootPrefix: String(statement.gcs?.rootPrefix ?? ''),
         pdfPath: String(statement.gcs?.pdfPath ?? '')
       },
       artifacts: buildStatementArtifacts(statement),
+      validationReport: statement.validationReport ?? undefined,
       checkImagePreview: checks.map((check: any) => ({
         id: String(check._id),
         status: String(check.status ?? 'queued'),
@@ -1325,6 +1635,123 @@ export const getStatementSuggestions = async (req: Request, res: Response) => {
     // eslint-disable-next-line no-console
     console.error('[accounting.get-statement-suggestions] failed', error);
     return fail(res, 'Failed to load statement suggestions', 500);
+  }
+};
+
+export const listRulesForStatement = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  try {
+    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    if (!statement) return fail(res, 'Statement not found', 404);
+    const rules = await listStatementRules(String(statement._id), String(req.companyId));
+    return ok(res, {
+      statementId: String(statement._id),
+      rules: rules.map(serializeStatementRule)
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.list-statement-rules] failed', error);
+    return fail(res, 'Failed to list statement rules', 500);
+  }
+};
+
+export const createRuleForStatement = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  const parsed = createStatementRuleSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  try {
+    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    if (!statement) return fail(res, 'Statement not found', 404);
+
+    const created = await StatementRuleModel.create({
+      statementId: String(statement._id),
+      companyId: req.companyId,
+      name: parsed.data.name,
+      enabled: parsed.data.enabled,
+      hardness: parsed.data.hardness,
+      conditions: parsed.data.conditions,
+      action: parsed.data.action
+    });
+
+    return ok(res, {
+      rule: serializeStatementRule(created)
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.create-statement-rule] failed', error);
+    return fail(res, 'Failed to create statement rule', 500);
+  }
+};
+
+export const updateRuleForStatement = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  const parsed = updateStatementRuleSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  try {
+    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    if (!statement) return fail(res, 'Statement not found', 404);
+
+    const rule = await StatementRuleModel.findOne({
+      _id: req.params.ruleId,
+      statementId: String(statement._id),
+      companyId: req.companyId
+    });
+    if (!rule) return fail(res, 'Rule not found', 404);
+
+    if (parsed.data.name !== undefined) rule.name = parsed.data.name;
+    if (parsed.data.enabled !== undefined) rule.enabled = parsed.data.enabled;
+    if (parsed.data.hardness !== undefined) rule.hardness = parsed.data.hardness;
+    if (parsed.data.conditions !== undefined) rule.conditions = parsed.data.conditions as any;
+    if (parsed.data.action !== undefined) rule.action = parsed.data.action as any;
+    await rule.save();
+
+    return ok(res, { rule: serializeStatementRule(rule) });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.update-statement-rule] failed', error);
+    return fail(res, 'Failed to update statement rule', 500);
+  }
+};
+
+export const createRuleFromStatementTransaction = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  try {
+    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    if (!statement) return fail(res, 'Statement not found', 404);
+    const transaction = await StatementTransactionModel.findOne({
+      _id: req.params.transactionId,
+      statementId: String(statement._id),
+      companyId: req.companyId
+    });
+    if (!transaction) return fail(res, 'Statement transaction not found', 404);
+
+    const hardness = req.body?.hardness === 'hard' ? 'hard' : 'soft';
+    const contains = String(transaction.merchant ?? transaction.description ?? '').slice(0, 120);
+    const created = await StatementRuleModel.create({
+      statementId: String(statement._id),
+      companyId: req.companyId,
+      name: `${hardness === 'hard' ? 'Hard' : 'Soft'} rule: ${contains || 'transaction'}`,
+      enabled: true,
+      hardness,
+      conditions: {
+        contains,
+        direction: transaction.type
+      },
+      action: {
+        type: 'suggestTxnType',
+        proposedTxnType: transaction.proposal?.qbTxnType ?? (transaction.type === 'credit' ? 'Deposit' : 'Expense'),
+        bankAccountId: transaction.proposal?.bankAccountId ?? undefined,
+        payeeName: transaction.proposal?.payeeName ?? undefined,
+        categoryAccountId: transaction.proposal?.categoryAccountId ?? undefined,
+        memo: transaction.proposal?.memo ?? undefined
+      }
+    });
+
+    return ok(res, { rule: serializeStatementRule(created) });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.create-statement-rule-from-transaction] failed', error);
+    return fail(res, 'Failed to create statement rule from transaction', 500);
   }
 };
 
@@ -1398,6 +1825,103 @@ export const updateStatementSuggestionReview = async (req: Request, res: Respons
     suggestionId: req.params.suggestionId,
     source: parsed.data.source,
     reviewStatus: parsed.data.reviewStatus
+  });
+};
+
+export const resolveTransferSuggestion = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+  const parsed = resolveTransferSuggestionSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, 'Validation failed', 422, parsed.error.flatten());
+
+  const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+  if (!statement) return fail(res, 'Statement not found', 404);
+
+  const entry = await StatementTransactionModel.findOne({
+    _id: req.params.suggestionId,
+    statementId: req.params.id,
+    companyId: req.companyId
+  });
+  if (!entry) return fail(res, 'Transfer suggestion not found', 404);
+
+  const isTransfer = entry.transactionFamily === 'transfer' || entry.proposal?.qbTxnType === 'Transfer';
+  if (!isTransfer) return fail(res, 'Suggestion is not a transfer candidate', 409);
+
+  const hint = parseMaskedAccountHint(String(entry.description ?? ''));
+  const accounts = await ChartOfAccountModel.find({
+    companyId: req.companyId,
+    type: 'asset'
+  })
+    .select('_id name code qbAccountId')
+    .lean();
+  const candidates = accounts.filter((account) => {
+    if (!hint) return false;
+    const text = `${account.name ?? ''} ${account.code ?? ''} ${account.qbAccountId ?? ''}`.toLowerCase();
+    return text.includes(hint.slice(-4).toLowerCase());
+  });
+
+  if (parsed.data.action === 'mark_external') {
+    entry.proposal = {
+      ...(entry.proposal ?? {}),
+      qbTxnType: 'Transfer',
+      transferTargetAccountId: undefined,
+      memo: [entry.proposal?.memo, 'External transfer (unmapped)'].filter(Boolean).join(' | ')
+    } as any;
+    await entry.save();
+    return ok(res, {
+      suggestionId: String(entry._id),
+      transferResolutionStatus: 'possible_external_transfer'
+    });
+  }
+
+  if (parsed.data.action === 'create_coa_account') {
+    const accountName = parsed.data.accountName ?? `Bank ${hint ?? String(entry._id).slice(-4)}`;
+    const created = await createQuickBooksHubChartAccount({
+      companyId: String(req.companyId),
+      name: accountName,
+      detailType: parsed.data.detailType ?? 'Checking'
+    });
+    entry.proposal = {
+      ...(entry.proposal ?? {}),
+      qbTxnType: 'Transfer',
+      transferTargetAccountId: created.id
+    } as any;
+    await entry.save();
+    return ok(res, {
+      suggestionId: String(entry._id),
+      relatedAccountId: created.id,
+      transferResolutionStatus: 'matched_transfer_ready'
+    });
+  }
+
+  const selectedAccountId = parsed.data.relatedAccountId;
+  let resolvedId = selectedAccountId;
+  if (!resolvedId) {
+    if (candidates.length === 1) {
+      resolvedId = String(candidates[0]._id);
+    } else if (candidates.length > 1) {
+      return fail(res, 'Multiple account matches found; select one', 409, {
+        candidates: candidates.map((account) => ({
+          id: String(account._id),
+          name: String(account.name ?? '')
+        }))
+      });
+    } else {
+      return fail(res, `No mapped destination/source account for ${hint ?? 'transfer account'}`, 409, {
+        transferResolutionStatus: 'needs_internal_account_match'
+      });
+    }
+  }
+
+  entry.proposal = {
+    ...(entry.proposal ?? {}),
+    qbTxnType: 'Transfer',
+    transferTargetAccountId: resolvedId
+  } as any;
+  await entry.save();
+  return ok(res, {
+    suggestionId: String(entry._id),
+    relatedAccountId: resolvedId,
+    transferResolutionStatus: 'matched_transfer_ready'
   });
 };
 
@@ -1707,20 +2231,42 @@ export const getStatementStream = async (req: Request, res: Response) => {
 
   let lastStatusFingerprint = '';
   let lastChecksFingerprint = '';
+  let lastProgressChangeAt = Date.now();
+  let lastStuckWarningAt = 0;
 
   const writeEvent = (event: string, data: unknown) => {
     res.write(`event: ${event}\n`);
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
 
+  const summarizeArtifactsForLog = (artifacts?: ReturnType<typeof buildStatementArtifacts>) => ({
+    pageImages: Array.isArray(artifacts?.pageImagePaths) ? artifacts.pageImagePaths.length : 0,
+    ocrReady: Boolean(artifacts?.ocrPath),
+    ocrTextReady: Boolean(artifacts?.ocrTextPath),
+    transactionsReady: Boolean(artifacts?.transactionsTablePath),
+    checksClearedReady: Boolean(artifacts?.checksClearedTablePath),
+    sectionsReady: Boolean(artifacts?.transactionSectionsPath),
+    extractedChecksReady: Boolean(artifacts?.extractedChecksPath),
+    classificationReady: Boolean(artifacts?.classificationOutputPath),
+    suggestionsReady: Boolean(artifacts?.suggestionsOutputPath),
+    processingSummaryReady: Boolean(artifacts?.processingSummaryPath),
+    structuredReady: Boolean(artifacts?.structuredStatementPath),
+    evidenceReady: Boolean(artifacts?.evidencePath),
+    validationReady: Boolean(artifacts?.validationReportPath),
+    geminiReady: Boolean(artifacts?.geminiPath),
+    stageTimestamps: artifacts?.stageTimestamps
+  });
+
   const emit = async () => {
     const latestStatement = await BankStatement.findOne({ _id: statementId, companyId });
     if (!latestStatement) return;
+    const liveMetrics = await buildStatementLiveMetrics(latestStatement._id.toString(), companyId);
 
     const statusPayload = {
       statementId: latestStatement._id.toString(),
       status: latestStatement.status,
       progress: buildStatementProgress(latestStatement),
+      liveMetrics,
       artifacts: buildStatementArtifacts(latestStatement),
       updatedAt: latestStatement.updatedAt,
       issues: latestStatement.issues ?? []
@@ -1729,6 +2275,17 @@ export const getStatementStream = async (req: Request, res: Response) => {
     if (statusFingerprint !== lastStatusFingerprint) {
       writeEvent('progressUpdated', statusPayload);
       lastStatusFingerprint = statusFingerprint;
+      lastProgressChangeAt = Date.now();
+      // eslint-disable-next-line no-console
+      console.info('[statement.stream] progressUpdated', {
+        statementId,
+        companyId,
+        status: statusPayload.status,
+        progress: statusPayload.progress,
+        liveMetrics: statusPayload.liveMetrics,
+        artifacts: summarizeArtifactsForLog(statusPayload.artifacts),
+        issues: statusPayload.issues
+      });
     }
 
     const checks = await StatementCheckModel.find({ companyId, statementId })
@@ -1753,6 +2310,43 @@ export const getStatementStream = async (req: Request, res: Response) => {
         writeEvent('checkUpdated', check);
       }
       lastChecksFingerprint = checksFingerprint;
+      lastProgressChangeAt = Date.now();
+      const checkSummary = checkPayload.reduce(
+        (acc, check) => {
+          const status = String(check.status ?? 'queued');
+          if (status === 'ready') acc.ready += 1;
+          else if (status === 'processing') acc.processing += 1;
+          else if (status === 'failed') acc.failed += 1;
+          else acc.queued += 1;
+          if (status === 'ready' || status === 'failed') {
+            const checkNumber =
+              check.extracted?.checkNumber ?? check.autoFill?.checkNumber ?? String(check.checkId ?? '');
+            if (checkNumber) {
+              acc.completedCheckNumbers.push(String(checkNumber));
+            }
+          }
+          return acc;
+        },
+        { queued: 0, processing: 0, ready: 0, failed: 0, completedCheckNumbers: [] as string[] }
+      );
+      // eslint-disable-next-line no-console
+      console.info('[statement.stream] checkUpdated', {
+        statementId,
+        companyId,
+        summary: checkSummary
+      });
+    }
+
+    const now = Date.now();
+    const idleMs = now - lastProgressChangeAt;
+    if (idleMs >= 20000 && now - lastStuckWarningAt >= 20000) {
+      lastStuckWarningAt = now;
+      // eslint-disable-next-line no-console
+      console.warn('[statement.stream] no progress change detected', {
+        statementId,
+        companyId,
+        idleMs
+      });
     }
   };
 

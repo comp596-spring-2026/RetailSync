@@ -53,6 +53,18 @@ export const buildStatementSuggestionsOutputPath = (rootPrefix: string) =>
 export const buildStatementProcessingSummaryPath = (rootPrefix: string) =>
   buildStatementJsonPath(rootPrefix, 'tables/processing-summary.json');
 
+export const buildStatementStructuredModelPath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/structured-statement.v1.json');
+
+export const buildStatementEvidencePath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/evidence.v1.json');
+
+export const buildStatementValidationReportPath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/validation-report.v1.json');
+
+export const buildStatementPdfLayoutPath = (rootPrefix: string) =>
+  buildStatementJsonPath(rootPrefix, 'tables/pdf-layout.v1.json');
+
 export const buildGeminiPath = (rootPrefix: string, fileName = 'normalized.v1.json') =>
   buildDerivedPath(rootPrefix, `gemini/${fileName}`);
 

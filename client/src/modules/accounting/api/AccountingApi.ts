@@ -34,6 +34,8 @@ import {
   QuickBooksTaxReportKey,
   QuickBooksTaxWindowQuery,
   QuickBooksTransactionDetail,
+  QuickBooksHubChartAccountCreateInput,
+  QuickBooksHubChartAccountCreateResponse,
   QuickBooksSettings,
   QuickBooksWriteCreateInput,
   QuickBooksWriteDeleteInput,
@@ -45,9 +47,14 @@ import {
   QuickBooksWriteUpdateInput,
   StatementCheck,
   StatementMonthClose,
+  StatementRule,
+  StatementRuleHardness,
+  CreateStatementRuleInput,
+  UpdateStatementRuleInput,
   StatementTransaction,
   StatementSuggestionsResponse,
   StatementReviewStatus,
+  ResolveTransferSuggestionInput,
   RequestStatementUploadUrlInput
 } from '@retailsync/shared';
 import { api } from '../../../app/api/client';
@@ -106,6 +113,7 @@ export class AccountingApi {
           statementCount: number;
           latestStatementId: string;
           latestStatus: string;
+          monthCloseStatus: string;
           updatedAt: string;
         }>;
       };
@@ -133,6 +141,13 @@ export class AccountingApi {
     }>('/accounting/statements/' + id);
   }
 
+  getStatementStreamUrl(id: string, accessToken?: string | null) {
+    const baseUrl = String(import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+    const basePath = `${baseUrl}/accounting/statements/${id}/stream`;
+    if (!accessToken) return basePath;
+    return `${basePath}?access_token=${encodeURIComponent(accessToken)}`;
+  }
+
   getStatementArtifactBlob(id: string, path: string) {
     return api.get<Blob>(`/accounting/statements/${id}/artifact`, {
       params: { path },
@@ -153,6 +168,13 @@ export class AccountingApi {
         statementId: string;
         status: BankStatementStatus;
         progress: StatementProgressPayload;
+        liveMetrics: {
+          entryCount: number;
+          debitCount: number;
+          creditCount: number;
+          startingBalance: number | null;
+          endingBalance: number | null;
+        };
         gcs?: {
           rootPrefix: string;
           pdfPath: string;
@@ -187,6 +209,39 @@ export class AccountingApi {
     }>(`/accounting/statements/${id}/suggestions`);
   }
 
+  listStatementRules(id: string) {
+    return api.get<{
+      data: {
+        statementId: string;
+        rules: StatementRule[];
+      };
+    }>(`/accounting/statements/${id}/rules`);
+  }
+
+  createStatementRule(id: string, payload: CreateStatementRuleInput) {
+    return api.post<{
+      data: {
+        rule: StatementRule;
+      };
+    }>(`/accounting/statements/${id}/rules`, payload);
+  }
+
+  updateStatementRule(id: string, ruleId: string, payload: UpdateStatementRuleInput) {
+    return api.patch<{
+      data: {
+        rule: StatementRule;
+      };
+    }>(`/accounting/statements/${id}/rules/${ruleId}`, payload);
+  }
+
+  createStatementRuleFromTransaction(id: string, transactionId: string, hardness: StatementRuleHardness) {
+    return api.post<{
+      data: {
+        rule: StatementRule;
+      };
+    }>(`/accounting/statements/${id}/rules/from-transaction/${transactionId}`, { hardness });
+  }
+
   listStatementEntries(id: string) {
     return api.get<{
       data: {
@@ -212,6 +267,14 @@ export class AccountingApi {
       source,
       reviewStatus
     });
+  }
+
+  resolveTransferSuggestion(
+    statementId: string,
+    suggestionId: string,
+    payload: ResolveTransferSuggestionInput
+  ) {
+    return api.patch(`/accounting/statements/${statementId}/suggestions/${suggestionId}/transfer-resolution`, payload);
   }
 
   completeStatementMonth(id: string) {
@@ -356,6 +419,12 @@ export class AccountingApi {
       '/integrations/quickbooks/hub/chart-of-accounts',
       params
     );
+  }
+
+  createQuickbooksHubChartAccount(payload: QuickBooksHubChartAccountCreateInput) {
+    return api.post<{
+      data: QuickBooksHubChartAccountCreateResponse;
+    }>('/integrations/quickbooks/hub/chart-of-accounts', payload);
   }
 
   getQuickbooksHubEntities(entityType: QuickBooksHubEntityType, params?: Omit<QuickBooksHubEntitiesParams, 'entityType'>) {
