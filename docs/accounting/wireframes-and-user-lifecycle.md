@@ -1,6 +1,6 @@
 # Accounting Wireframes, Components, and User Lifecycle
 
-Last updated: 2026-04-19
+Last updated: 2026-05-14
 
 This document maps the implemented accounting UI to the server/runtime flow so product, engineering, and QA can reason about the full accounting workspace from the user point of view.
 
@@ -150,6 +150,7 @@ Main UI pieces:
 - issues alert for statement-level warnings/failures
 - extracted entries section (month-close)
 - suggestion review section with approve/exclude actions
+- workspace tabs: `Overview`, `Suggestions`, `Rules`, `File Manager`
 - completion checklist (server gates) + `Complete Month`
 - dedicated pipeline stage timeline panel
 - dedicated artifact metadata panels (statement + selected check)
@@ -172,12 +173,27 @@ Main UI pieces:
 
 [Optional issues alert]
 
-[Month-close sections]
+[Workspace Tabs]
+  Overview | Suggestions | Rules | File Manager
+
+[Overview tab]
   [Now & Next summary]
   [Extracted entries table]
-  [Suggestion review panel]
   [Completion gates checklist]
-  [Artifact viewer panel]
+  [Artifact summary]
+
+[Suggestions tab]
+  [Suggestion review table]
+  [Approve / Exclude / Transfer resolution]
+
+[Rules tab]
+  [Saved rules]
+  [Create soft/hard rule from reviewed transaction]
+
+[File Manager tab]
+  [Source PDF]
+  [OCR text / OCR JSON]
+  [Transactions / checks-cleared / validation artifacts]
 
 [Check Card Grid]
   [Check ABC123] [status chip]
@@ -252,6 +268,11 @@ flowchart TD
   I --> J["Post Approved"]
   J --> K["Queue quickbooks.post_approved"]
 ```
+
+Current scenario note:
+- statement detail is the primary accounting review surface
+- ledger remains the canonical downstream posting surface
+- QuickBooks posting is still triggered from ledger/QuickBooks workflows, not directly from statement detail
 
 ## 6) QuickBooks Sync
 

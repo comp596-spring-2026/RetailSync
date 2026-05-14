@@ -1,11 +1,12 @@
 # RetailSync Execution Status
 
-Last updated: 2026-04-17
+Last updated: 2026-05-14
 
 This file tracks the current implementation state of the live product surfaces, backend workflows, and validation posture.
 
 Primary companion docs:
 - [docs/architecture/workflows-and-usage.md](/Users/trupal/Projects/RetailSync/docs/architecture/workflows-and-usage.md)
+- [docs/architecture/statement-pdf-processing-workflow.md](/Users/trupal/Projects/RetailSync/docs/architecture/statement-pdf-processing-workflow.md)
 - [docs/frontend/routing-and-permission-gates.md](/Users/trupal/Projects/RetailSync/docs/frontend/routing-and-permission-gates.md)
 - [docs/backend/api-reference.md](/Users/trupal/Projects/RetailSync/docs/backend/api-reference.md)
 - [docs/testing/module-test-matrix.md](/Users/trupal/Projects/RetailSync/docs/testing/module-test-matrix.md)
@@ -31,6 +32,21 @@ RetailSync is currently centered on:
 - Google Sheets and QuickBooks integration management in Settings
 
 Inventory has been removed from the active product and is no longer part of the supported user flow.
+
+---
+
+## Current Scenario Snapshot
+
+As of 2026-05-14, the current live accounting scenario is:
+- accounting is statements-first in the visible product shell
+- statement detail is the active month-close and suggestion review workspace
+- ledger and QuickBooks posting remain downstream operational workspaces
+- the statement PDF pipeline documentation and storage contract are now documented and aligned with the codebase
+- overall product direction is stable, while release confidence remains `PARTIAL`
+
+Operational nuance worth calling out:
+- the statement pipeline itself is implemented and demoable
+- post-processing after statement review still depends on ledger approval and QuickBooks posting readiness rather than being completed entirely inside the statement detail workflow
 
 ---
 
@@ -168,6 +184,7 @@ Environment/config readiness required for production:
 - server auth controller and Google auth tests
 - server email/invite flow tests
 - server QuickBooks CRUD service tests
+- server statement fixture extraction script
 - shared schema/type build validation
 
 ### Current validation confidence
