@@ -1,10 +1,23 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { runStatementFixtureExtraction } from './runStatementFixtureExtraction';
 
+const hasPdfToPpm = () => {
+  const result = spawnSync('pdftoppm', ['-h'], {
+    encoding: 'utf8',
+    timeout: 5000
+  });
+  return !result.error;
+};
+
 describe('SouthState fixture strict validation', () => {
   it('matches SouthState truth exactly', async () => {
+    if (!hasPdfToPpm()) {
+      return;
+    }
+
     const summary = await runStatementFixtureExtraction();
     const report = summary.validationReport;
 
