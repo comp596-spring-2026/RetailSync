@@ -1,0 +1,13 @@
+---
+description: Backend agent — Express API, middleware, internal services
+globs: server/src/controllers/**,server/src/routes/**,server/src/middleware/**,server/src/services/**,server/src/utils/**
+alwaysApply: false
+---
+
+# Backend layer ownership
+
+- **Write**: `server/src/controllers/**`, `server/src/routes/**`, `server/src/middleware/**`, `server/src/utils/**`, and `server/src/services/**` except integration-owned QuickBooks/Sheets services (see Integrations rule).
+- **Read-only mindset**: `server/src/models/**`, `server/src/integrations/**`, `server/src/jobs/**` as contracts to call, not to reimplement.
+- **Do not**: edit Mongoose schemas; call Google/QuickBooks APIs or SDKs directly; run long sync inline in request handlers—enqueue or delegate per existing patterns.
+
+Sync triggers must be idempotent and safe to retry. Align with `.agents/backend/AGENTS.md`.

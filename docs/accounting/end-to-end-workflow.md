@@ -89,10 +89,10 @@ sequenceDiagram
 
 | Stage | Entry Condition | Main Actions | Output | Next Stage |
 | --- | --- | --- | --- | --- |
-| `statement.extract` | Statement exists, GCS PDF path valid | PDF fallback OCR + page placeholders written to GCS | `/derived/ocr/docai.json`, `/derived/ocr/text.txt`, `/derived/pages/page-*.png` | `statement.structure` |
-| `statement.structure` | OCR text exists | Parse/normalize transactions, generate proposal seeds, create ledger rows | `StatementTransaction[]`, `LedgerEntry[]`, `/derived/gemini/normalized.v1.json` | `checks.spawn` |
-| `checks.spawn` | Transactions structured | Detect check candidates, create `StatementCheck`, enqueue per-check jobs | `StatementCheck[]` with `queued` status | `check.process` (fan-out) |
-| `check.process` | checkId + statementId | Check OCR/structured artifacts, autofill fields/confidence, link and patch ledger | updated `StatementCheck`, enriched `LedgerEntry` | none |
+| `statement.extract` | Statement exists, GCS PDF path valid | Render page PNGs, extract PDF text, save OCR JSON/text | `/derived/pages/page-*.png`, `/derived/ocr/docai.json`, `/derived/ocr/text.txt` | `statement.structure` |
+| `statement.structure` | OCR JSON exists | Parse/normalize transactions, generate proposal seeds, create ledger rows, save tables | `StatementTransaction[]`, `LedgerEntry[]`, `/derived/ocr/json/tables/*.json`, `/derived/gemini/normalized.v1.json` | `checks.spawn` |
+| `checks.spawn` | Transactions structured | Detect check candidates, create `StatementCheck`, stagger per-check jobs, reserve consolidated checks path | `StatementCheck[]` with `queued` status | `check.process` (fan-out) |
+| `check.process` | checkId + statementId | Render crop, save OCR/structured/proposal artifacts, autofill fields/confidence, link and patch ledger | updated `StatementCheck`, enriched `LedgerEntry`, final `extracted-checks.json` after all checks finish | none |
 | `matching.refresh` | optional manual/automated trigger | recompute proposal confidence/reasons | refreshed proposals in transaction/ledger | none |
 | `quickbooks.refresh_reference_data` | QB connected | pull accounts + entities, cache and map | `ChartOfAccount`, `QuickBooksReference`, quickbooks pull status | none |
 | `quickbooks.post_approved` | approved entries exist | preflight and typed posting with fallback | per-entry posting status + quickbooks push status | none |

@@ -1,7 +1,11 @@
 import {
   Alert,
   Button,
-  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Grid2 as Grid,
   MenuItem,
   Paper,
   Stack,
@@ -9,18 +13,24 @@ import {
   Typography
 } from '@mui/material';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { BankStatementStatus } from '@retailsync/shared';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import { LoadingEmptyStateWrapper, NoAccess, PageHeader } from '../../../components';
-import { formatDate } from '../../../utils/date';
 import { hasPermission } from '../../../utils/permissions';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { accountingApi } from '../api';
-import { UploadStatementDialog } from '../components';
+import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
+import {
+  StatementMonthCalendar,
+  type StatementMonthInfo,
+  StatementWorkflowCard,
+  UploadStatementDialog
+} from '../components';
+import { formatStatementMonthShort } from '../utils/statementDisplay';
+import { isStatementInFlight } from '../utils/statementStatus';
 
 type StatementItem = {
   id: string;
@@ -41,66 +51,14 @@ type StatementItem = {
   updatedAt: string;
 };
 
-const statusColor = (
-  status: BankStatementStatus
-): 'default' | 'info' | 'warning' | 'success' | 'error' => {
-  if (status === 'extracting' || status === 'structuring' || status === 'checks_queued') return 'info';
-  if (status === 'ready_for_review') return 'warning';
-  if (status === 'failed') return 'error';
-  return 'default';
+type BankChartAccountOption = {
+  id: string;
+  qbId: string;
+  name: string;
+  detailType?: string;
 };
 
-const statusOptions: Array<{ value: BankStatementStatus; label: string }> = [
-  { value: 'uploaded', label: 'Uploaded' },
-  { value: 'extracting', label: 'Extracting' },
-  { value: 'structuring', label: 'Structuring' },
-  { value: 'checks_queued', label: 'Checks queued' },
-  { value: 'ready_for_review', label: 'Ready for review' },
-  { value: 'failed', label: 'Failed' }
-];
-
-const formatProgressLabel = (progress: StatementItem['progress']) => {
-  return `${progress.completedChecks} done • ${progress.remainingChecks} left`;
-};
-
-const formatStatusLabel = (status: BankStatementStatus) =>
-  status.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-
-const getStageSummary = (row: StatementItem) => {
-  if (row.status === 'failed') {
-    return row.issuesCount > 0
-      ? `${row.issuesCount} issue${row.issuesCount === 1 ? '' : 's'} need attention`
-      : 'Processing stopped and needs attention';
-  }
-
-  if (row.status === 'ready_for_review') {
-    return row.progress.totalChecks > 0
-      ? `${row.progress.checksReady} checks ready for review`
-      : 'Artifacts are ready for review';
-  }
-
-  if (row.progress.totalChecks > 0) {
-    return `${formatProgressLabel(row.progress)} across ${row.progress.totalChecks} checks`;
-  }
-
-  if (row.status === 'uploaded') {
-    return 'Saved and waiting to start background processing';
-  }
-
-  if (row.status === 'extracting') {
-    return 'Extracting text and page data from the PDF';
-  }
-
-  if (row.status === 'structuring') {
-    return 'Structuring transactions and statement sections';
-  }
-
-  if (row.status === 'checks_queued') {
-    return 'Preparing check review items';
-  }
-
-  return 'In progress';
-};
+const STATEMENT_BANK_ACCOUNT_STORAGE_KEY = 'accounting.statement.defaultBankAccountId';
 
 export const StatementsPage = () => {
   const dispatch = useAppDispatch();
@@ -111,36 +69,116 @@ export const StatementsPage = () => {
   const canCreate = hasPermission(permissions, 'bankStatements', 'create');
   const canEdit = hasPermission(permissions, 'bankStatements', 'edit');
   const canDelete = hasPermission(permissions, 'bankStatements', 'delete');
+  const canViewQuickBooks = hasPermission(permissions, 'quickbooks', 'view');
+
+  const { isConnected: quickBooksConnected } = useQuickBooksWorkspace(canViewQuickBooks);
 
   const [rows, setRows] = useState<StatementItem[]>([]);
-  const [month, setMonth] = useState('');
-  const [status, setStatus] = useState<BankStatementStatus | ''>('');
-  const [search, setSearch] = useState('');
+  const [monthInfos, setMonthInfos] = useState<StatementMonthInfo[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankChartAccountOption[]>([]);
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return window.localStorage.getItem(STATEMENT_BANK_ACCOUNT_STORAGE_KEY) ?? '';
+  });
+  const [filterMonth, setFilterMonth] = useState('');
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getUTCFullYear());
   const [loading, setLoading] = useState(true);
+  const [loadingBankAccounts, setLoadingBankAccounts] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [bankAccountError, setBankAccountError] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [createAccountOpen, setCreateAccountOpen] = useState(false);
+  const [creatingAccount, setCreatingAccount] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [newAccountNumber, setNewAccountNumber] = useState('');
+  const [newAccountDetailType, setNewAccountDetailType] = useState<'Checking' | 'Savings' | 'CashOnHand'>(
+    'Checking'
+  );
+  const hasAssignedBankAccount = Boolean(selectedBankAccountId);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    if (!canView || !hasAssignedBankAccount) return;
     setLoading(true);
     setError(null);
     try {
-      const response = await accountingApi.listStatements({
-        month: month || undefined,
-        status: status || undefined,
-        search: search || undefined
-      });
-      setRows(response.data.data.statements);
+      const [listResponse, monthsResponse] = await Promise.all([
+        accountingApi.listStatements({
+          month: filterMonth || undefined
+        }),
+        accountingApi.listStatementMonths()
+      ]);
+      setRows(listResponse.data.data.statements);
+      setMonthInfos(monthsResponse.data.data.months as StatementMonthInfo[]);
     } catch (loadError) {
       setError(extractApiErrorMessage(loadError, 'Failed to load statements'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [canView, filterMonth, hasAssignedBankAccount]);
+
+  const loadBankAccounts = useCallback(async () => {
+    if (!canView || !canViewQuickBooks || !quickBooksConnected) {
+      setBankAccounts([]);
+      setLoadingBankAccounts(false);
+      return;
+    }
+    setLoadingBankAccounts(true);
+    setBankAccountError(null);
+    try {
+      const response = await accountingApi.getQuickbooksHubChartOfAccounts({
+        page: 1,
+        pageSize: 200,
+        status: 'active',
+        type: 'asset',
+        sort: 'name'
+      });
+      const items = response.data.data.items ?? [];
+      const options = items
+        .filter((item) => item.qbId && item.name)
+        .map((item) => ({
+          id: item.id,
+          qbId: String(item.qbId),
+          name: String(item.name),
+          detailType: item.detailType ?? undefined
+        }));
+      setBankAccounts(options);
+      if (options.every((option) => option.qbId !== selectedBankAccountId)) {
+        setSelectedBankAccountId('');
+        window.localStorage.removeItem(STATEMENT_BANK_ACCOUNT_STORAGE_KEY);
+      }
+    } catch (apiError) {
+      setBankAccountError(extractApiErrorMessage(apiError, 'Failed to load bank chart accounts'));
+      setBankAccounts([]);
+    } finally {
+      setLoadingBankAccounts(false);
+    }
+  }, [canView, canViewQuickBooks, quickBooksConnected, selectedBankAccountId]);
 
   useEffect(() => {
-    if (!canView) return;
     void load();
-  }, [canView]);
+  }, [load]);
+
+  useEffect(() => {
+    void loadBankAccounts();
+  }, [loadBankAccounts]);
+
+  useEffect(() => {
+    if (!selectedBankAccountId) return;
+    window.localStorage.setItem(STATEMENT_BANK_ACCOUNT_STORAGE_KEY, selectedBankAccountId);
+  }, [selectedBankAccountId]);
+
+  const hasInFlightRows = useMemo(() => rows.some((row) => isStatementInFlight(row.status)), [rows]);
+
+  useEffect(() => {
+    if (!canView || !hasAssignedBankAccount) return;
+    if (!hasInFlightRows && !uploadOpen) return;
+
+    const intervalMs = uploadOpen ? 2000 : 4000;
+    const timer = window.setInterval(() => {
+      void load();
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [canView, hasAssignedBankAccount, hasInFlightRows, uploadOpen, load]);
 
   const reprocess = async (id: string) => {
     try {
@@ -157,9 +195,9 @@ export const StatementsPage = () => {
     }
   };
 
-  const deleteStatement = async (id: string, fileName: string) => {
+  const deleteStatement = async (id: string, statementMonth: string) => {
     const confirmed = window.confirm(
-      `Delete ${fileName}? This removes the statement and its extracted processing records.`
+      `Delete the ${formatStatementMonthShort(statementMonth)} statement? This removes the statement and its extracted processing records.`
     );
     if (!confirmed) return;
 
@@ -187,41 +225,90 @@ export const StatementsPage = () => {
     await load();
   };
 
+  const createBankAccount = async () => {
+    if (!newAccountName.trim()) {
+      dispatch(showSnackbar({ message: 'Account name is required', severity: 'error' }));
+      return;
+    }
+    setCreatingAccount(true);
+    try {
+      const response = await accountingApi.createQuickbooksHubChartAccount({
+        name: newAccountName.trim(),
+        accountNumber: newAccountNumber.trim() || undefined,
+        detailType: newAccountDetailType
+      });
+      const created = response.data.data.account;
+      await loadBankAccounts();
+      if (created.qbId) {
+        setSelectedBankAccountId(created.qbId);
+      }
+      setCreateAccountOpen(false);
+      setNewAccountName('');
+      setNewAccountNumber('');
+      setNewAccountDetailType('Checking');
+      dispatch(showSnackbar({ message: 'Bank chart account created', severity: 'success' }));
+    } catch (apiError) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Failed to create bank chart account'),
+          severity: 'error'
+        })
+      );
+    } finally {
+      setCreatingAccount(false);
+    }
+  };
+
   const hasRows = useMemo(() => rows.length > 0, [rows]);
-  const summary = useMemo(() => {
-    const failed = rows.filter((row) => row.status === 'failed').length;
-    const active = rows.filter((row) =>
-      row.status === 'extracting' || row.status === 'structuring' || row.status === 'checks_queued'
-    ).length;
-    const ready = rows.filter((row) => row.status === 'ready_for_review').length;
-    return { failed, active, ready };
-  }, [rows]);
 
   const sections = useMemo(
     () => [
       {
-        title: 'Processing now',
-        subtitle: 'Statements actively moving through extraction, structuring, or check processing.',
+        title: 'Queued',
+        subtitle: 'Waiting to start extraction.',
+        rows: rows.filter((row) => row.status === 'uploaded')
+      },
+      {
+        title: 'Running',
+        subtitle: 'Extraction, structuring, or checks in progress.',
         rows: rows.filter((row) =>
-          row.status === 'uploaded' ||
-          row.status === 'extracting' ||
-          row.status === 'structuring' ||
-          row.status === 'checks_queued'
+          row.status === 'extracting' || row.status === 'structuring' || row.status === 'checks_queued'
         )
       },
       {
-        title: 'Needs attention',
-        subtitle: 'Statements that failed and need reprocess or cleanup.',
+        title: 'Attention',
+        subtitle: 'Failed or needs reprocess.',
         rows: rows.filter((row) => row.status === 'failed')
       },
       {
-        title: 'Ready for review',
-        subtitle: 'Statements with extracted outputs ready for suggestions and ledger review.',
+        title: 'Ready',
+        subtitle: 'Ready for workspace review.',
         rows: rows.filter((row) => row.status === 'ready_for_review')
       }
     ],
     [rows]
   );
+
+  const sectionsWithRows = useMemo(
+    () => sections.filter((section) => section.rows.length > 0),
+    [sections]
+  );
+  const selectedBankAccountValue = bankAccounts.some((account) => account.qbId === selectedBankAccountId)
+    ? selectedBankAccountId
+    : '';
+  const bankAccountGuardMessage = useMemo(() => {
+    if (hasAssignedBankAccount) return null;
+    if (!canViewQuickBooks) {
+      return 'QuickBooks account access is required to assign a bank chart account before using statements.';
+    }
+    if (!quickBooksConnected) {
+      return 'Connect QuickBooks first, then assign a bank chart account to continue.';
+    }
+    if (!loadingBankAccounts && bankAccounts.length === 0) {
+      return 'No active bank chart accounts found. Create one to continue.';
+    }
+    return 'Select a bank chart account to unlock statement upload and workspace visibility.';
+  }, [hasAssignedBankAccount, canViewQuickBooks, quickBooksConnected, loadingBankAccounts, bankAccounts.length]);
 
   if (!canView) {
     return <NoAccess />;
@@ -230,208 +317,179 @@ export const StatementsPage = () => {
   return (
     <Stack spacing={2}>
       <PageHeader
-        title="Bank Statements"
-        subtitle="Upload statements and monitor extraction/check processing before ledger approval."
+        title={(
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ xs: 'flex-start', md: 'center' }}>
+            <Typography variant="h5">Bank Statements</Typography>
+            <TextField
+              select
+              size="small"
+              label="Bank chart account"
+              value={selectedBankAccountValue}
+              onChange={(event) => setSelectedBankAccountId(event.target.value)}
+              disabled={!canViewQuickBooks || !quickBooksConnected || loadingBankAccounts || bankAccounts.length === 0}
+              sx={{ minWidth: { xs: 260, md: 340 } }}
+            >
+              <MenuItem value="">
+                <em>Select bank account</em>
+              </MenuItem>
+              {bankAccounts.map((account) => (
+                <MenuItem key={account.qbId} value={account.qbId}>
+                  {account.name}
+                  {account.detailType ? ` (${account.detailType})` : ''}
+                </MenuItem>
+              ))}
+            </TextField>
+            <Button
+              variant="outlined"
+              onClick={() => setCreateAccountOpen(true)}
+              disabled={!canViewQuickBooks || !quickBooksConnected}
+            >
+              Create account
+            </Button>
+          </Stack>
+        )}
         icon={<AccountBalanceIcon />}
       />
       {error && <Alert severity="error">{error}</Alert>}
+      {bankAccountError && <Alert severity="error">{bankAccountError}</Alert>}
+      {bankAccountGuardMessage ? <Alert severity="warning">{bankAccountGuardMessage}</Alert> : null}
 
-      <Paper sx={{ p: 2 }}>
-        <Stack
-          direction={{ xs: 'column', md: 'row' }}
-          spacing={1.5}
-          alignItems={{ xs: 'stretch', md: 'center' }}
-        >
-          <TextField
-            label="Month"
-            type="month"
-            size="small"
-            value={month}
-            onChange={(event) => setMonth(event.target.value)}
-            InputLabelProps={{ shrink: true }}
-            sx={{ minWidth: 170 }}
-          />
-          <TextField
-            select
-            label="Status"
-            size="small"
-            value={status}
-            onChange={(event) =>
-              setStatus((event.target.value || '') as BankStatementStatus | '')
-            }
-            sx={{ minWidth: 170 }}
-          >
-            <MenuItem value="">All</MenuItem>
-            {statusOptions.map((option) => (
-              <MenuItem key={option.value} value={option.value}>
-                {option.label}
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            label="Search file"
-            size="small"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            sx={{ flexGrow: 1 }}
-          />
-          <Button variant="outlined" onClick={() => void load()}>
-            Refresh
-          </Button>
-          <Button variant="contained" onClick={() => setUploadOpen(true)} disabled={!canCreate}>
-            Upload PDF
-          </Button>
-        </Stack>
-      </Paper>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, lg: 8 }} order={{ xs: 2, lg: 1 }}>
+          {!hasAssignedBankAccount ? (
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="body2" color="text.secondary">
+                Statement workspace is locked until bank account assignment is complete.
+              </Typography>
+            </Paper>
+          ) : (
+            <LoadingEmptyStateWrapper
+              loading={loading}
+              empty={!loading && !hasRows}
+              loadingLabel="Loading statements..."
+              emptyMessage={filterMonth ? 'No statements for this month' : 'No statements yet'}
+              emptySecondary={
+                filterMonth
+                  ? 'Try another month on the calendar or clear the month filter.'
+                  : 'Upload a PDF to get started.'
+              }
+            >
+              <Stack spacing={2}>
+                {sectionsWithRows.map((section) => (
+                  <Paper key={section.title} sx={{ p: 2 }}>
+                    <Stack spacing={1.5}>
+                      <Stack spacing={0.25}>
+                        <Typography variant="subtitle1">{section.title}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {section.subtitle}
+                        </Typography>
+                      </Stack>
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
-        <Paper variant="outlined" sx={{ p: 1.5, flex: 1 }}>
-          <Typography variant="caption" color="text.secondary">
-            Active processing
-          </Typography>
-          <Typography variant="h5">{summary.active}</Typography>
-        </Paper>
-        <Paper variant="outlined" sx={{ p: 1.5, flex: 1 }}>
-          <Typography variant="caption" color="text.secondary">
-            Ready for review
-          </Typography>
-          <Typography variant="h5">{summary.ready}</Typography>
-        </Paper>
-        <Paper variant="outlined" sx={{ p: 1.5, flex: 1 }}>
-          <Typography variant="caption" color="text.secondary">
-            Failed statements
-          </Typography>
-          <Typography variant="h5">{summary.failed}</Typography>
-        </Paper>
-      </Stack>
+                      <Stack spacing={1.25}>
+                        {section.rows.map((row) => (
+                          <StatementWorkflowCard
+                            key={row.id}
+                            row={row}
+                            canEdit={canEdit}
+                            canDelete={canDelete}
+                            onOpenWorkspace={() => navigate(`/dashboard/accounting/statements/${row.id}`)}
+                            onOpenLedger={() => navigate('/dashboard/accounting/ledger')}
+                            onReprocess={() => void reprocess(row.id)}
+                            onDelete={() => void deleteStatement(row.id, row.statementMonth)}
+                          />
+                        ))}
+                      </Stack>
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            </LoadingEmptyStateWrapper>
+          )}
+        </Grid>
 
-      <LoadingEmptyStateWrapper
-        loading={loading}
-        empty={!loading && !hasRows}
-        loadingLabel="Loading statements..."
-        emptyMessage="No statements uploaded yet"
-        emptySecondary="Upload a PDF to start extraction."
-      >
-        <Stack spacing={2}>
-          {sections.map((section) => (
-            <Paper key={section.title} sx={{ p: 2 }}>
+        <Grid size={{ xs: 12, lg: 4 }} order={{ xs: 1, lg: 2 }}>
+          <Stack spacing={2}>
+            <StatementMonthCalendar
+              months={monthInfos}
+              selectedMonth={filterMonth}
+              onSelectMonth={setFilterMonth}
+              year={calendarYear}
+              onYearChange={setCalendarYear}
+            />
+            <Paper sx={{ p: 2 }}>
               <Stack spacing={1.5}>
-                <Stack spacing={0.25}>
-                  <Typography variant="subtitle1">{section.title}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {section.subtitle}
-                  </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Button variant="outlined" onClick={() => void load()} disabled={!hasAssignedBankAccount}>
+                    Refresh
+                  </Button>
+                  <Button
+                    variant="contained"
+                    onClick={() => setUploadOpen(true)}
+                    disabled={!canCreate || !hasAssignedBankAccount}
+                  >
+                    Upload PDF
+                  </Button>
                 </Stack>
-
-                {section.rows.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary">
-                    No statements in this stage right now.
-                  </Typography>
-                ) : (
-                  <Stack spacing={1.25}>
-                    {section.rows.map((row) => (
-                      <Paper key={row.id} variant="outlined" sx={{ p: 1.5, bgcolor: 'background.default' }}>
-                        <Stack spacing={1.25}>
-                          <Stack
-                            direction={{ xs: 'column', md: 'row' }}
-                            spacing={1}
-                            justifyContent="space-between"
-                            alignItems={{ md: 'center' }}
-                          >
-                            <Stack spacing={0.35}>
-                              <Typography variant="subtitle2">{row.fileName}</Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                Month {row.statementMonth} • Updated {formatDate(row.updatedAt, 'short')}
-                              </Typography>
-                              <Typography variant="body2">{getStageSummary(row)}</Typography>
-                            </Stack>
-                            <Chip
-                              size="small"
-                              label={formatStatusLabel(row.status)}
-                              color={statusColor(row.status)}
-                            />
-                          </Stack>
-
-                          {row.progress.totalChecks > 0 || row.issuesCount > 0 ? (
-                            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                              {row.progress.totalChecks > 0 ? (
-                                <Chip
-                                  size="small"
-                                  variant="outlined"
-                                  label={`${row.progress.totalChecks} checks`}
-                                />
-                              ) : null}
-                              {row.progress.totalChecks > 0 ? (
-                                <Chip
-                                  size="small"
-                                  variant="outlined"
-                                  label={formatProgressLabel(row.progress)}
-                                />
-                              ) : null}
-                              {row.issuesCount > 0 ? (
-                                <Chip
-                                  size="small"
-                                  color="warning"
-                                  variant="outlined"
-                                  label={`${row.issuesCount} issue${row.issuesCount === 1 ? '' : 's'}`}
-                                />
-                              ) : null}
-                            </Stack>
-                          ) : null}
-
-                          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                            <Button
-                              size="small"
-                              variant="contained"
-                              onClick={() => navigate(`/dashboard/accounting/statements/${row.id}`)}
-                            >
-                              Open workspace
-                            </Button>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={() => navigate('/dashboard/accounting/ledger')}
-                              disabled={row.status !== 'ready_for_review'}
-                            >
-                              Open ledger
-                            </Button>
-                            {canEdit ? (
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => void reprocess(row.id)}
-                              >
-                                Reprocess
-                              </Button>
-                            ) : null}
-                            {canDelete ? (
-                              <Button
-                                size="small"
-                                color="error"
-                                variant="outlined"
-                                startIcon={<DeleteOutlineIcon />}
-                                onClick={() => void deleteStatement(row.id, row.fileName)}
-                              >
-                                Delete
-                              </Button>
-                            ) : null}
-                          </Stack>
-                        </Stack>
-                      </Paper>
-                    ))}
-                  </Stack>
-                )}
               </Stack>
             </Paper>
-          ))}
-        </Stack>
-      </LoadingEmptyStateWrapper>
+          </Stack>
+        </Grid>
+      </Grid>
 
       <UploadStatementDialog
         open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
+        onClose={() => {
+          setUploadOpen(false);
+          void load();
+        }}
         onUploaded={onUploaded}
+        onSaveError={(message) => {
+          dispatch(showSnackbar({ message, severity: 'error' }));
+        }}
       />
+
+      <Dialog open={createAccountOpen} onClose={() => (creatingAccount ? null : setCreateAccountOpen(false))} fullWidth maxWidth="sm">
+        <DialogTitle>Create bank chart account</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ mt: 0.5 }}>
+            <TextField
+              label="Account name"
+              value={newAccountName}
+              onChange={(event) => setNewAccountName(event.target.value)}
+              required
+              autoFocus
+              size="small"
+            />
+            <TextField
+              label="Account number (optional)"
+              value={newAccountNumber}
+              onChange={(event) => setNewAccountNumber(event.target.value)}
+              size="small"
+            />
+            <TextField
+              select
+              label="Detail type"
+              value={newAccountDetailType}
+              onChange={(event) =>
+                setNewAccountDetailType(event.target.value as 'Checking' | 'Savings' | 'CashOnHand')
+              }
+              size="small"
+            >
+              <MenuItem value="Checking">Checking</MenuItem>
+              <MenuItem value="Savings">Savings</MenuItem>
+              <MenuItem value="CashOnHand">Cash on hand</MenuItem>
+            </TextField>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateAccountOpen(false)} disabled={creatingAccount}>
+            Cancel
+          </Button>
+          <Button onClick={() => void createBankAccount()} variant="contained" disabled={creatingAccount}>
+            {creatingAccount ? 'Creating...' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };

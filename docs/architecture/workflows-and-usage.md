@@ -1,6 +1,6 @@
 # RetailSync Workflows and Usage
 
-Last updated: 2026-04-17
+Last updated: 2026-05-14
 
 ## Monorepo Structure
 
@@ -68,9 +68,14 @@ Visible top-level workspaces:
 ## Accounting Flow
 
 1. User opens statements workspace.
-2. Uploads a statement.
-3. Processing runs through extraction/structuring/check stages.
-4. User opens statement detail to monitor status and retry/reprocess work when needed.
+2. Client detects statement month and uploads the original PDF to the company-scoped storage path.
+3. `createStatement` stores the statement record and queues `statement.extract`.
+4. Background jobs run `statement.extract`, `statement.structure`, `checks.spawn`, and `check.process`.
+5. Statement detail surfaces the source PDF, page images, OCR artifacts, structured JSON, extracted checks, and suggestions.
+6. User opens statement detail to monitor status and retry/reprocess work when needed.
+
+Detailed PDF-processing reference:
+- [docs/architecture/statement-pdf-processing-workflow.md](/Users/trupal/Projects/RetailSync/docs/architecture/statement-pdf-processing-workflow.md)
 
 ## QuickBooks Flow
 

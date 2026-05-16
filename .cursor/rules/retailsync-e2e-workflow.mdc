@@ -1,0 +1,52 @@
+---
+description: RetailSync end-to-end delivery order, handoffs, and when to load agent docs
+alwaysApply: true
+---
+
+# RetailSync — end-to-end workflow
+
+## Default implementation order
+
+1. **Database** — only when schemas, migrations, or persistence contracts change.
+2. **Backend** — API routes, controllers, internal orchestration (after contracts exist).
+3. **Integrations** — OAuth adapters, QuickBooks/Sheets sync, jobs, retries (never skip idempotency).
+4. **Frontend** — UI and Redux after API is stable.
+5. **Tester** — tests and verification last; cover retry and duplicate prevention for sync work.
+
+Skip Database if there is no schema change. Skip Frontend if there is no UI. Do not skip Tester for integration or sync changes.
+
+## Agent instruction files
+
+For role-specific scope and anti-patterns, follow the matching doc (open or `@` it in chat):
+
+- `.agents/manager/AGENTS.md` — planning and delegation only; Manager does not implement product code.
+- `.agents/database/AGENTS.md`
+- `.agents/backend/AGENTS.md`
+- `.agents/integrations/AGENTS.md`
+- `.agents/frontend/AGENTS.md`
+- `.agents/tester/AGENTS.md`
+- `.agents/auth-onboarding/AGENTS.md`
+- `.agents/access-rbac/AGENTS.md`
+- `.agents/pos-sheets/AGENTS.md`
+- `.agents/accounting-statements/AGENTS.md`
+- `.agents/quickbooks/AGENTS.md`
+- `.agents/release-docs/AGENTS.md`
+- `.agents/settings-integrations/AGENTS.md`
+- `.agents/app-shell-navigation/AGENTS.md`
+- `.agents/shared-contracts/AGENTS.md`
+- `.agents/security-tenancy/AGENTS.md`
+- `.agents/ci-release/AGENTS.md`
+
+Start substantive implementation prompts with: `Use .agents/<agent>/AGENTS.md` when using those docs.
+
+## Task lifecycle
+
+Planned → scoped → in-progress → handoff → validated → complete. Do not mark integration work complete without idempotency, retry behavior, and sync direction considered.
+
+## Conflict avoidance
+
+One owner per writable area per task. Avoid editing the same file from multiple “roles” in one pass. Frontend must not run ahead of unstable APIs.
+
+## Integration gate (QuickBooks / Google Sheets)
+
+Before implementing sync or export features, ensure: idempotency, retries, external IDs, sync direction, and source of truth are defined. If not, clarify or implement them first.

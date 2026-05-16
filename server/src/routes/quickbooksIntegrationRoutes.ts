@@ -17,6 +17,7 @@ import {
   getQuickBooksContactById,
   getQuickBooksAccountRegisterByAccount,
   getQuickBooksHubChartOfAccounts,
+  postQuickBooksHubChartOfAccounts,
   getQuickBooksHubEntities,
   getQuickBooksHubOperations,
   getQuickBooksLiveTransactionsByType,
@@ -162,6 +163,12 @@ router.get(
   requireAuth,
   requirePermission('quickbooks', 'view'),
   getQuickBooksHubChartOfAccounts
+);
+router.post(
+  '/hub/chart-of-accounts',
+  requireAuth,
+  requirePermission('quickbooks', 'post'),
+  postQuickBooksHubChartOfAccounts
 );
 router.get(
   '/hub/entities',

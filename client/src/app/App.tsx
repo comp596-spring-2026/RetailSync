@@ -23,7 +23,8 @@ import {
   PrivacyPage,
   ServerErrorPage,
   TermsPage,
-  UnauthorizedPage
+  UnauthorizedPage,
+  ArchitecturePage
 } from "../modules/dev/pages";
 import { DashboardHomePage } from "./pages/DashboardHomePage";
 import { POSWorkspacePage } from "../modules/pos/pages";
@@ -113,6 +114,7 @@ const App = () => {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="/architecture" element={<ArchitecturePage />} />
       <Route path="/home-demo" element={<HomeDemoPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />

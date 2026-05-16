@@ -1,0 +1,12 @@
+---
+description: Frontend agent — React UI, Redux, client modules
+globs: client/src/**
+alwaysApply: false
+---
+
+# Frontend layer ownership
+
+- **Write**: `client/src/app/**`, `client/src/modules/**`, `client/src/components/**`, `client/src/theme/**`, `client/src/store/**`.
+- **Do not**: change server code or Mongoose schemas; call Google Sheets or QuickBooks from the browser; store OAuth secrets or tokens in client state; bypass Redux for app-wide state.
+
+Use `shared` types and server API contracts as read-only references. Align with `.agents/frontend/AGENTS.md`.

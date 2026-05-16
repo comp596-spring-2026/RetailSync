@@ -87,7 +87,7 @@ describe('accountingCheckExtractionService', () => {
     });
   });
 
-  it('persists OCR artifacts and returns structured extraction output', async () => {
+  it('persists extraction artifacts and returns structured extraction output from statement PDF text', async () => {
     persistCropMock.mockResolvedValue({
       crop: {
         pageNumber: 2,
@@ -98,22 +98,15 @@ describe('accountingCheckExtractionService', () => {
       objectPath: 'companies/company-a/statements/2026/03/statement-a/derived/checks/extracted/check-001/front.png',
       cropImagePath: 'companies/company-a/statements/2026/03/statement-a/derived/checks/extracted/check-001/front.png'
     });
-    ocrMock.mockResolvedValue({
-      provider: 'vision',
-      text: [
-        'Check 1002',
-        'Pay to the Order of Acme Plumbing',
-        'Date 03/25/2026',
-        '$1,250.00',
-        'Memo: invoice 441'
-      ].join('\n'),
-      blocks: [],
-      paragraphs: [],
-      words: [],
-      raw: { responses: [] }
-    });
 
     const { runStatementCheckExtraction } = await import('./accountingCheckExtractionService');
+    const pageText = [
+      'Check 1002',
+      'Pay to the Order of Acme Plumbing',
+      'Date 03/25/2026',
+      '$1,250.00',
+      'Memo: invoice 441'
+    ].join('\n');
 
     const result = await runStatementCheckExtraction({
       pdfBuffer: Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nendobj\n'),
@@ -121,13 +114,14 @@ describe('accountingCheckExtractionService', () => {
       cropBox: { left: 20, top: 40, right: 220, bottom: 180 },
       checkKey: 'check-001',
       pageContext: 'Pay to the Order of Acme Plumbing',
+      internalPdfPageText: pageText,
       bucketName: 'accounting-bucket',
       rootPrefix: 'companies/company-a/statements/2026/03/statement-a',
       persistArtifacts: true
     });
 
     expect(persistCropMock).toHaveBeenCalledTimes(1);
-    expect(ocrMock).toHaveBeenCalledTimes(1);
+    expect(ocrMock).not.toHaveBeenCalled();
     expect(result.artifacts).toMatchObject({
       cropImagePath: buildCheckCropPath('companies/company-a/statements/2026/03/statement-a', 'check-001', 'front.png'),
       ocrTextPath: buildCheckOcrPath('companies/company-a/statements/2026/03/statement-a', 'check-001', 'ocr.txt'),
@@ -140,8 +134,9 @@ describe('accountingCheckExtractionService', () => {
       payeeName: 'Acme Plumbing',
       amount: 1250,
       memo: 'invoice 441',
-      source: 'ocr'
+      source: 'pdf_text'
     });
+    expect(result.ocr.text).toBe(pageText);
     expect(result.confidence.overall).toBeGreaterThan(0.5);
     expect(storageSaves.saves.map((save) => save.objectPath)).toEqual([
       `accounting-bucket::${buildCheckOcrPath('companies/company-a/statements/2026/03/statement-a', 'check-001', 'ocr.txt')}`,

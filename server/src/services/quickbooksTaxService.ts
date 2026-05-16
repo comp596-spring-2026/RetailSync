@@ -1,4 +1,5 @@
 import {
+  createQuickBooksAccount,
   createQuickBooksCheckTransaction,
   createQuickBooksJournalEntry,
   ensureFreshQuickBooksSecret,
@@ -701,6 +702,24 @@ const chartAccountSortMap: Record<string, Record<string, 1 | -1>> = {
   '-updatedAt': { updatedAt: -1, _id: -1 }
 };
 
+const normalizeAccountCode = (input: string | null, accountId: string) => {
+  const cleaned = (input ?? '').trim().replace(/\s+/g, '');
+  if (!cleaned) return `QB-${accountId}`;
+  return cleaned.slice(0, 60);
+};
+
+const mapQuickBooksAccountType = (
+  accountType: string | null
+): 'asset' | 'liability' | 'equity' | 'revenue' | 'expense' => {
+  const normalized = (accountType ?? '').trim().toLowerCase();
+  if (normalized.includes('asset') || normalized === 'bank') return 'asset';
+  if (normalized.includes('liability') || normalized === 'credit card') return 'liability';
+  if (normalized.includes('equity')) return 'equity';
+  if (normalized.includes('income') || normalized.includes('revenue')) return 'revenue';
+  if (normalized.includes('expense') || normalized.includes('cost of goods sold')) return 'expense';
+  return 'expense';
+};
+
 const entitySortMap: Record<string, Record<string, 1 | -1>> = {
   displayName: { displayName: 1, _id: 1 },
   '-displayName': { displayName: -1, _id: -1 },
@@ -768,6 +787,57 @@ export const listQuickBooksHubChartOfAccounts = async (args: {
       balance: null
     }))
   };
+};
+
+export const createQuickBooksHubChartAccount = async (args: {
+  companyId: string;
+  name: string;
+  accountNumber?: string;
+  detailType: 'Checking' | 'Savings' | 'CashOnHand';
+}) => {
+  const created = await createQuickBooksAccount({
+    companyId: args.companyId,
+    name: args.name,
+    accountType: 'Bank',
+    accountSubType: args.detailType,
+    accountNumber: args.accountNumber
+  });
+
+  const qbAccountId = created.id;
+  const existing = await ChartOfAccountModel.findOne({
+    companyId: args.companyId,
+    qbAccountId
+  }).select('code');
+
+  const code = existing?.code
+    ? String(existing.code)
+    : normalizeAccountCode(created.code, created.id);
+  const mappedType = mapQuickBooksAccountType(created.accountType);
+
+  const account = await ChartOfAccountModel.findOneAndUpdate(
+    { companyId: args.companyId, qbAccountId },
+    {
+      $set: {
+        companyId: args.companyId,
+        code,
+        name: created.name,
+        type: mappedType,
+        qbAccountId,
+        isSystem: false
+      }
+    },
+    { new: true, upsert: true }
+  );
+
+  return {
+    id: account._id.toString(),
+    qbId: account.qbAccountId ?? null,
+    name: account.name,
+    type: account.type ?? null,
+    detailType: args.detailType,
+    status: account.isSystem ? 'system' : 'active',
+    balance: null
+  } as const;
 };
 
 export const listQuickBooksHubEntities = async (args: {
@@ -986,12 +1056,113 @@ export const listQuickBooksHubOperations = async (args: {
   };
 };
 
+type RegisterColumnIndex = {
+  date?: number;
+  txnType?: number;
+  docNum?: number;
+  name?: number;
+  memo?: number;
+  splitAccount?: number;
+  amount?: number;
+  debit?: number;
+  credit?: number;
+  balance?: number;
+};
+
+// QuickBooks GeneralLedger reports do not have a stable column order across
+// realms / minorversions / configurations. Some payloads include an explicit
+// `Amount` column, others omit it; some include `Balance`, others do not.
+// Always derive positions from the report's `Columns.Column` metadata
+// (ColTitle + ColType) instead of assuming fixed indices, otherwise we end
+// up reading the same value into Amount / Debit / Credit.
+const buildRegisterColumnIndex = (raw: Record<string, unknown> | unknown): RegisterColumnIndex => {
+  const columnsContainer = (raw && typeof raw === 'object'
+    ? (raw as Record<string, unknown>).Columns
+    : undefined) as Record<string, unknown> | undefined;
+  const columns = toObjectArray(columnsContainer?.Column);
+  const index: RegisterColumnIndex = {};
+  columns.forEach((column, position) => {
+    const title = (toNullableString(column.ColTitle) ?? '').trim().toLowerCase();
+    const type = (toNullableString(column.ColType) ?? '').trim().toLowerCase();
+    const assign = (key: keyof RegisterColumnIndex) => {
+      if (index[key] == null) index[key] = position;
+    };
+    if (!title && !type) return;
+    if (type === 'tx_date' || /^date$/.test(title) || /\bdate\b/.test(title)) {
+      assign('date');
+      return;
+    }
+    if (type === 'txn_type' || /\btype\b/.test(title) || /transaction\s*type/.test(title)) {
+      assign('txnType');
+      return;
+    }
+    if (type === 'doc_num' || /\b(num|no\.?|doc)\b/.test(title) || /^#$/.test(title)) {
+      assign('docNum');
+      return;
+    }
+    if (type === 'name' || /\bname\b/.test(title) || /\bpayee\b/.test(title)) {
+      assign('name');
+      return;
+    }
+    if (type === 'memo' || /\bmemo\b/.test(title) || /\bdescription\b/.test(title)) {
+      assign('memo');
+      return;
+    }
+    if (type === 'account' || /split\s*account/.test(title) || /\baccount\b/.test(title)) {
+      assign('splitAccount');
+      return;
+    }
+    if (/\bdebit\b/.test(title)) {
+      assign('debit');
+      return;
+    }
+    if (/\bcredit\b/.test(title)) {
+      assign('credit');
+      return;
+    }
+    if (/\bbalance\b/.test(title)) {
+      assign('balance');
+      return;
+    }
+    if (/\bamount\b/.test(title) || type === 'amount') {
+      assign('amount');
+    }
+  });
+  return index;
+};
+
+const FALLBACK_REGISTER_COLUMN_INDEX: RegisterColumnIndex = {
+  date: 0,
+  txnType: 1,
+  docNum: 2,
+  name: 3,
+  memo: 4,
+  splitAccount: 5,
+  debit: 6,
+  credit: 7,
+  balance: 8
+};
+
+const readColumnValue = <T>(
+  colData: Array<Record<string, unknown>>,
+  position: number | undefined,
+  reader: (raw: unknown) => T | null
+): T | null => {
+  if (position == null) return null;
+  const cell = colData[position];
+  if (!cell) return null;
+  return reader(cell.value);
+};
+
 const parseRegisterRows = (
   accountId: string,
   rows: unknown,
-  sort: 'date' | '-date' | 'amount' | '-amount'
+  sort: 'date' | '-date' | 'amount' | '-amount',
+  columnIndex: RegisterColumnIndex = FALLBACK_REGISTER_COLUMN_INDEX
 ) => {
   const parsed: QuickBooksAccountRegisterResponse['items'] = [];
+  const hasAnyMappedColumn = Object.values(columnIndex).some((position) => position != null);
+  const effectiveIndex = hasAnyMappedColumn ? columnIndex : FALLBACK_REGISTER_COLUMN_INDEX;
   const visit = (items: unknown, path: string[] = []) => {
     for (const row of toObjectArray(items)) {
       const header = readColData(row.Header);
@@ -1000,20 +1171,49 @@ const parseRegisterRows = (
       const colData = readColData(row);
 
       if (colData.length > 0) {
-        const txnDate = toNullableString(colData[0]?.value) ?? null;
-        const txnType = toNullableString(colData[1]?.value) ?? null;
-        const docNum = toNullableString(colData[2]?.value) ?? null;
-        const name = toNullableString(colData[3]?.value) ?? null;
-        const memo = toNullableString(colData[4]?.value) ?? null;
-        const splitAccount = toNullableString(colData[5]?.value) ?? null;
-        const debit = toNumber(colData[6]?.value);
-        const credit = toNumber(colData[7]?.value);
-        const balance = toNumber(colData[8]?.value);
+        const txnDate = readColumnValue(colData, effectiveIndex.date, toNullableString);
+        const txnType = readColumnValue(colData, effectiveIndex.txnType, toNullableString);
+        const docNum = readColumnValue(colData, effectiveIndex.docNum, toNullableString);
+        const name = readColumnValue(colData, effectiveIndex.name, toNullableString);
+        const memo = readColumnValue(colData, effectiveIndex.memo, toNullableString);
+        const splitAccount = readColumnValue(colData, effectiveIndex.splitAccount, toNullableString);
+        let debit = readColumnValue(colData, effectiveIndex.debit, toNumber);
+        let credit = readColumnValue(colData, effectiveIndex.credit, toNumber);
+        const explicitAmount = readColumnValue(colData, effectiveIndex.amount, toNumber);
+        const balance = readColumnValue(colData, effectiveIndex.balance, toNumber);
+
+        // Defensive: some QB layouts populate both Debit and Credit with the
+        // same value (the gross amount) instead of placing it in only one
+        // direction. In that case, treat the row as a debit when there is no
+        // signed Amount column to disambiguate.
+        if (debit != null && credit != null && Math.abs(debit - credit) < 0.005) {
+          if (explicitAmount != null) {
+            if (explicitAmount > 0) credit = null;
+            else if (explicitAmount < 0) debit = null;
+            else credit = null;
+          } else {
+            credit = null;
+          }
+        }
         const txnId =
           toNullableString((row as Record<string, unknown>).Id) ??
           [txnDate ?? '', txnType ?? '', docNum ?? '', memo ?? '', String(parsed.length + 1)].join(':');
 
-        if (txnDate || txnType || docNum || memo || name || debit != null || credit != null) {
+        // Net signed amount: prefer the report's own Amount column when QB
+        // provides one (some reports duplicate it across debit/credit), otherwise
+        // fall back to debit (positive) or credit (negative).
+        const netAmount =
+          explicitAmount != null
+            ? explicitAmount
+            : debit != null && credit != null
+              ? debit - credit
+              : debit != null
+                ? debit
+                : credit != null
+                  ? -credit
+                  : null;
+
+        if (txnDate || txnType || docNum || memo || name || debit != null || credit != null || explicitAmount != null) {
           parsed.push({
             id: txnId,
             accountId,
@@ -1024,7 +1224,7 @@ const parseRegisterRows = (
             name,
             memo,
             splitAccount: splitAccount ?? (nextPath.length > 0 ? nextPath[nextPath.length - 1] : null),
-            amount: debit != null ? debit : credit != null ? -credit : null,
+            amount: netAmount,
             debit,
             credit,
             balance
@@ -1076,10 +1276,12 @@ export const getQuickBooksAccountRegister = async (args: {
     }
   })) as Record<string, unknown>;
 
+  const columnIndex = buildRegisterColumnIndex(raw);
   let rows = parseRegisterRows(
     args.accountId,
     (raw.Rows as Record<string, unknown> | undefined)?.Row ?? [],
-    args.sort
+    args.sort,
+    columnIndex
   );
 
   if (args.search) {

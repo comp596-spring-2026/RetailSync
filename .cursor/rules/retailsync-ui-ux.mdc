@@ -1,0 +1,54 @@
+---
+description: RetailSync UI/UX Guidelines and Wireframe Rules for Autonomous Development
+globs: ["client/src/**/*.tsx", "client/src/**/*.ts"]
+---
+
+# RetailSync UI/UX Agent Guidelines
+
+## Context of Use
+RetailSync uses **Material-UI (MUI)**. All layouts, spacing, themes, and interactive states should strictly adhere to MUI components (`Stack`, `Box`, `Grid2`, `Paper`, `Button`, `Typography`, etc.).
+
+This rule is a visual consistency guide only.
+It does NOT override:
+
+- `.agents/PROJECT-TRUTH.md`
+- workspace ownership rules
+- auth page simplicity
+- QuickBooks hub + child-page hierarchy
+- statements-first accounting
+
+## 1. Visual Hierarchy & Global Rules
+1. **Never use raw HTML/CSS divs** for layout unless explicitly required. Use `<Stack />` for 1D alignments and `<Grid2 />` or `<Box />` for 2D.
+2. **Page Headers**: Most app workspaces should begin with a clear top-level header such as `<PageHeader ... />`, but do not force this on simplified auth surfaces or on child pages that intentionally use a back-to-parent hierarchy.
+3. **Card-Based UI**: Wrap data aggregates in `<Paper>` or `<Card>` components. Separate logical boundaries with `border` or `box-shadow` properties native to MUI.
+4. **Spacing**: Rely on the MUI spacing multiplier (e.g., `<Stack spacing={2}>` which equates to 16px).
+5. **Responsiveness**: 
+   - Never strictly define horizontal pixel widths (e.g., `width: 500px`) unless inside a popup Dialog.
+   - For table heavy views, always implement horizontal scrolling (`overflowX: 'auto'`) or Card-Stacks on `{ xs: ... }` breakpoints.
+
+## 2. Structural Wireframes for Core Modules
+For complete autonomous generation, reference the exact table structures in `docs/wireframes/*`.
+
+### General Page Structure Pattern
+```tsx
+<Stack spacing={2.5}>
+  <PageHeader title="Module Name" subtitle="Explanation of what this view does." icon={<Icon />} />
+  
+  {/* Control Strip / Filter Strip */}
+  <Paper sx={{ p: 2 }}>
+    <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
+       {/* Filters */}
+    </Stack>
+  </Paper>
+
+  {/* Main Content Area */}
+  <Grid container spacing={2}>
+    {/* Body */}
+  </Grid>
+</Stack>
+```
+
+## 3. UI Flow Perfection
+- **Empty States**: If a table or array is empty, always use `<LoadingEmptyStateWrapper>` or an equivalent informative prompt to guide the user on how to add data.
+- **Button Feedback**: Any action modifying state must use a loading spinner inside the button (`startIcon={<CircularProgress size={16} />}`) and disabled conditions.
+- **Form Control**: Wrap forms inside `<Paper>` with tight (`p={3}`) bounds. Field interactions must use clear visual boundaries.

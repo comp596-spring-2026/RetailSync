@@ -6,6 +6,7 @@ const statusValues = [
   'extracting',
   'structuring',
   'checks_queued',
+  'needs_parser_review',
   'ready_for_review',
   'failed'
 ] as const;
@@ -15,7 +16,7 @@ const progressSchema = new Schema(
   {
     phase: {
       type: String,
-      enum: ['uploaded', 'extracting', 'structuring', 'checks_queued', 'ready_for_review', 'failed'],
+      enum: ['uploaded', 'extracting', 'structuring', 'checks_queued', 'needs_parser_review', 'ready_for_review', 'failed'],
       default: 'uploaded'
     },
     totalChecks: { type: Number, default: 0 },
@@ -35,6 +36,7 @@ const stageTimestampsSchema = new Schema(
     extractingAt: { type: String, required: false },
     structuringAt: { type: String, required: false },
     checksQueuedAt: { type: String, required: false },
+    parserReviewAt: { type: String, required: false },
     readyForReviewAt: { type: String, required: false },
     failedAt: { type: String, required: false }
   },
@@ -50,12 +52,40 @@ const statementArtifactsSchema = new Schema(
     checksClearedTablePath: { type: String, required: false },
     transactionSectionsPath: { type: String, required: false },
     extractedChecksPath: { type: String, required: false },
+    extractedChecksFinalizingAt: { type: String, required: false },
+    extractedChecksFinalizedAt: { type: String, required: false },
+    classificationOutputPath: { type: String, required: false },
+    suggestionsOutputPath: { type: String, required: false },
+    processingSummaryPath: { type: String, required: false },
+    structuredStatementPath: { type: String, required: false },
+    evidencePath: { type: String, required: false },
+    validationReportPath: { type: String, required: false },
     geminiPath: { type: String, required: false },
     detectionEvidence: { type: String, required: false },
     detectedStatementMonth: { type: String, required: false },
     detectedStatementDate: { type: String, required: false },
     autoAppliedStatementMonth: { type: Boolean, default: false },
     stageTimestamps: { type: stageTimestampsSchema, default: () => ({}) }
+  },
+  { _id: false }
+);
+
+const monthCloseGatesSchema = new Schema(
+  {
+    rowsReviewed: { type: Boolean, default: false },
+    noBlockingExtractionFailures: { type: Boolean, default: false },
+    noMandatoryUnknowns: { type: Boolean, default: false },
+    noPendingMandatorySuggestionDecisions: { type: Boolean, default: false }
+  },
+  { _id: false }
+);
+
+const monthCloseSchema = new Schema(
+  {
+    status: { type: String, enum: ['open', 'completed'], default: 'open' },
+    completedAt: { type: String, required: false },
+    completedBy: { type: Schema.Types.ObjectId, ref: 'User', required: false },
+    gates: { type: monthCloseGatesSchema, default: () => ({}) }
   },
   { _id: false }
 );
@@ -76,12 +106,15 @@ const bankStatementSchema = new Schema(
     periodEnd: { type: String, required: false },
     bankName: { type: String, required: false },
     accountLast4: { type: String, required: false },
+    bankAccountId: { type: String, required: false },
     gcs: {
       rootPrefix: { type: String, required: true },
       pdfPath: { type: String, required: true }
     },
     progress: { type: progressSchema, default: () => ({}) },
     artifacts: { type: statementArtifactsSchema, default: () => ({}) },
+    monthClose: { type: monthCloseSchema, default: () => ({}) },
+    validationReport: { type: Schema.Types.Mixed, required: false },
     hash: { type: String, required: false, index: true },
     issues: { type: [String], default: [] },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true }

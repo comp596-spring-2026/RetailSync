@@ -1,0 +1,11 @@
+---
+description: RetailSync security and tenancy specialist guidance
+globs: server/src/middleware/**,server/src/models/plugins/**,server/src/controllers/auth*.ts,server/src/controllers/**,shared/src/permissions/**
+alwaysApply: false
+---
+
+# RetailSync security and tenancy
+
+- Follow `.agents/security-tenancy/AGENTS.md`.
+- Preserve tenant isolation and server-side permission enforcement.
+- Treat auth/session behavior as a cross-cutting safety concern, not just a feature concern.

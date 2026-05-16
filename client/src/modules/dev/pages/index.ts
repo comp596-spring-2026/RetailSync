@@ -10,3 +10,4 @@ export {
   ServerErrorPage,
   UnauthorizedPage
 } from './errors';
+export { ArchitecturePage } from './ArchitecturePage';

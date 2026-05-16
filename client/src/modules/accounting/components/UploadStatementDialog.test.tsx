@@ -11,6 +11,7 @@ vi.mock('../api', () => ({
     getStatementStatus: vi.fn(),
     createStatement: vi.fn(),
     reprocessStatement: vi.fn(),
+    getStatementMonthSummary: vi.fn().mockRejectedValue({ response: { status: 404 } })
   },
 }));
 
@@ -99,14 +100,12 @@ describe('UploadStatementDialog', () => {
     await waitFor(() => {
       expect(screen.getByDisplayValue('2025-12')).toBeInTheDocument();
     });
-    expect((await screen.findAllByText(/December 2025/i)).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Dec 2025 bank statement/i)).toBeInTheDocument();
     expect(screen.getByDisplayValue('2025-12')).toBeInTheDocument();
-    expect(screen.getByText(/Auto-applied/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Dec 2025 from the PDF/i)).toBeInTheDocument();
     expect(screen.queryByText(/Confidence:/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Source:/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Evidence preview:/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/1. Select PDF/i)).toBeInTheDocument();
-    expect(screen.getByText(/6. Review outputs/i)).toBeInTheDocument();
   });
 
   it('supports drag and drop and uploads using the detected month', async () => {
@@ -194,7 +193,7 @@ describe('UploadStatementDialog', () => {
     await waitFor(() => {
       expect(screen.getByDisplayValue('2025-12')).toBeInTheDocument();
     });
-    expect((await screen.findAllByText(/December 2025/i)).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Dec 2025 from the PDF/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Upload & Start/i }));
 
@@ -214,18 +213,12 @@ describe('UploadStatementDialog', () => {
         source: 'upload',
       }),
     );
-    expect(getStatementStatusMock).toHaveBeenCalledWith('statement-a');
     expect(axiosPutMock).toHaveBeenCalledTimes(1);
     expect(onUploaded).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('shows a processing state while waiting for extraction to advance', async () => {
-    let statusResolver!: (value: StatementStatusResponse) => void;
-    const statusPromise = new Promise<StatementStatusResponse>((resolve) => {
-      statusResolver = resolve;
-    });
-
+  it('closes immediately after statement save starts processing', async () => {
     detectStatementMonthMock.mockResolvedValue({
       data: { data: detectedMonthPayload },
     } as never);
@@ -264,13 +257,33 @@ describe('UploadStatementDialog', () => {
         },
       },
     } as never);
-    getStatementStatusMock.mockReturnValue(statusPromise as never);
+    getStatementStatusMock.mockResolvedValue({
+      data: {
+        data: {
+          statementId: 'statement-a',
+          status: 'extracting',
+          progress: {
+            phase: 'extracting',
+            totalChecks: 0,
+            checksQueued: 0,
+            checksProcessing: 0,
+            checksReady: 0,
+            checksFailed: 0,
+            completedChecks: 0,
+            remainingChecks: 0,
+          },
+          updatedAt: '2026-03-18T18:52:02.000Z',
+          issues: [],
+        },
+      },
+    } as never);
     axiosPutMock.mockResolvedValue({} as never);
+    const onClose = vi.fn();
 
     render(
       <UploadStatementDialog
         open
-        onClose={vi.fn()}
+        onClose={onClose}
         onUploaded={vi.fn().mockResolvedValue(undefined)}
       />,
     );
@@ -287,30 +300,8 @@ describe('UploadStatementDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Upload & Start/i }));
 
-    expect(await screen.findByText(/Processing statement/i)).toBeInTheDocument();
-    expect(screen.getByText(/Extracting statement pages and text/i)).toBeInTheDocument();
-    expect(screen.getByText(/Phase: Extracting/i)).toBeInTheDocument();
-
-    statusResolver({
-      data: {
-        data: {
-          statementId: 'statement-a',
-          status: 'structuring',
-          progress: {
-            phase: 'structuring',
-            totalChecks: 0,
-            checksQueued: 0,
-            checksProcessing: 0,
-            checksReady: 0,
-            checksFailed: 0,
-            completedChecks: 0,
-            remainingChecks: 0,
-          },
-          updatedAt: '2026-03-18T18:52:02.000Z',
-          issues: [],
-        },
-      },
-    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/^Processing$/i)).not.toBeInTheDocument();
   });
 
   it('shows a helpful error when direct storage upload is blocked', async () => {
@@ -361,7 +352,7 @@ describe('UploadStatementDialog', () => {
     expect(createStatementMock).not.toHaveBeenCalled();
   });
 
-  it('retries statement creation without re-uploading when finalize fails after upload', async () => {
+  it('closes the dialog after upload and surfaces finalize failure via onSaveError', async () => {
     detectStatementMonthMock.mockResolvedValue({
       data: { data: detectedMonthPayload },
     } as never);
@@ -377,70 +368,26 @@ describe('UploadStatementDialog', () => {
       },
     } as never);
     axiosPutMock.mockResolvedValue({} as never);
-    createStatementMock
-      .mockRejectedValueOnce(
-        new AxiosError(
-          'statement_queue_failed',
-          {
-            data: {
-              message: 'statement_queue_failed',
-            },
-          } as never,
-        ) as never
-      )
-      .mockResolvedValueOnce({
-        data: {
+    createStatementMock.mockRejectedValue(
+      new AxiosError(
+        'statement_queue_failed',
+        {
           data: {
-            statement: {
-              id: 'statement-a',
-              statementMonth: '2025-12',
-              fileName: 'testStatmentPDF.pdf',
-              source: 'upload',
-              status: 'extracting',
-              progress: {
-                phase: 'extracting',
-                totalChecks: 0,
-                checksQueued: 0,
-                checksProcessing: 0,
-                checksReady: 0,
-                checksFailed: 0,
-                completedChecks: 0,
-                remainingChecks: 0,
-              },
-              issuesCount: 0,
-              updatedAt: '2026-03-18T18:51:49.113Z',
-              createdAt: '2026-03-18T18:51:49.113Z',
-            },
-            queue: null,
+            message: 'statement_queue_failed',
           },
-        },
-      } as never);
-    getStatementStatusMock.mockResolvedValue({
-      data: {
-        data: {
-          statementId: 'statement-a',
-          status: 'structuring',
-          progress: {
-            phase: 'structuring',
-            totalChecks: 0,
-            checksQueued: 0,
-            checksProcessing: 0,
-            checksReady: 0,
-            checksFailed: 0,
-            completedChecks: 0,
-            remainingChecks: 0,
-          },
-          updatedAt: '2026-03-18T18:52:02.000Z',
-          issues: [],
-        },
-      },
-    } as never);
+        } as never,
+      ) as never,
+    );
+
+    const onClose = vi.fn();
+    const onSaveError = vi.fn();
 
     render(
       <UploadStatementDialog
         open
-        onClose={vi.fn()}
+        onClose={onClose}
         onUploaded={vi.fn().mockResolvedValue(undefined)}
+        onSaveError={onSaveError}
       />,
     );
 
@@ -457,20 +404,17 @@ describe('UploadStatementDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Upload & Start/i }));
 
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(createStatementMock).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole('button', { name: /Retry Save/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Retry processing/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(onSaveError).toHaveBeenCalledTimes(1));
+    expect(typeof onSaveError.mock.calls[0][0]).toBe('string');
+    expect(onSaveError.mock.calls[0][0].length).toBeGreaterThan(0);
     expect(axiosPutMock).toHaveBeenCalledTimes(1);
     expect(requestUploadUrlMock).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole('button', { name: /Retry Save/i }));
-
-    await waitFor(() => expect(createStatementMock).toHaveBeenCalledTimes(2));
-    expect(axiosPutMock).toHaveBeenCalledTimes(1);
-    expect(requestUploadUrlMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /Retry Save/i })).not.toBeInTheDocument();
   });
 
-  it('can restart processing when extraction appears stuck or failed', async () => {
+  it('does not block upload flow waiting for extraction retries in dialog', async () => {
     detectStatementMonthMock.mockResolvedValue({
       data: { data: detectedMonthPayload },
     } as never);
@@ -513,73 +457,33 @@ describe('UploadStatementDialog', () => {
         },
       },
     } as never);
-    getStatementStatusMock
-      .mockResolvedValueOnce({
+    getStatementStatusMock.mockResolvedValue({
+      data: {
         data: {
-          data: {
-            statementId: 'statement-a',
-            status: 'failed',
-            progress: {
-              phase: 'failed',
-              totalChecks: 0,
-              checksQueued: 0,
-              checksProcessing: 0,
-              checksReady: 0,
-              checksFailed: 0,
-              completedChecks: 0,
-              remainingChecks: 0,
-            },
-            updatedAt: '2026-03-18T18:52:02.000Z',
-            issues: ['Extraction failed'],
+          statementId: 'statement-a',
+          status: 'failed',
+          progress: {
+            phase: 'failed',
+            totalChecks: 0,
+            checksQueued: 0,
+            checksProcessing: 0,
+            checksReady: 0,
+            checksFailed: 0,
+            completedChecks: 0,
+            remainingChecks: 0,
           },
+          updatedAt: '2026-03-18T18:52:02.000Z',
+          issues: ['Extraction failed'],
         },
-      } as never)
-      .mockResolvedValueOnce({
-        data: {
-          data: {
-            statementId: 'statement-a',
-            status: 'extracting',
-            progress: {
-              phase: 'extracting',
-              totalChecks: 0,
-              checksQueued: 0,
-              checksProcessing: 0,
-              checksReady: 0,
-              checksFailed: 0,
-              completedChecks: 0,
-              remainingChecks: 0,
-            },
-            updatedAt: '2026-03-18T18:53:00.000Z',
-            issues: [],
-          },
-        },
-      } as never)
-      .mockResolvedValueOnce({
-        data: {
-          data: {
-            statementId: 'statement-a',
-            status: 'structuring',
-            progress: {
-              phase: 'structuring',
-              totalChecks: 0,
-              checksQueued: 0,
-              checksProcessing: 0,
-              checksReady: 0,
-              checksFailed: 0,
-              completedChecks: 0,
-              remainingChecks: 0,
-            },
-            updatedAt: '2026-03-18T18:53:30.000Z',
-            issues: [],
-          },
-        },
-      } as never);
+      },
+    } as never);
     reprocessStatementMock.mockResolvedValue({ data: { data: {} } } as never);
+    const onClose = vi.fn();
 
     render(
       <UploadStatementDialog
         open
-        onClose={vi.fn()}
+        onClose={onClose}
         onUploaded={vi.fn().mockResolvedValue(undefined)}
       />,
     );
@@ -597,9 +501,8 @@ describe('UploadStatementDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Upload & Start/i }));
 
-    expect(await screen.findByText(/Extraction failed/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Retry processing/i }));
-
-    await waitFor(() => expect(reprocessStatementMock).toHaveBeenCalledWith('statement-a'));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: /Retry processing/i })).not.toBeInTheDocument();
+    expect(reprocessStatementMock).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 # Accounting Wireframes, Components, and User Lifecycle
 
-Last updated: 2026-03-16
+Last updated: 2026-05-14
 
 This document maps the implemented accounting UI to the server/runtime flow so product, engineering, and QA can reason about the full accounting workspace from the user point of view.
 
@@ -15,14 +15,14 @@ Shared shell:
 
 Primary routes:
 
-| Route | Page component | Purpose |
-| --- | --- | --- |
-| `/dashboard/accounting/statements` | `StatementsPage.tsx` | statement intake and processing queue |
-| `/dashboard/accounting/statements/:statementId` | `StatementDetailPage.tsx` | per-statement check processing progress |
-| `/dashboard/accounting/ledger` | `LedgerPage.tsx` | canonical review and posting surface |
-| `/dashboard/accounting/quickbooks` | `QuickBooksSyncPage.tsx` | OAuth connection, reference refresh, post-approved trigger |
-| `/dashboard/accounting/tax` | `TaxDashboardPage.tsx` | live QuickBooks tax/reporting tools |
-| `/dashboard/accounting/observability` | `ObservabilityPage.tsx` | health, failed runs, debug actions |
+| Route                                           | Page component            | Purpose                                                           |
+| ----------------------------------------------- | ------------------------- | ----------------------------------------------------------------- |
+| `/dashboard/accounting/statements`              | `StatementsPage.tsx`      | statement intake and processing queue                             |
+| `/dashboard/accounting/statements/:statementId` | `StatementDetailPage.tsx` | per-statement month-close review, suggestions, and check progress |
+| `/dashboard/accounting/ledger`                  | `LedgerPage.tsx`          | canonical review and posting surface                              |
+| `/dashboard/accounting/quickbooks`              | `QuickBooksSyncPage.tsx`  | OAuth connection, reference refresh, post-approved trigger        |
+| `/dashboard/accounting/tax`                     | `TaxDashboardPage.tsx`    | live QuickBooks tax/reporting tools                               |
+| `/dashboard/accounting/observability`           | `ObservabilityPage.tsx`   | health, failed runs, debug actions                                |
 
 ```mermaid
 flowchart LR
@@ -52,15 +52,29 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  A["Enter Accounting workspace"] --> B["QuickBooks Sync: connect + choose sandbox/production"]
-  B --> C["Refresh reference data"]
-  C --> D["Statements: upload PDF"]
-  D --> E["Statement detail: watch extract/structure/check progress"]
-  E --> F["Ledger: review proposals, approve or exclude"]
-  F --> G["QuickBooks Sync or Ledger: post approved rows"]
-  G --> H["Tax: inspect live reports, payments, ledger, adjustments"]
-  H --> I["Observability: inspect failed runs, retries, environment readiness"]
+  A["Enter Accounting workspace"] --> B["Statements: upload PDF"]
+  B --> C["Upload successful + backend processing started"]
+  C --> D["Frontend polls status (live or waiting)"]
+  D --> E["Month-close workspace: entries, suggestions, artifacts"]
+  E --> F{"Completion gates all pass?"}
+  F -- No --> E
+  F -- Yes --> G["Complete Month"]
+  G --> H["Ledger / QuickBooks posting workflow"]
+  H --> I["Tax + Observability follow-up"]
 ```
+
+### 2A) Stage name mapping (spec vs runtime)
+
+The task brief uses conceptual stage names; runtime status still uses statement status values.
+
+| Conceptual stage                 | Current runtime status/events                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------- |
+| `statement_ingest`               | upload URL + `POST /statements` create record (`uploaded`)                            |
+| `statement_extract_text`         | `statement.extract` (`extracting`)                                                    |
+| `statement_extract_rows`         | early `statement.structure` (`structuring`)                                           |
+| `statement_classify_rows`        | `statement.structure` classification output artifacts                                 |
+| `statement_generate_suggestions` | `statement.structure` suggestion output artifacts                                     |
+| `statement_finalize_artifacts`   | end of `statement.structure` + checks pipeline (`checks_queued` / `ready_for_review`) |
 
 ## 3) Statements list
 
@@ -73,9 +87,11 @@ Main UI pieces:
 
 - filter toolbar: month, status, search, apply
 - primary action: `Upload PDF`
-- statements table: month, file, status, check progress, updated time, actions
-- row actions: `Open`, `Open Ledger`, `Reprocess`
+- stage lanes: `Queued`, `Running`, `Attention`, `Ready`
+- statement workflow cards with compact progress chips and primary/secondary actions
+- row actions: `Open workspace`, `Open ledger`, `Reprocess`, `Delete`
 - auto-polling every 3 seconds while rows are in `extracting`, `structuring`, or `checks_queued`
+- upload dialog now reports: upload success, backend-started state, waiting-for-backend state, and live status refresh
 
 ```text
 [PageHeader: Bank Statements]
@@ -85,9 +101,18 @@ Main UI pieces:
 [Filter Paper]
   Month | Status | Search file | Apply | Upload PDF
 
-[Statements Table]
-  Month | File | Status chip | Checks Progress | Updated | Actions
-  2026-03 | march.pdf | extracting | total/queued/processing/ready/failed | time | Open | Open Ledger | Reprocess
+[Workflow Lanes]
+  Queued
+  Running
+  Attention
+  Ready
+
+[Statement workflow card]
+  File name + month + updated time
+  Status chip
+  Stage summary
+  Checks/progress chips
+  Open workspace | Open ledger | Reprocess | Delete
 
 [UploadStatementDialog]
   Statement Month
@@ -99,17 +124,20 @@ Main UI pieces:
 ```mermaid
 flowchart TD
   A["Open Statements"] --> B["Load /api/accounting/statements"]
-  B --> C["Apply filters or search"]
-  C --> D["Upload PDF"]
+  B --> C["Upload PDF in dialog"]
+  C --> D["Detect month from PDF"]
   D --> E["Request signed upload URL"]
-  E --> F["PUT PDF to GCS"]
-  F --> G["Create BankStatement"]
-  G --> H["Auto-poll list while processing"]
-  H --> I["Open statement detail or ledger"]
-  H --> J["Reprocess failed statement"]
+  E --> F["PUT PDF to bucket"]
+  F --> G["POST /accounting/statements"]
+  G --> H["Show: upload successful + backend started"]
+  H --> I["Poll /statements/:id/status"]
+  I --> J{"status fetch failed?"}
+  J -- Yes --> K["Show waiting for backend update + keep polling"]
+  J -- No --> L["Show phase/progress/issues + original/check image preview"]
+  L --> M["Open statement detail"]
 ```
 
-## 4) Statement detail
+## 4) Statement detail (month-close workspace)
 
 File:
 
@@ -117,8 +145,15 @@ File:
 
 Main UI pieces:
 
-- header card with file name, update time, status, progress counts
+- header card with file name, update time, status, progress counts, month-close status
+- explicit `Now / Next` guidance in the page header copy
 - issues alert for statement-level warnings/failures
+- extracted entries section (month-close)
+- suggestion review section with approve/exclude actions
+- workspace tabs: `Overview`, `Suggestions`, `Rules`, `File Manager`
+- completion checklist (server gates) + `Complete Month`
+- dedicated pipeline stage timeline panel
+- dedicated artifact metadata panels (statement + selected check)
 - check cards sorted roughly by active-first order
 - card fields: status chip, confidence, check number, date, payee, amount, front artifact path, match reasons
 - action: `Retry` when a check has failed and the user has edit permission
@@ -132,10 +167,33 @@ Main UI pieces:
   File name
   Updated at
   Status
-  Back | Open Ledger Review
+  Month-close status
+  Back | Open Ledger Review | Complete Month
   Checks total | queued | processing | ready | failed
 
 [Optional issues alert]
+
+[Workspace Tabs]
+  Overview | Suggestions | Rules | File Manager
+
+[Overview tab]
+  [Now & Next summary]
+  [Extracted entries table]
+  [Completion gates checklist]
+  [Artifact summary]
+
+[Suggestions tab]
+  [Suggestion review table]
+  [Approve / Exclude / Transfer resolution]
+
+[Rules tab]
+  [Saved rules]
+  [Create soft/hard rule from reviewed transaction]
+
+[File Manager tab]
+  [Source PDF]
+  [OCR text / OCR JSON]
+  [Transactions / checks-cleared / validation artifacts]
 
 [Check Card Grid]
   [Check ABC123] [status chip]
@@ -151,13 +209,18 @@ Main UI pieces:
 
 ```mermaid
 flowchart TD
-  A["Open statement detail"] --> B["GET statement + checks"]
-  B --> C{"Statement in flight?"}
-  C -- Yes --> D["Poll every 3s"]
-  C -- No --> E["Render stable detail"]
-  D --> F["Check cards move queued -> processing -> ready/needs_review/failed"]
-  F --> G["Retry failed check"]
-  E --> H["Open Ledger Review when ready_for_review"]
+  A["Open statement detail"] --> B["GET statement summary + entries + checks"]
+  B --> C["Render month-close workspace"]
+  C --> D["Review extracted entries"]
+  C --> E["Review suggestions (approve/exclude)"]
+  C --> F["Inspect artifacts (statement + check images)"]
+  D --> G["Update entry review status"]
+  E --> H["Update suggestion review status"]
+  G --> I["Recompute completion gates"]
+  H --> I
+  I --> J{"All gates pass?"}
+  J -- No --> C
+  J -- Yes --> K["Complete Month"]
 ```
 
 ## 5) Ledger
@@ -205,6 +268,11 @@ flowchart TD
   I --> J["Post Approved"]
   J --> K["Queue quickbooks.post_approved"]
 ```
+
+Current scenario note:
+- statement detail is the primary accounting review surface
+- ledger remains the canonical downstream posting surface
+- QuickBooks posting is still triggered from ledger/QuickBooks workflows, not directly from statement detail
 
 ## 6) QuickBooks Sync
 
@@ -375,15 +443,15 @@ flowchart TD
 
 ## 9) Component ownership map
 
-| Concern | Main client files | Main server files |
-| --- | --- | --- |
-| Workspace shell | `client/src/modules/accounting/components/AccountingTabs.tsx` | n/a |
-| Statements intake | `StatementsPage.tsx`, `UploadStatementDialog.tsx` | `accountingController.ts`, `accountingRoutes.ts` |
-| Statement processing detail | `StatementDetailPage.tsx` | `accountingTaskRunner.ts`, `StatementCheck.ts`, `BankStatement.ts` |
-| Ledger review/posting | `LedgerPage.tsx` | `ledgerController.ts`, `ledgerRoutes.ts`, `LedgerEntry.ts`, `quickbooksSyncService.ts` |
-| QuickBooks connection/sync | `QuickBooksSyncPage.tsx` | `quickbooksController.ts`, `quickbooksIntegrationRoutes.ts`, `quickbooksService.ts`, `quickbooksSyncService.ts` |
-| Tax tools | `TaxDashboardPage.tsx` | `quickbooksTaxController.ts`, `quickbooksTaxService.ts` |
-| Observability | `ObservabilityPage.tsx` | `accountingObservabilityController.ts`, `Run.ts` |
+| Concern                                   | Main client files                                             | Main server files                                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Workspace shell                           | `client/src/modules/accounting/components/AccountingTabs.tsx` | n/a                                                                                                                      |
+| Statements intake                         | `StatementsPage.tsx`, `UploadStatementDialog.tsx`             | `accountingController.ts`, `accountingRoutes.ts`                                                                         |
+| Statement processing + month-close detail | `StatementDetailPage.tsx`                                     | `accountingController.ts`, `accountingTaskRunner.ts`, `StatementCheck.ts`, `BankStatement.ts`, `StatementTransaction.ts` |
+| Ledger review/posting                     | `LedgerPage.tsx`                                              | `ledgerController.ts`, `ledgerRoutes.ts`, `LedgerEntry.ts`, `quickbooksSyncService.ts`                                   |
+| QuickBooks connection/sync                | `QuickBooksSyncPage.tsx`                                      | `quickbooksController.ts`, `quickbooksIntegrationRoutes.ts`, `quickbooksService.ts`, `quickbooksSyncService.ts`          |
+| Tax tools                                 | `TaxDashboardPage.tsx`                                        | `quickbooksTaxController.ts`, `quickbooksTaxService.ts`                                                                  |
+| Observability                             | `ObservabilityPage.tsx`                                       | `accountingObservabilityController.ts`, `Run.ts`                                                                         |
 
 ## 10) Practical reading order
 

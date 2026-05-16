@@ -7,11 +7,18 @@ import { setRequestContext } from '../config/requestContext';
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer ')) {
+    const headerToken = auth && auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : null;
+    const streamQueryToken =
+      req.method === 'GET' && /\/accounting\/statements\/[^/]+\/stream$/.test(req.originalUrl.split('?')[0] ?? '')
+        ? typeof req.query.access_token === 'string'
+          ? req.query.access_token
+          : null
+        : null;
+    const token = headerToken ?? streamQueryToken;
+    if (!token) {
       return fail(res, 'Unauthorized', 401);
     }
 
-    const token = auth.slice('Bearer '.length);
     const payload = verifyAccessToken(token);
     const user = await UserModel.findById(payload.sub).select('_id email companyId roleId isActive');
 

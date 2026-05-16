@@ -1,0 +1,12 @@
+---
+description: RetailSync release and documentation specialist guidance
+globs: README.md,RELEASE.md,docs/**
+alwaysApply: false
+---
+
+# RetailSync release and docs
+
+- Follow `.agents/release-docs/AGENTS.md`.
+- Docs must reflect the active product surface, not stale roadmap intent.
+- Do not present inventory as active or procurement as release-ready.
+- Keep route, workspace, and test-confidence language honest.

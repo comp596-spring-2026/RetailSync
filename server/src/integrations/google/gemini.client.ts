@@ -1,4 +1,5 @@
 import { env } from '../../config/env';
+import { sleep, withRetries } from '../common/retry';
 
 export type GeminiContentPart = {
   text: string;
@@ -29,12 +30,15 @@ export class GeminiClientError extends Error {
 
   statusCode?: number;
 
+  retryAfterMs?: number;
+
   constructor(
     code: string,
     message: string,
     options: {
       retryable?: boolean;
       statusCode?: number;
+      retryAfterMs?: number;
       cause?: unknown;
     } = {}
   ) {
@@ -43,6 +47,7 @@ export class GeminiClientError extends Error {
     this.code = code;
     this.retryable = Boolean(options.retryable ?? false);
     this.statusCode = options.statusCode;
+    this.retryAfterMs = options.retryAfterMs;
     if (options.cause instanceof Error && options.cause.stack) {
       this.stack = `${this.stack}\nCaused by: ${options.cause.stack}`;
     }
@@ -88,37 +93,69 @@ export const buildGeminiEndpoint = (args: { endpoint?: string; model?: string; a
   return `${endpoint}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 };
 
-export const generateGeminiContent = async (args: GeminiGenerateContentArgs): Promise<GeminiGenerateContentResult> => {
+const parseRetryAfterMs = (value: string | null) => {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(30_000, seconds * 1000);
+  }
+
+  const dateMs = Date.parse(value);
+  if (!Number.isNaN(dateMs)) {
+    return Math.min(30_000, Math.max(0, dateMs - Date.now()));
+  }
+
+  return undefined;
+};
+
+const retryDelayMs = (error: GeminiClientError, attempt: number) =>
+  error.retryAfterMs ?? Math.min(5000, 250 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 150);
+
+const requestGeminiContentOnce = async (
+  args: GeminiGenerateContentArgs
+): Promise<GeminiGenerateContentResult> => {
   const timeoutMs = args.timeoutMs ?? env.statementGeminiTimeoutMs;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new GeminiClientError('GEMINI_NOT_CONFIGURED', 'Gemini timeout must be a positive number');
   }
 
   const url = buildGeminiEndpoint(args);
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: args.systemInstruction }]
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
       },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: args.prompt }]
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: args.systemInstruction }]
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: args.prompt }]
+          }
+        ],
+        generationConfig: {
+          temperature: args.temperature ?? env.statementGeminiTemperature,
+          maxOutputTokens: args.maxOutputTokens ?? env.statementGeminiMaxOutputTokens,
+          responseMimeType: args.responseMimeType ?? 'application/json',
+          ...(args.responseJsonSchema ? { responseJsonSchema: args.responseJsonSchema } : {})
         }
-      ],
-      generationConfig: {
-        temperature: args.temperature ?? env.statementGeminiTemperature,
-        maxOutputTokens: args.maxOutputTokens ?? env.statementGeminiMaxOutputTokens,
-        responseMimeType: args.responseMimeType ?? 'application/json',
-        ...(args.responseJsonSchema ? { responseJsonSchema: args.responseJsonSchema } : {})
+      }),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (error) {
+    throw new GeminiClientError(
+      'GEMINI_NETWORK_FAILED',
+      `Gemini request could not be completed: ${error instanceof Error ? error.message : String(error)}`,
+      {
+        retryable: true,
+        cause: error
       }
-    }),
-    signal: AbortSignal.timeout(timeoutMs)
-  });
+    );
+  }
 
   const bodyText = await response.text();
   if (!response.ok) {
@@ -127,7 +164,8 @@ export const generateGeminiContent = async (args: GeminiGenerateContentArgs): Pr
       `Gemini request failed (${response.status}): ${bodyText.trim()}`,
       {
         retryable: response.status >= 500 || response.status === 429,
-        statusCode: response.status
+        statusCode: response.status,
+        retryAfterMs: response.status === 429 ? parseRetryAfterMs(response.headers.get('retry-after')) : undefined
       }
     );
   }
@@ -181,3 +219,15 @@ export const generateGeminiContent = async (args: GeminiGenerateContentArgs): Pr
     raw
   };
 };
+
+export const generateGeminiContent = async (args: GeminiGenerateContentArgs): Promise<GeminiGenerateContentResult> =>
+  withRetries({
+    attempts: 3,
+    shouldRetry: (error, attempt) =>
+      attempt < 3 && error instanceof GeminiClientError && error.retryable,
+    onRetry: async (error, attempt) => {
+      const clientError = error as GeminiClientError;
+      await sleep(retryDelayMs(clientError, attempt));
+    },
+    run: () => requestGeminiContentOnce(args)
+  });

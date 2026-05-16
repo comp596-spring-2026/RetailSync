@@ -1,5 +1,7 @@
 # Data Model and Storage (Accounting)
 
+Last updated: 2026-05-14
+
 ## 1) Storage split
 
 1. GCS stores immutable files and derived artifacts.
@@ -29,7 +31,8 @@ companies/<companyId>/statements/<yyyy>/<mm>/<statementId>/
     checks/
       extracted/
         <checkId>/
-          front.jpg
+          front.png
+          ocr.txt
           ocr.json
           structured.v1.json
 ```
@@ -45,7 +48,7 @@ Purpose: statement-level lifecycle and progress.
 
 Key fields:
 - `companyId`
-- `status`: `uploaded | extracting | structuring | checks_queued | ready_for_review | failed`
+- `status`: `uploaded | extracting | structuring | checks_queued | needs_parser_review | ready_for_review | failed`
 - `gcs.rootPrefix`, `gcs.pdfPath`
 - `progress.totalChecks/checksQueued/checksProcessing/checksReady/checksFailed`
 - `hash` (dedupe signal)

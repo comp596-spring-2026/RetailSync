@@ -1,0 +1,11 @@
+---
+description: RetailSync shared contracts specialist guidance
+globs: shared/src/**
+alwaysApply: false
+---
+
+# RetailSync shared contracts
+
+- Follow `.agents/shared-contracts/AGENTS.md`.
+- Shared changes are cross-layer changes.
+- Verify backend, frontend, and tests whenever shared contracts evolve.

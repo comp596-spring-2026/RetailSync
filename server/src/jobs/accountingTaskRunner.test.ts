@@ -83,9 +83,9 @@ vi.mock('../services/accountingPdfRenderService', () => ({
   renderAndPersistStatementPages: (...args: unknown[]) => renderAndPersistStatementPagesMock(...args)
 }));
 
-const ocrStatementPagesMock = vi.fn();
-vi.mock('../services/accountingStatementOcrService', () => ({
-  ocrStatementPages: (...args: unknown[]) => ocrStatementPagesMock(...args)
+const extractStatementPagesFromPdfBufferMock = vi.fn();
+vi.mock('../services/accountingPdfTextExtractionService', () => ({
+  extractStatementPagesFromPdfBuffer: (...args: unknown[]) => extractStatementPagesFromPdfBufferMock(...args)
 }));
 
 const runStatementCheckExtractionMock = vi.fn();
@@ -96,11 +96,6 @@ vi.mock('../services/accountingCheckExtractionService', () => ({
 const buildMatchingProposalMock = vi.fn();
 vi.mock('../services/matchingEngine', () => ({
   buildMatchingProposal: (...args: unknown[]) => buildMatchingProposalMock(...args)
-}));
-
-const runAccountingGeminiProposalMock = vi.fn();
-vi.mock('../services/accountingGeminiProposalService', () => ({
-  runAccountingGeminiProposal: (...args: unknown[]) => runAccountingGeminiProposalMock(...args)
 }));
 
 vi.mock('../services/quickbooksSyncService', () => ({
@@ -136,6 +131,28 @@ vi.mock('../models/BankStatement', () => ({
         stores.statements.find((statement) => statement._id === id && statement.companyId === companyId) ?? null
       );
     }),
+    findOneAndUpdate: vi.fn((query: Record<string, unknown>, update: Record<string, any>) => {
+      const id = getId(query._id, '');
+      const companyId = String(query.companyId ?? '');
+      const statement = stores.statements.find(
+        (entry) => entry._id === id && entry.companyId === companyId
+      );
+      if (!statement) {
+        return {
+          lean: vi.fn().mockResolvedValue(null)
+        };
+      }
+
+      if (update.$set) {
+        Object.entries(update.$set).forEach(([key, value]) => {
+          assignDeep(statement, key, value);
+        });
+      }
+
+      return {
+        lean: vi.fn().mockResolvedValue(statement)
+      };
+    }),
     create: vi.fn(async (doc: Record<string, any>) => {
       const statement = {
         ...doc,
@@ -164,6 +181,18 @@ vi.mock('../models/BankStatement', () => ({
             cursor = cursor[segment];
           });
           cursor[segments.at(-1) as string] = value;
+        });
+      }
+
+      if (update.$unset) {
+        Object.keys(update.$unset).forEach((key) => {
+          const segments = key.split('.');
+          let cursor: Record<string, any> = statement;
+          segments.slice(0, -1).forEach((segment) => {
+            cursor[segment] = cursor[segment] ?? {};
+            cursor = cursor[segment];
+          });
+          delete cursor[segments.at(-1) as string];
         });
       }
 
@@ -337,8 +366,8 @@ describe('accountingTaskRunner', () => {
       ]
     });
 
-    ocrStatementPagesMock.mockReset();
-    ocrStatementPagesMock.mockResolvedValue([
+    extractStatementPagesFromPdfBufferMock.mockReset();
+    extractStatementPagesFromPdfBufferMock.mockResolvedValue([
       {
         provider: 'vision',
         pageNumber: 1,
@@ -429,41 +458,6 @@ describe('accountingTaskRunner', () => {
       version: 'v1'
     });
 
-    runAccountingGeminiProposalMock.mockReset();
-    runAccountingGeminiProposalMock.mockImplementation(async (args: any) => {
-      const artifactKey = String(args.checkKey ?? 'statement');
-      const artifactBase = args.checkKey
-        ? `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${artifactKey}`
-        : `companies/company-1/statements/2026-01/statement-1/derived/gemini/${artifactKey}`;
-      return {
-        provider: 'gemini',
-        providerStatus: 'healthy',
-        degraded: false,
-        source: 'hybrid',
-        confidence: 0.91,
-        proposal: {
-          ...args.fallbackProposal,
-          confidence: 0.91,
-          reasons: [...(args.fallbackProposal?.reasons ?? []), 'Gemini approved'],
-          status: 'proposed',
-          version: 'v1'
-        },
-        fallbackProposal: args.fallbackProposal,
-        geminiProposal: {
-          qbTxnType: 'Check',
-          payeeName: 'ACME Supplies',
-          confidence: 0.91,
-          reasons: ['Gemini approved'],
-          version: 'v1'
-        },
-        reasons: [...(args.fallbackProposal?.reasons ?? []), 'Gemini approved'],
-        artifacts: {
-          promptPath: `${artifactBase}/proposal.prompt.v1.txt`,
-          rawPath: `${artifactBase}/proposal.raw.v1.json`,
-          normalizedPath: `${artifactBase}/proposal.normalized.v1.json`
-        }
-      };
-    });
   });
 
   it('persists statement, check, and progress artifacts through the pipeline', async () => {
@@ -532,12 +526,13 @@ describe('accountingTaskRunner', () => {
 
     expect(stores.transactions).toHaveLength(2);
     expect(stores.ledgerEntries).toHaveLength(2);
-    expect(statement.status).toBe('checks_queued');
+    expect(statement.status).toBe('needs_parser_review');
+    expect(statement.validationReport?.passed).toBe(false);
     expect(statement.artifacts.geminiPath).toBe(
       'companies/company-1/statements/2026-01/statement-1/derived/gemini/normalized.v1.json'
     );
     expect(stores.transactions[0].sourceLocator.bbox).toEqual([10, 20, 200, 120]);
-    expect(runAccountingGeminiProposalMock).toHaveBeenCalledTimes(2);
+    expect(extractStatementPagesFromPdfBufferMock).toHaveBeenCalled();
     expect(buildMatchingProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({
         check: expect.objectContaining({
@@ -564,9 +559,9 @@ describe('accountingTaskRunner', () => {
     const check = stores.checks[0];
     expect(check.extracted.checkNumber).toBe('1001');
     expect(check.artifacts.cropBBox).toEqual([10, 20, 200, 120]);
-    expect(check.artifacts.cropImagePath).toBe(
-      `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/front.png`
-    );
+    // cropImagePath is intentionally absent until check.process uploads the PNG;
+    // publishing it earlier causes 404s when the UI tries to open the crop.
+    expect(check.artifacts.cropImagePath).toBeUndefined();
     expect(check.processing.retryCount).toBe(0);
 
     await runAccountingTask({
@@ -580,31 +575,304 @@ describe('accountingTaskRunner', () => {
 
     expect(check.status).toBe('ready');
     expect(check.processing.processedAt).toBeDefined();
+    expect(check.artifacts.cropImagePath).toBe(
+      `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/front.png`
+    );
     expect(check.artifacts.ocrJsonPath).toBe(
       `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/ocr.json`
     );
     expect(check.artifacts.geminiPath).toBe(
-      `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/proposal.normalized.v1.json`
+      `companies/company-1/statements/2026-01/statement-1/derived/suggestions/${check._id}.json`
     );
     expect(check.extracted.source).toBe('ocr');
     expect(check.match.statementTransactionId).toBe('txn-1');
-    expect(check.match.reasons).toEqual(expect.arrayContaining(['Gemini approved']));
+    expect(check.match.reasons).toEqual(expect.arrayContaining(['mocked']));
     expect(stores.transactions[0].statementCheckId).toBe(check._id);
     expect(stores.transactions[0].evidence.checkCropPath).toBe(
       `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/front.png`
     );
     expect(stores.transactions[0].evidence.geminiPath).toBe(
-      `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/proposal.normalized.v1.json`
+      `companies/company-1/statements/2026-01/statement-1/derived/suggestions/${check._id}.json`
     );
-    expect(stores.transactions[0].proposal.reasons).toEqual(
-      expect.arrayContaining(['mocked', 'Gemini approved'])
-    );
+    expect(stores.transactions[0].proposal.reasons).toEqual(expect.arrayContaining(['mocked']));
     expect(stores.ledgerEntries[0].attachments.geminiPath).toBe(
-      `companies/company-1/statements/2026-01/statement-1/derived/checks/extracted/${check._id}/proposal.normalized.v1.json`
+      `companies/company-1/statements/2026-01/statement-1/derived/suggestions/${check._id}.json`
     );
-    expect(runAccountingGeminiProposalMock).toHaveBeenCalledTimes(3);
     expect(statement.progress.phase).toBe('ready_for_review');
     expect(statement.progress.completedChecks).toBe(1);
     expect(statement.progress.remainingChecks).toBe(0);
+    const extractedChecksPath =
+      'companies/company-1/statements/2026-01/statement-1/derived/ocr/json/tables/extracted-checks.json';
+    expect(stores.files.has(extractedChecksPath)).toBe(true);
+    const extractedChecks = JSON.parse(String(stores.files.get(extractedChecksPath)));
+    expect(extractedChecks).toEqual([
+      expect.objectContaining({
+        id: check._id,
+        status: 'ready',
+        cropImagePath: check.artifacts.cropImagePath,
+        structuredPath: check.artifacts.structuredPath
+      })
+    ]);
+  });
+
+  it('classifies sections and excludes balances/totals from posting suggestions', async () => {
+    const { runAccountingTask } = await import('./accountingTaskRunner');
+    extractStatementPagesFromPdfBufferMock.mockResolvedValue([
+      {
+        provider: 'vision',
+        pageNumber: 1,
+        text: [
+          'Account Summary',
+          '11/29/2025 Beginning Balance $15,062.62',
+          'Deposits',
+          '12/01/2025 Internet Transfer from OPERATIONS 1,250.00',
+          'Electronic Debits',
+          '12/01/2025 HACKNEY WAREHOUSE ACH 240.18',
+          'Checks Cleared',
+          '12/02/2025 131 540.00',
+          'Daily Balances',
+          '12/01/2025 9,940.71',
+          '38 item(s) totaling $49,537.95',
+          '12/31/2025 Ending Balance $22,990.44'
+        ].join('\n'),
+        blocks: [],
+        paragraphs: [],
+        words: [],
+        raw: {},
+        checkRegions: []
+      }
+    ]);
+
+    const statement: any = {
+      _id: 'statement-2',
+      companyId: 'company-1',
+      statementMonth: '2025-12',
+      fileName: 'statement.pdf',
+      source: 'upload',
+      status: 'uploaded',
+      gcs: {
+        rootPrefix: 'companies/company-1/statements/2025-12/statement-2',
+        pdfPath: 'companies/company-1/statements/2025-12/statement-2/uploads/statement.pdf'
+      },
+      progress: {
+        phase: 'uploaded',
+        totalChecks: 0,
+        checksQueued: 0,
+        checksProcessing: 0,
+        checksReady: 0,
+        checksFailed: 0,
+        completedChecks: 0,
+        remainingChecks: 0
+      },
+      artifacts: {
+        stageTimestamps: {
+          uploadedAt: '2026-03-25T00:00:00.000Z'
+        }
+      },
+      issues: [],
+      updatedAt: new Date('2026-03-25T00:00:00.000Z'),
+      createdAt: new Date('2026-03-25T00:00:00.000Z'),
+      save: vi.fn(async () => undefined)
+    };
+    stores.statements.push(statement);
+    stores.files.set(statement.gcs.pdfPath, stores.pdfBuffer);
+
+    await runAccountingTask({
+      companyId: 'company-1',
+      jobType: 'statement.extract',
+      statementId: statement._id,
+      attempt: 1,
+      meta: { taskId: 'task-10' }
+    });
+    await runAccountingTask({
+      companyId: 'company-1',
+      jobType: 'statement.structure',
+      statementId: statement._id,
+      attempt: 1,
+      meta: { taskId: 'task-11' }
+    });
+
+    const beginning = stores.transactions.find((txn) => txn.rowType === 'beginning_balance');
+    const ending = stores.transactions.find((txn) => txn.rowType === 'ending_balance');
+    const daily = stores.transactions.find((txn) => txn.rowType === 'daily_balance');
+    const summary = stores.transactions.find((txn) => txn.rowType === 'summary_total');
+    const debit = stores.transactions.find((txn) => txn.rowType === 'electronic_debit');
+    const check = stores.transactions.find((txn) => txn.rowType === 'check_cleared');
+    expect(beginning?.isPostingCandidate).toBe(false);
+    expect(ending?.isPostingCandidate).toBe(false);
+    expect(daily?.isPostingCandidate).toBe(false);
+    expect(summary?.isPostingCandidate).toBe(false);
+    expect(debit?.type).toBe('debit');
+    expect(check?.type).toBe('debit');
+    expect(check?.checkNumber).toBe('131');
+
+    const postingCandidates = stores.transactions.filter((txn) => txn.isPostingCandidate !== false);
+    expect(postingCandidates.some((txn) => String(txn.description).includes('Beginning Balance'))).toBe(false);
+    expect(postingCandidates.some((txn) => String(txn.description).includes('Ending Balance'))).toBe(false);
+  });
+
+  it('derives a manual crop bbox for checks that lack a parser-provided bbox', async () => {
+    const { runAccountingTask } = await import('./accountingTaskRunner');
+    extractStatementPagesFromPdfBufferMock.mockResolvedValue([
+      {
+        provider: 'vision',
+        pageNumber: 1,
+        text: '2026-01-03 CHECK #1001 ACME SUPPLIES -125.00',
+        blocks: [],
+        paragraphs: [],
+        words: [],
+        raw: {},
+        checkRegions: []
+      }
+    ]);
+
+    const statement: any = {
+      _id: 'statement-3',
+      companyId: 'company-1',
+      statementMonth: '2026-01',
+      fileName: 'statement.pdf',
+      source: 'upload',
+      status: 'uploaded',
+      gcs: {
+        rootPrefix: 'companies/company-1/statements/2026-01/statement-3',
+        pdfPath: 'companies/company-1/statements/2026-01/statement-3/uploads/statement.pdf'
+      },
+      progress: {
+        phase: 'uploaded',
+        totalChecks: 0,
+        checksQueued: 0,
+        checksProcessing: 0,
+        checksReady: 0,
+        checksFailed: 0,
+        completedChecks: 0,
+        remainingChecks: 0
+      },
+      artifacts: {
+        stageTimestamps: {
+          uploadedAt: '2026-03-25T00:00:00.000Z'
+        }
+      },
+      issues: [],
+      updatedAt: new Date('2026-03-25T00:00:00.000Z'),
+      createdAt: new Date('2026-03-25T00:00:00.000Z'),
+      save: vi.fn(async () => undefined)
+    };
+    stores.statements.push(statement);
+    stores.files.set(statement.gcs.pdfPath, stores.pdfBuffer);
+
+    await runAccountingTask({
+      companyId: 'company-1',
+      jobType: 'statement.extract',
+      statementId: statement._id,
+      attempt: 1,
+      meta: { taskId: 'task-20' }
+    });
+    await runAccountingTask({
+      companyId: 'company-1',
+      jobType: 'statement.structure',
+      statementId: statement._id,
+      attempt: 1,
+      meta: { taskId: 'task-21' }
+    });
+    await runAccountingTask({
+      companyId: 'company-1',
+      jobType: 'checks.spawn',
+      statementId: statement._id,
+      attempt: 1,
+      meta: { taskId: 'task-22' }
+    });
+
+    const check = stores.checks[0];
+    expect(check).toBeDefined();
+
+    await runAccountingTask({
+      companyId: 'company-1',
+      jobType: 'check.process',
+      statementId: statement._id,
+      checkId: check._id,
+      attempt: 1,
+      meta: { taskId: 'task-23' }
+    });
+
+    expect(check.status).not.toBe('needs_review');
+    expect(Array.isArray(check.artifacts?.cropBBox)).toBe(true);
+    expect(check.artifacts.cropBBox).toHaveLength(4);
+    expect(check.artifacts.pageNumber).toBeGreaterThan(0);
+    expect(String(check.processing.lastError ?? '')).not.toContain('manual review required');
+  });
+
+  it('normalizes fused OCR rows before parsing transactions', async () => {
+    const { runAccountingTask } = await import('./accountingTaskRunner');
+    extractStatementPagesFromPdfBufferMock.mockResolvedValue([
+      {
+        provider: 'vision',
+        pageNumber: 1,
+        text: [
+          'Electronic Credits',
+          '2/03/2025West Georgia Man PAYMENT ENT0508A$5,323.96'
+        ].join('\n'),
+        blocks: [],
+        paragraphs: [],
+        words: [],
+        raw: {},
+        checkRegions: []
+      }
+    ]);
+
+    const statement: any = {
+      _id: 'statement-4',
+      companyId: 'company-1',
+      statementMonth: '2025-02',
+      fileName: 'statement.pdf',
+      source: 'upload',
+      status: 'uploaded',
+      gcs: {
+        rootPrefix: 'companies/company-1/statements/2025-02/statement-4',
+        pdfPath: 'companies/company-1/statements/2025-02/statement-4/uploads/statement.pdf'
+      },
+      progress: {
+        phase: 'uploaded',
+        totalChecks: 0,
+        checksQueued: 0,
+        checksProcessing: 0,
+        checksReady: 0,
+        checksFailed: 0,
+        completedChecks: 0,
+        remainingChecks: 0
+      },
+      artifacts: {
+        stageTimestamps: {
+          uploadedAt: '2026-03-25T00:00:00.000Z'
+        }
+      },
+      issues: [],
+      updatedAt: new Date('2026-03-25T00:00:00.000Z'),
+      createdAt: new Date('2026-03-25T00:00:00.000Z'),
+      save: vi.fn(async () => undefined)
+    };
+    stores.statements.push(statement);
+    stores.files.set(statement.gcs.pdfPath, stores.pdfBuffer);
+
+    await runAccountingTask({
+      companyId: 'company-1',
+      jobType: 'statement.extract',
+      statementId: statement._id,
+      attempt: 1,
+      meta: { taskId: 'task-30' }
+    });
+    await runAccountingTask({
+      companyId: 'company-1',
+      jobType: 'statement.structure',
+      statementId: statement._id,
+      attempt: 1,
+      meta: { taskId: 'task-31' }
+    });
+
+    const txn = stores.transactions.find((row) => String(row.description).includes('West Georgia Man'));
+    expect(txn).toBeDefined();
+    if (!txn) return;
+    expect(txn.type).toBe('credit');
+    expect(txn.amount).toBeCloseTo(5323.96, 2);
+    expect(String(txn.sourceLocator?.sourceText ?? '')).toContain('2/03/2025 West Georgia Man');
   });
 });

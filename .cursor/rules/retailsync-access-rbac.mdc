@@ -1,0 +1,13 @@
+---
+description: RetailSync access and RBAC specialist guidance
+globs: client/src/modules/users/**,client/src/modules/rbac/**,server/src/controllers/userController.ts,server/src/controllers/roleController.ts,server/src/controllers/inviteController.ts,server/src/routes/userRoutes.ts,server/src/routes/roleRoutes.ts,server/src/routes/inviteRoutes.ts,server/src/middleware/requirePermission.ts,shared/src/permissions/**
+alwaysApply: false
+---
+
+# RetailSync access and RBAC
+
+- Follow `.agents/access-rbac/AGENTS.md`.
+- Access workspace currently contains users and roles only.
+- Do not present hidden modules as active product areas.
+- Client visibility and server permission enforcement must stay aligned.
+- Role action lists should come from valid module action catalogs, not free-form text.

@@ -327,17 +327,6 @@ describe('Accounting e2e', () => {
         .expect(200);
       expect(status.body.data.statementId).toBe(statementId);
 
-      await request(app)
-        .post(`/api/accounting/statements/${statementId}/checks/${failedCheck._id.toString()}/retry`)
-        .set('Authorization', `Bearer ${accessToken}`)
-        .expect(200);
-
-      await request(app)
-        .post(`/api/accounting/statements/${statementId}/reprocess`)
-        .set('Authorization', `Bearer ${accessToken}`)
-        .send({ fromJobType: 'statement.extract' })
-        .expect(200);
-
       const ledgerEntries = await request(app)
         .get('/api/accounting/ledger/entries')
         .set('Authorization', `Bearer ${accessToken}`)
@@ -354,6 +343,17 @@ describe('Accounting e2e', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
       expect(postApproved.body.data.queue.status).toBe('queued');
+
+      await request(app)
+        .post(`/api/accounting/statements/${statementId}/checks/${failedCheck._id.toString()}/retry`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      await request(app)
+        .post(`/api/accounting/statements/${statementId}/reprocess`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ fromJobType: 'statement.extract' })
+        .expect(200);
     },
     TEST_TIMEOUT_MS
   );
@@ -373,7 +373,7 @@ describe('Accounting e2e', () => {
         statementMonth: '2026-04',
         contentType: 'application/pdf'
       })
-      .expect(500);
+      .expect(502);
 
     expect(response.body.message).toBe('Storage URL signing is not configured on the server');
     expect(response.body.details).toEqual({
@@ -563,6 +563,89 @@ describe('Accounting e2e', () => {
         .post('/api/integrations/quickbooks/sync/refresh-reference-data')
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(403);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'enforces month-close gates and completes month when entries are resolved',
+    async () => {
+      const { accessToken, email } = await registerAndCreateCompany(app, 'MonthCloseSuite');
+      const { companyId, userId } = await extractCompanyContext(email);
+      const statementId = new Types.ObjectId().toString();
+
+      await BankStatement.create({
+        _id: statementId,
+        companyId,
+        statementMonth: '2026-04',
+        fileName: 'April Statement 2026.pdf',
+        source: 'upload',
+        status: 'ready_for_review',
+        gcs: {
+          rootPrefix: `companies/${companyId}/statements/2026/04/${statementId}`,
+          pdfPath: `companies/${companyId}/statements/2026/04/${statementId}/original/statement.pdf`
+        },
+        progress: {
+          phase: 'ready_for_review',
+          totalChecks: 0,
+          checksQueued: 0,
+          checksProcessing: 0,
+          checksReady: 0,
+          checksFailed: 0,
+          completedChecks: 0,
+          remainingChecks: 0
+        },
+        monthClose: {
+          status: 'open'
+        },
+        createdBy: userId
+      });
+
+      const entryId = new Types.ObjectId().toString();
+      await StatementTransactionModel.create({
+        _id: entryId,
+        statementId,
+        companyId,
+        postDate: '2026-04-01',
+        description: 'Office supply payment',
+        merchant: 'ACME',
+        amount: 120,
+        type: 'debit',
+        classification: 'unknown',
+        reviewStatus: 'proposed',
+        proposal: {
+          qbTxnType: 'Expense',
+          confidence: 0.8,
+          reasons: ['rule'],
+          status: 'proposed',
+          version: 'v1'
+        }
+      });
+
+      await request(app)
+        .post(`/api/accounting/statements/${statementId}/complete-month`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(409);
+
+      await request(app)
+        .patch(`/api/accounting/statements/${statementId}/entries/${entryId}/review`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ reviewStatus: 'approved' })
+        .expect(200);
+
+      await StatementTransactionModel.updateOne(
+        { _id: entryId, companyId },
+        { $set: { classification: 'expense', 'proposal.status': 'approved' } }
+      );
+
+      const complete = await request(app)
+        .post(`/api/accounting/statements/${statementId}/complete-month`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(complete.body.data.monthClose.status).toBe('completed');
+      expect(complete.body.data.monthClose.gates.rowsReviewed).toBe(true);
+      expect(complete.body.data.monthClose.gates.noMandatoryUnknowns).toBe(true);
     },
     TEST_TIMEOUT_MS
   );

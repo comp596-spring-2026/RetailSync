@@ -10,14 +10,24 @@ import rbacReducer from '../../rbac/state';
 import uiReducer from '../../../app/store/uiSlice';
 import { StatementsPage } from './StatementsPage';
 
-const { listStatementsMock } = vi.hoisted(() => ({
-  listStatementsMock: vi.fn()
+const { listStatementsMock, listStatementMonthsMock, getQuickbooksHubChartOfAccountsMock } = vi.hoisted(() => ({
+  listStatementsMock: vi.fn(),
+  listStatementMonthsMock: vi.fn(),
+  getQuickbooksHubChartOfAccountsMock: vi.fn()
 }));
 
 vi.mock('../api', () => ({
   accountingApi: {
-    listStatements: (...args: unknown[]) => listStatementsMock(...args)
+    listStatements: (...args: unknown[]) => listStatementsMock(...args),
+    listStatementMonths: (...args: unknown[]) => listStatementMonthsMock(...args),
+    getQuickbooksHubChartOfAccounts: (...args: unknown[]) => getQuickbooksHubChartOfAccountsMock(...args)
   }
+}));
+
+vi.mock('../hooks/useQuickBooksWorkspace', () => ({
+  useQuickBooksWorkspace: () => ({
+    isConnected: true
+  })
 }));
 
 vi.mock('../components', async () => {
@@ -91,10 +101,34 @@ describe('StatementsPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     listStatementsMock.mockResolvedValue({
       data: {
         data: {
           statements: []
+        }
+      }
+    });
+    listStatementMonthsMock.mockResolvedValue({
+      data: {
+        data: {
+          months: []
+        }
+      }
+    });
+    getQuickbooksHubChartOfAccountsMock.mockResolvedValue({
+      data: {
+        data: {
+          items: [
+            {
+              id: 'acct-1',
+              qbId: '35',
+              name: 'Checking',
+              detailType: 'Checking',
+              type: 'Bank',
+              status: 'active'
+            }
+          ]
         }
       }
     });
@@ -114,6 +148,7 @@ describe('StatementsPage', () => {
   });
 
   it('renders the richer progress summary for statements', async () => {
+    window.localStorage.setItem('accounting.statement.defaultBankAccountId', '35');
     listStatementsMock.mockResolvedValueOnce({
       data: {
         data: {
@@ -151,14 +186,14 @@ describe('StatementsPage', () => {
       </Provider>
     );
 
-    expect(await screen.findByText(/Processing now/i)).toBeInTheDocument();
-    expect(screen.getByText(/Open workspace/i)).toBeInTheDocument();
-    expect(screen.getByText(/2 done • 3 left across 5 checks/i)).toBeInTheDocument();
-    expect(screen.getByText(/^5 checks$/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/2 done • 3 left/i).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Running/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open workspace/i })).toBeInTheDocument();
+    expect(screen.getByText(/Mar 2026 · Checks/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 done • 3 left/i)).toBeInTheDocument();
   });
 
-  it('does not auto-poll the statements list every 3 seconds', async () => {
+  it('auto-polls the statements list while a statement is in-flight', async () => {
+    window.localStorage.setItem('accounting.statement.defaultBankAccountId', '35');
     listStatementsMock.mockResolvedValue({
       data: {
         data: {
@@ -196,9 +231,9 @@ describe('StatementsPage', () => {
       </Provider>
     );
 
-    await screen.findByText(/march-statement.pdf/i);
+    await screen.findByText(/Mar 2026 · Extracting/i);
     expect(listStatementsMock).toHaveBeenCalledTimes(1);
-    await new Promise((resolve) => setTimeout(resolve, 3200));
-    expect(listStatementsMock).toHaveBeenCalledTimes(1);
-  }, 7000);
+    await new Promise((resolve) => setTimeout(resolve, 4500));
+    expect(listStatementsMock.mock.calls.length).toBeGreaterThan(1);
+  }, 10000);
 });

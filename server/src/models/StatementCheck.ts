@@ -45,7 +45,7 @@ const extractedSchema = new Schema(
     memo: { type: String, required: false },
     source: {
       type: String,
-      enum: ['ocr', 'gemini', 'deterministic', 'legacy'],
+      enum: ['ocr', 'gemini', 'deterministic', 'legacy', 'pdf_text'],
       required: false
     }
   },

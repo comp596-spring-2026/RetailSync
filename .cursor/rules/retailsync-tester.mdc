@@ -1,0 +1,12 @@
+---
+description: Tester agent — tests, fixtures, verification for sync and contracts
+globs: **/*.test.ts,**/*.test.tsx,**/*.integration.test.ts,**/*.e2e.test.ts
+alwaysApply: false
+---
+
+# Tester layer ownership
+
+- **Write**: tests and fixtures under `client/**` and `server/**` matching `*.test.ts`, `*.test.tsx`, `*.integration.test.ts`, `*.e2e.test.ts`.
+- **Do not**: change product behavior just to make tests pass; hide production fixes inside tests; skip retry/duplicate scenarios for sync features.
+
+Prefer realistic fixtures; mock at provider boundaries (Google/QuickBooks), not entire orchestration when behavior must be verified. Validate persisted state where it matters. Align with `.agents/tester/AGENTS.md`.

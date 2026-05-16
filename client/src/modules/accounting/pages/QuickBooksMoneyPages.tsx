@@ -1,7 +1,10 @@
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import {
   Alert,
+  Box,
   Button,
+  Chip,
+  Divider,
   MenuItem,
   Paper,
   Stack,
@@ -32,6 +35,19 @@ type MoneyFormState = {
   payeeRefId: string;
   fromAccountId: string;
   toAccountId: string;
+};
+
+type AccountOption = {
+  qbId: string;
+  name: string;
+  type: string | null;
+  detailType: string | null;
+  balance: number | null;
+};
+
+type VendorOption = {
+  qbId: string;
+  displayName: string;
 };
 
 const moneyTypeMeta: Record<
@@ -82,6 +98,38 @@ const blankMoneyForm = (): MoneyFormState => ({
   fromAccountId: '',
   toAccountId: ''
 });
+
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 2
+});
+
+const formatCurrency = (value: number | null | undefined) =>
+  value == null || Number.isNaN(value) ? '-' : currencyFormatter.format(value);
+
+const normalizeAccountType = (value: string | null | undefined) => String(value ?? '').trim().toLowerCase();
+
+const isBankLikeAccount = (account: AccountOption) => {
+  const type = normalizeAccountType(account.type);
+  const detailType = normalizeAccountType(account.detailType);
+  return (
+    type === 'bank' ||
+    detailType === 'checking' ||
+    detailType === 'savings' ||
+    detailType === 'cashonhand' ||
+    detailType === 'cash on hand'
+  );
+};
+
+const accountDescriptor = (account: AccountOption | undefined) =>
+  [account?.type, account?.detailType].filter(Boolean).join(' / ') || 'QuickBooks account';
+
+const selectedAccount = (accounts: AccountOption[], qbId: string) =>
+  accounts.find((account) => account.qbId === qbId);
+
+const selectedVendor = (vendors: VendorOption[], qbId: string) =>
+  vendors.find((vendor) => vendor.qbId === qbId);
 
 const buildMoneyPayload = (
   txnType: QuickBooksMoneyTxnType,
@@ -157,8 +205,8 @@ export const QuickBooksMoneyEditorPage = ({ mode }: { mode: 'create' | 'edit' })
     useQuickBooksWorkspace(canView);
 
   const [form, setForm] = useState<MoneyFormState>(() => blankMoneyForm());
-  const [accounts, setAccounts] = useState<Array<{ qbId: string; name: string }>>([]);
-  const [vendors, setVendors] = useState<Array<{ qbId: string; displayName: string }>>([]);
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [vendors, setVendors] = useState<VendorOption[]>([]);
   const [loading, setLoading] = useState(mode === 'edit');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -184,7 +232,10 @@ export const QuickBooksMoneyEditorPage = ({ mode }: { mode: 'create' | 'edit' })
         .filter((row) => row.qbId)
         .map((row) => ({
           qbId: row.qbId ?? '',
-          name: row.name
+          name: row.name,
+          type: row.type,
+          detailType: row.detailType,
+          balance: row.balance
         }))
     );
     setVendors(
@@ -263,6 +314,54 @@ export const QuickBooksMoneyEditorPage = ({ mode }: { mode: 'create' | 'edit' })
     return Boolean(form.fromAccountId && form.toAccountId);
   }, [form, txnType]);
 
+  const bankAccounts = useMemo(() => {
+    const filtered = accounts.filter(isBankLikeAccount);
+    return filtered.length > 0 ? filtered : accounts;
+  }, [accounts]);
+
+  const categoryAccounts = useMemo(() => {
+    const filtered = accounts.filter((account) => !isBankLikeAccount(account));
+    return filtered.length > 0 ? filtered : accounts;
+  }, [accounts]);
+
+  const amountValue = Number(form.amount || 0);
+  const bankAccount = selectedAccount(accounts, form.bankAccountId);
+  const categoryAccount = selectedAccount(accounts, form.categoryAccountId);
+  const fromAccount = selectedAccount(accounts, form.fromAccountId);
+  const toAccount = selectedAccount(accounts, form.toAccountId);
+  const vendor = selectedVendor(vendors, form.payeeRefId);
+
+  const previewRows = useMemo(() => {
+    if (!txnType) return [];
+    if (txnType === 'check' || txnType === 'expense') {
+      return [
+        ['Money out of', bankAccount?.name ?? '-'],
+        ['Category', categoryAccount?.name ?? '-'],
+        ['Payee', vendor?.displayName ?? '-'],
+        ['Amount', formatCurrency(amountValue || null)]
+      ];
+    }
+    if (txnType === 'deposit') {
+      return [
+        ['Deposit to', bankAccount?.name ?? '-'],
+        ['Source category', categoryAccount?.name ?? '-'],
+        ['Amount', formatCurrency(amountValue || null)]
+      ];
+    }
+    return [
+      ['From account', fromAccount?.name ?? '-'],
+      ['To account', toAccount?.name ?? '-'],
+      ['Amount', formatCurrency(amountValue || null)]
+    ];
+  }, [amountValue, bankAccount?.name, categoryAccount?.name, fromAccount?.name, toAccount?.name, txnType, vendor?.displayName]);
+
+  const renderAccountOptions = (options: AccountOption[]) =>
+    options.map((account) => (
+      <MenuItem key={account.qbId} value={account.qbId}>
+        {account.name}
+      </MenuItem>
+    ));
+
   if (!canView || !canPost) {
     return <NoAccess />;
   }
@@ -288,125 +387,170 @@ export const QuickBooksMoneyEditorPage = ({ mode }: { mode: 'create' | 'edit' })
         {error ? <Alert severity="error">{error}</Alert> : null}
         {loading ? <Alert severity="info">Loading transaction...</Alert> : null}
         {!loading ? (
-          <Paper sx={{ p: 2.5 }}>
-            <Stack spacing={2}>
-              <Stack spacing={1}>
-                <Typography variant="h6">Transaction</Typography>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                  <TextField
-                    label="Date"
-                    type="date"
-                    value={form.txnDate}
-                    onChange={(event) => setForm((current) => ({ ...current, txnDate: event.target.value }))}
-                    InputLabelProps={{ shrink: true }}
-                    fullWidth
-                  />
-                  <TextField
-                    label="Amount"
-                    type="number"
-                    inputProps={{ min: 0, step: '0.01' }}
-                    value={form.amount}
-                    onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))}
-                    fullWidth
-                  />
-                </Stack>
-                <TextField
-                  label="Memo"
-                  value={form.memo}
-                  onChange={(event) => setForm((current) => ({ ...current, memo: event.target.value }))}
-                  multiline
-                  minRows={2}
-                  fullWidth
-                />
-              </Stack>
+          <Paper sx={{ p: { xs: 2, md: 3 } }}>
+            <Stack spacing={3}>
+              <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 320px' } }}>
+                <Stack spacing={2.5}>
+                  <Box>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
+                      <Typography variant="h6">Main Information</Typography>
+                      <Chip size="small" label={moneyTypeMeta[txnType].label.slice(0, -1)} />
+                    </Stack>
+                    <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
+                      <TextField
+                        label="Date"
+                        type="date"
+                        value={form.txnDate}
+                        onChange={(event) => setForm((current) => ({ ...current, txnDate: event.target.value }))}
+                        InputLabelProps={{ shrink: true }}
+                        fullWidth
+                      />
+                      <TextField
+                        label="Amount"
+                        type="number"
+                        inputProps={{ min: 0, step: '0.01' }}
+                        value={form.amount}
+                        onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))}
+                        fullWidth
+                      />
+                    </Box>
+                  </Box>
 
-              {(txnType === 'check' || txnType === 'expense' || txnType === 'deposit') ? (
-                <Stack spacing={1}>
-                  <Typography variant="h6">
-                    {txnType === 'deposit' ? 'Deposit Accounts' : 'Posting Accounts'}
-                  </Typography>
-                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                    <TextField
-                      select
-                      label={txnType === 'deposit' ? 'Deposit Account' : 'Bank Account'}
-                      value={form.bankAccountId}
-                      onChange={(event) => setForm((current) => ({ ...current, bankAccountId: event.target.value }))}
-                      fullWidth
-                    >
-                      {accounts.map((account) => (
-                        <MenuItem key={account.qbId} value={account.qbId}>
-                          {account.name}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                    <TextField
-                      select
-                      label="Category Account"
-                      value={form.categoryAccountId}
-                      onChange={(event) => setForm((current) => ({ ...current, categoryAccountId: event.target.value }))}
-                      fullWidth
-                    >
-                      {accounts.map((account) => (
-                        <MenuItem key={account.qbId} value={account.qbId}>
-                          {account.name}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Stack>
-                  {(txnType === 'check' || txnType === 'expense') ? (
-                    <TextField
-                      select
-                      label="Vendor"
-                      value={form.payeeRefId}
-                      onChange={(event) => setForm((current) => ({ ...current, payeeRefId: event.target.value }))}
-                      fullWidth
-                    >
-                      <MenuItem value="">None</MenuItem>
-                      {vendors.map((vendor) => (
-                        <MenuItem key={vendor.qbId} value={vendor.qbId}>
-                          {vendor.displayName}
-                        </MenuItem>
-                      ))}
-                    </TextField>
+                  {(txnType === 'check' || txnType === 'expense' || txnType === 'deposit') ? (
+                    <Box>
+                      <Typography variant="h6" sx={{ mb: 1.5 }}>
+                        Money Movement
+                      </Typography>
+                      <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
+                        <TextField
+                          select
+                          label={txnType === 'deposit' ? 'Deposit Account' : 'Bank Account'}
+                          value={form.bankAccountId}
+                          onChange={(event) => setForm((current) => ({ ...current, bankAccountId: event.target.value }))}
+                          helperText={accountDescriptor(bankAccount)}
+                          fullWidth
+                        >
+                          {renderAccountOptions(bankAccounts)}
+                        </TextField>
+                        <TextField
+                          select
+                          label="Category Account"
+                          value={form.categoryAccountId}
+                          onChange={(event) => setForm((current) => ({ ...current, categoryAccountId: event.target.value }))}
+                          helperText={accountDescriptor(categoryAccount)}
+                          fullWidth
+                        >
+                          {renderAccountOptions(categoryAccounts)}
+                        </TextField>
+                      </Box>
+                    </Box>
                   ) : null}
-                </Stack>
-              ) : null}
 
-              {txnType === 'transfer' ? (
-                <Stack spacing={1}>
-                  <Typography variant="h6">Transfer Accounts</Typography>
-                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                  {txnType === 'transfer' ? (
+                    <Box>
+                      <Typography variant="h6" sx={{ mb: 1.5 }}>
+                        Transfer Accounts
+                      </Typography>
+                      <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
+                        <TextField
+                          select
+                          label="From Account"
+                          value={form.fromAccountId}
+                          onChange={(event) => setForm((current) => ({ ...current, fromAccountId: event.target.value }))}
+                          helperText={accountDescriptor(fromAccount)}
+                          fullWidth
+                        >
+                          {renderAccountOptions(bankAccounts)}
+                        </TextField>
+                        <TextField
+                          select
+                          label="To Account"
+                          value={form.toAccountId}
+                          onChange={(event) => setForm((current) => ({ ...current, toAccountId: event.target.value }))}
+                          helperText={accountDescriptor(toAccount)}
+                          fullWidth
+                        >
+                          {renderAccountOptions(accounts)}
+                        </TextField>
+                      </Box>
+                    </Box>
+                  ) : null}
+
+                  {(txnType === 'check' || txnType === 'expense') ? (
+                    <Box>
+                      <Typography variant="h6" sx={{ mb: 1.5 }}>
+                        Payee
+                      </Typography>
+                      <TextField
+                        select
+                        label="Vendor"
+                        value={form.payeeRefId}
+                        onChange={(event) => setForm((current) => ({ ...current, payeeRefId: event.target.value }))}
+                        helperText={vendor ? 'Active QuickBooks vendor' : 'Optional'}
+                        fullWidth
+                      >
+                        <MenuItem value="">None</MenuItem>
+                        {vendors.map((vendor) => (
+                          <MenuItem key={vendor.qbId} value={vendor.qbId}>
+                            {vendor.displayName}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    </Box>
+                  ) : null}
+
+                  <Box>
+                    <Typography variant="h6" sx={{ mb: 1.5 }}>
+                      Notes
+                    </Typography>
                     <TextField
-                      select
-                      label="From Account"
-                      value={form.fromAccountId}
-                      onChange={(event) => setForm((current) => ({ ...current, fromAccountId: event.target.value }))}
+                      label="Memo"
+                      value={form.memo}
+                      onChange={(event) => setForm((current) => ({ ...current, memo: event.target.value }))}
+                      multiline
+                      minRows={3}
                       fullWidth
-                    >
-                      {accounts.map((account) => (
-                        <MenuItem key={account.qbId} value={account.qbId}>
-                          {account.name}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                    <TextField
-                      select
-                      label="To Account"
-                      value={form.toAccountId}
-                      onChange={(event) => setForm((current) => ({ ...current, toAccountId: event.target.value }))}
-                      fullWidth
-                    >
-                      {accounts.map((account) => (
-                        <MenuItem key={account.qbId} value={account.qbId}>
-                          {account.name}
-                        </MenuItem>
-                      ))}
-                    </TextField>
+                    />
+                  </Box>
+                </Stack>
+
+                <Box
+                  sx={{
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: 1,
+                    p: 2,
+                    alignSelf: 'start',
+                    position: { lg: 'sticky' },
+                    top: { lg: 16 }
+                  }}
+                >
+                  <Stack spacing={1.5}>
+                    <Typography variant="h6">Review</Typography>
+                    <Divider />
+                    {previewRows.map(([label, value]) => (
+                      <Stack key={label} spacing={0.25}>
+                        <Typography variant="caption" color="text.secondary">
+                          {label}
+                        </Typography>
+                        <Typography variant="body2" fontWeight={600}>
+                          {value}
+                        </Typography>
+                      </Stack>
+                    ))}
+                    {form.memo.trim() ? (
+                      <Stack spacing={0.25}>
+                        <Typography variant="caption" color="text.secondary">
+                          Memo
+                        </Typography>
+                        <Typography variant="body2">{form.memo.trim()}</Typography>
+                      </Stack>
+                    ) : null}
                   </Stack>
-                </Stack>
-              ) : null}
+                </Box>
+              </Box>
 
-              <Stack direction="row" spacing={1} justifyContent="flex-end">
+              <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap" useFlexGap>
                 <Button variant="outlined" onClick={onCancel} disabled={saving}>
                   Cancel
                 </Button>

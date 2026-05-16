@@ -6,12 +6,10 @@ node_modules
 dist
 coverage
 *.log
-.cursor/
 .pnpm-store/
 .npmrc
 
 *.tsbuildinfo
 credentials/
-.agents
-.vscode
+
 server/tmp

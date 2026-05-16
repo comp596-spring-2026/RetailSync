@@ -1,0 +1,13 @@
+---
+description: RetailSync auth and onboarding specialist guidance
+globs: client/src/modules/auth/**,client/src/app/guards/**,server/src/controllers/auth*.ts,server/src/controllers/companyController.ts,server/src/routes/authRoutes.ts,server/src/routes/companyRoutes.ts,server/src/services/mailer.ts,server/src/services/authSessionService.ts,server/src/services/companyOnboardingService.ts
+alwaysApply: false
+---
+
+# RetailSync auth and onboarding
+
+- Follow `.agents/auth-onboarding/AGENTS.md` for workflow truth.
+- Keep account creation separate from company setup unless explicitly changing the product flow.
+- Invite users should go through dedicated invite acceptance flows, not generic register forms.
+- Preserve verification, reset, invite, refresh, and onboarding guard semantics.
+- Any auth flow change must update tests and relevant docs.
