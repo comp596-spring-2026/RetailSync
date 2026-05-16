@@ -1,4 +1,4 @@
-import { Box, Typography, Container, Paper } from "@mui/material";
+import { Typography, Container, Paper } from "@mui/material";
 
 export const ArchitecturePage = () => {
   return (

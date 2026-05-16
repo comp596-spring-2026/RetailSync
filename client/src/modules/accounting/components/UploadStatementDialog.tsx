@@ -14,7 +14,6 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import AccountBalanceOutlinedIcon from '@mui/icons-material/AccountBalanceOutlined';
 import CalendarMonthOutlinedIcon from '@mui/icons-material/CalendarMonthOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
@@ -192,9 +191,9 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded, onSaveError }
     statementCount: number;
     latestStatus: string;
   } | null>(null);
-  const [bankAccounts, setBankAccounts] = useState<QuickBooksHubChartAccount[]>([]);
-  const [bankAccountsLoading, setBankAccountsLoading] = useState(false);
-  const [bankAccountsError, setBankAccountsError] = useState<string | null>(null);
+  const [, setBankAccounts] = useState<QuickBooksHubChartAccount[]>([]);
+  const [, setBankAccountsLoading] = useState(false);
+  const [, setBankAccountsError] = useState<string | null>(null);
   const [bankAccountId, setBankAccountId] = useState<string>('');
   const statementMonthTouchedRef = useRef(false);
   const detectionRequestIdRef = useRef(0);

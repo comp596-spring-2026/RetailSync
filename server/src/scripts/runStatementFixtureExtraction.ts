@@ -438,7 +438,7 @@ export const runStatementFixtureExtraction = async () => {
       };
 
   let pageObservations: Awaited<ReturnType<typeof extractStatementPagesFromPdfBuffer>> = [];
-  let statementOcrProvider: 'vision' | 'pdf_text' = 'pdf_text';
+  let statementOcrProvider: 'vision' | 'pdf_text';
 
   try {
     try {

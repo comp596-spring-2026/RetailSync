@@ -94,8 +94,7 @@ export const useStatementUploadFlow = ({
             ? 'failed'
             : processingStatus === 'ready_for_review'
               ? 'done'
-              : activeStatementId &&
-                  processingStatus &&
+              : processingStatus &&
                   ['uploaded', 'extracting', 'structuring', 'checks_queued'].includes(processingStatus)
                 ? 'active'
                 : 'waiting'
