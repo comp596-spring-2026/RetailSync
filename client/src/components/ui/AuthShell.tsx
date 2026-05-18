@@ -63,6 +63,9 @@ export const AuthShell = ({
             <MuiLink component={Link} to="/home-demo" underline="hover" variant="caption" color="text.secondary">
               About project
             </MuiLink>
+            <MuiLink component={Link} to="/architecture" underline="hover" variant="caption" color="text.secondary">
+              Architecture
+            </MuiLink>
             <MuiLink component={Link} to="/privacy" underline="hover" variant="caption" color="text.secondary">
               Privacy
             </MuiLink>

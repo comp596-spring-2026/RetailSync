@@ -14,6 +14,9 @@ RetailSync is a multi-tenant retail operations platform that combines authentica
 
 ## High-Level Architecture
 
+Official rendered diagram asset:
+- [client/public/architecture-diagram.png](../../client/public/architecture-diagram.png)
+
 ```mermaid
 flowchart LR
   User["Retail User"] --> Client["React Client\nVite + Redux Toolkit"]
