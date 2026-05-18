@@ -5,7 +5,6 @@ import SecurityOutlinedIcon from '@mui/icons-material/SecurityOutlined';
 import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined';
 import VpnKeyOutlinedIcon from '@mui/icons-material/VpnKeyOutlined';
 import ArchitectureOutlinedIcon from '@mui/icons-material/ArchitectureOutlined';
-import PolicyOutlinedIcon from '@mui/icons-material/PolicyOutlined';
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
