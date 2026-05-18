@@ -9,7 +9,7 @@ export type StatementViewerTab = string;
 
 export type ArtifactKind = 'blob' | 'text';
 export type StepState = 'done' | 'active' | 'waiting' | 'failed';
-export type WorkspaceTab = 'overview' | 'artifacts' | 'suggestions' | 'rules';
+export type WorkspaceTab = 'overview' | 'source_proof' | 'review_transactions';
 
 export type ArtifactDescriptor<TTab extends string> = {
   key: TTab;

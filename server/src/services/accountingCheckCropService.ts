@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { coerceSharpInputBuffer } from '../utils/imageInput';
 import { env } from '../config/env';
 import { getStorageClient } from '../integrations/google/storage.client';
 import { buildCheckCropPath } from './accountingStorageService';
@@ -85,7 +86,17 @@ export const renderCheckCropFromPdf = async (args: RenderCheckCropArgs): Promise
       scale
     );
     const crop = normalizeBox(args.cropBox, marginPx);
-    const buffer = await sharp(page.buffer)
+    const pageBuffer = coerceSharpInputBuffer('renderCheckCropFromPdf.page', page.buffer);
+    // eslint-disable-next-line no-console
+    console.info('[check.crop] rendering region', {
+      pageNumber: args.pageNumber,
+      cropBox: args.cropBox,
+      normalizedCrop: crop,
+      pageWidth: page.width,
+      pageHeight: page.height,
+      bufferBytes: pageBuffer.byteLength
+    });
+    const buffer = await sharp(pageBuffer)
       .extract({
         left: clamp(Math.floor(crop.left), 0, page.width - 1),
         top: clamp(Math.floor(crop.top), 0, page.height - 1),

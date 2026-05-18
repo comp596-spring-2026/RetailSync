@@ -16,6 +16,7 @@ import type { CheckRegionCandidate, StatementPageObservation } from '../services
 import { extractStatementPagesFromPdfBuffer } from '../services/accountingPdfTextExtractionService';
 import {
   deriveSectionBoundsFromLayout,
+  applyLayoutSectionsToParsedTransactions,
   extractChecksClearedFromLayout,
   extractDailyBalancesFromLayout,
   extractStatementPagesLayoutFromPdfBuffer,
@@ -27,7 +28,10 @@ import {
   buildFallbackManualCheckSlots,
   computeManualCheckSlot,
   detectCheckImagePages,
-  DEFAULT_CHECK_IMAGE_PRESET
+  DEFAULT_CHECK_IMAGE_PRESET,
+  isCheckImagePageText,
+  isLikelyChecksClearedTableCrop,
+  resolveCheckImageCropPlacement
 } from '../services/accountingCheckLayoutService';
 import {
   buildCheckCropPath,
@@ -51,6 +55,7 @@ import {
   buildStatementTransactionsTablePath,
   buildStatementOcrTextPath
 } from '../services/accountingStorageService';
+import { persistStatementFailure, persistStatementPatch } from '../services/bankStatementPersistence';
 import { renderAndPersistStatementPages } from '../services/accountingPdfRenderService';
 import { runStatementCheckExtraction } from '../services/accountingCheckExtractionService';
 import { extractOfflineStatement } from '../statement-extraction/offline';
@@ -475,13 +480,16 @@ const sectionHeadingMatchers: Array<{
     | 'daily_balances';
   pattern: RegExp;
 }> = [
-  { section: 'account_summary', pattern: /^account\s+summary$/i },
-  { section: 'deposits', pattern: /^deposits?$/i },
-  { section: 'electronic_credits', pattern: /^electronic\s+credits?$/i },
-  { section: 'other_credits', pattern: /^other\s+credits?$/i },
-  { section: 'electronic_debits', pattern: /^electronic\s+debits?$/i },
-  { section: 'checks_cleared', pattern: /^checks?\s+cleared$/i },
-  { section: 'daily_balances', pattern: /^daily\s+balances$/i }
+  { section: 'account_summary', pattern: /^account\s+summary(\s+\(continued\))?$/i },
+  { section: 'deposits', pattern: /^deposits?(\s+\(continued\))?$/i },
+  {
+    section: 'electronic_credits',
+    pattern: /^electronic\s+(?:deposits|credits)(\s+\(continued\))?$/i
+  },
+  { section: 'other_credits', pattern: /^other\s+credits(\s+\(continued\))?$/i },
+  { section: 'electronic_debits', pattern: /^electronic\s+debits(\s+\(continued\))?$/i },
+  { section: 'checks_cleared', pattern: /^checks?\s+(?:cleared|paid)(\s+\(continued\))?$/i },
+  { section: 'daily_balances', pattern: /^daily\s+balances?(\s+\(continued\))?$/i }
 ];
 
 const detectSectionHeading = (line: string) =>
@@ -855,15 +863,21 @@ export const parseTransactionsFromOcrPages = (pages: StatementPageObservationWit
 
   for (const page of pages) {
     const pageTransactions = parseTransactionsFromPage(page);
+    const pageIsChecksClearedTable = /checks\s+cleared/i.test(page.text ?? '');
     for (const txn of pageTransactions) {
-      const bestRegion = findBestRegionForTransaction(txn, page.checkRegions);
-      if (bestRegion) {
-        txn.sourceLocator.bbox = [
-          bestRegion.bbox.left,
-          bestRegion.bbox.top,
-          bestRegion.bbox.right,
-          bestRegion.bbox.bottom
-        ];
+      const isClearedTableRow =
+        txn.rowType === 'check_cleared' || txn.section === 'checks_cleared';
+      const skipTableRowBbox = isClearedTableRow && pageIsChecksClearedTable;
+      if (!skipTableRowBbox) {
+        const bestRegion = findBestRegionForTransaction(txn, page.checkRegions);
+        if (bestRegion) {
+          txn.sourceLocator.bbox = [
+            bestRegion.bbox.left,
+            bestRegion.bbox.top,
+            bestRegion.bbox.right,
+            bestRegion.bbox.bottom
+          ];
+        }
       }
       transactions.push(txn);
     }
@@ -903,14 +917,6 @@ const pickLayoutSectionForRow = (
 
   if (row.rowType === 'check_cleared' && availableSections.has('checks_cleared')) {
     return 'checks_cleared';
-  }
-
-  const pageNumber = Number(row.sourceLocator.pageNumber ?? 0);
-  if (pageNumber) {
-    const pageBounds = layoutSectionBounds.filter((bound) => bound.pageNumber === pageNumber);
-    if (pageBounds.length > 0) {
-      return pageBounds[0].section;
-    }
   }
 
   return undefined;
@@ -981,51 +987,56 @@ export const buildChecksClearedRows = (
     return bucket.shift() ?? null;
   };
 
-  return anchored.map((txn) => {
-    const layoutMatch = (typeof txn.checkNumber === 'string' && txn.checkNumber.trim().length > 0)
-      ? null
-      : consumeLayoutMatch(txn);
-    const resolvedCheckNumber =
-      (typeof txn.checkNumber === 'string' && txn.checkNumber.trim().length > 0
-        ? txn.checkNumber
-        : layoutMatch?.checkNumber) ?? null;
-    return {
-      localId: txn.localId,
-      pageNumber: layoutMatch?.pageNumber ?? txn.sourceLocator.pageNumber ?? null,
-      postDate: txn.postDate,
-      checkNumber: resolvedCheckNumber,
-      description: txn.description,
-      merchant: txn.merchant,
-      amount: txn.amount,
-      type: txn.type,
-      bbox: txn.sourceLocator.bbox ?? undefined,
-      layoutSection: pickLayoutSectionForRow(txn, layoutSectionBounds) ?? null,
-      checkNumberSource: resolvedCheckNumber
-        ? (typeof txn.checkNumber === 'string' && txn.checkNumber.trim().length > 0
-            ? 'text_parser'
-            : 'pdf_layout')
-        : 'missing'
-    };
-  });
+  if (anchored.length > 0) {
+    return anchored.map((txn) => {
+      const layoutMatch = (typeof txn.checkNumber === 'string' && txn.checkNumber.trim().length > 0)
+        ? null
+        : consumeLayoutMatch(txn);
+      const resolvedCheckNumber =
+        (typeof txn.checkNumber === 'string' && txn.checkNumber.trim().length > 0
+          ? txn.checkNumber
+          : layoutMatch?.checkNumber) ?? null;
+      return {
+        localId: txn.localId,
+        pageNumber: layoutMatch?.pageNumber ?? txn.sourceLocator.pageNumber ?? null,
+        postDate: txn.postDate,
+        checkNumber: resolvedCheckNumber,
+        description: txn.description,
+        merchant: txn.merchant,
+        amount: txn.amount,
+        type: txn.type,
+        bbox: txn.sourceLocator.bbox ?? undefined,
+        layoutSection: pickLayoutSectionForRow(txn, layoutSectionBounds) ?? null,
+        checkNumberSource: resolvedCheckNumber
+          ? (typeof txn.checkNumber === 'string' && txn.checkNumber.trim().length > 0
+              ? 'text_parser'
+              : 'pdf_layout')
+          : 'missing'
+      };
+    });
+  }
+
+  if ((layoutChecks ?? []).length > 0) {
+    return (layoutChecks ?? []).map((row) => ({
+      localId: `layout-check-${row.checkNumber}`,
+      pageNumber: row.pageNumber,
+      postDate: row.date,
+      checkNumber: row.checkNumber,
+      description: `Check ${row.checkNumber}`,
+      merchant: `Check ${row.checkNumber}`,
+      amount: row.amount,
+      type: 'debit' as const,
+      bbox: undefined,
+      layoutSection: 'checks_cleared',
+      checkNumberSource: 'pdf_layout'
+    }));
+  }
+
+  return [];
 };
 
 export const buildExtractionIssues = (transactions: ParsedTransaction[]) => {
   const issues: string[] = [];
-  const beginningBalance = transactions.find((txn) => txn.rowType === 'beginning_balance');
-  const endingBalance = [...transactions].reverse().find((txn) => txn.rowType === 'ending_balance');
-  if (beginningBalance && endingBalance) {
-    const credits = transactions
-      .filter((txn) => txn.isPostingCandidate && txn.type === 'credit')
-      .reduce((sum, txn) => sum + Number(txn.amount ?? 0), 0);
-    const debits = transactions
-      .filter((txn) => txn.isPostingCandidate && txn.type === 'debit')
-      .reduce((sum, txn) => sum + Number(txn.amount ?? 0), 0);
-    const expectedEnding = Number(beginningBalance.amount) + credits - debits;
-    const drift = Math.abs(expectedEnding - Number(endingBalance.amount));
-    if (drift > 1) {
-      issues.push(`Balance reconciliation drift detected (${drift.toFixed(2)}).`);
-    }
-  }
   const malformedRows = transactions.filter((txn) => !txn.postDate || !Number.isFinite(Number(txn.amount)));
   if (malformedRows.length > 0) {
     issues.push(`${malformedRows.length} malformed extracted row(s) skipped or marked noise.`);
@@ -1222,14 +1233,15 @@ const updateStatementProgressFromChecks = async (companyId: string, statementId:
   const statement = await BankStatement.findOne({ _id: statementId, companyId });
   if (!statement) return;
 
+  const currentStatus = String(statement.status ?? '');
   const nextStatus =
     total > 0 && queued === 0 && processing === 0
       ? 'ready_for_review'
-      : total === 0 && statement.status === 'checks_queued'
+      : total === 0 && currentStatus === 'checks_queued'
         ? 'ready_for_review'
-        : statement.status;
+        : currentStatus;
 
-  updateStatementProgress(statement, nextStatus, {
+  const progress = buildStatementProgress(nextStatus, {
     totalChecks: total,
     checksQueued: queued,
     checksProcessing: processing,
@@ -1237,19 +1249,27 @@ const updateStatementProgressFromChecks = async (companyId: string, statementId:
     checksFailed: failed
   });
 
-  if (nextStatus !== statement.status) {
-    updateStatementStage(statement, nextStatus as keyof typeof statementStageTimestampKeys);
+  const artifactsPatch: Record<string, unknown> = {};
+  if (nextStatus !== currentStatus) {
+    const timestampKey = statementStageTimestampKeys[nextStatus as keyof typeof statementStageTimestampKeys];
+    if (timestampKey) {
+      artifactsPatch.stageTimestamps = {
+        [timestampKey]: nowIso()
+      };
+    }
   } else if (nextStatus === 'ready_for_review') {
-    mergeStatementArtifacts(statement, {
-      stageTimestamps: {
-        readyForReviewAt:
-          statement.artifacts?.stageTimestamps?.readyForReviewAt ?? nowIso()
-      }
-    });
-    statement.status = 'ready_for_review' as any;
+    artifactsPatch.stageTimestamps = {
+      readyForReviewAt: statement.artifacts?.stageTimestamps?.readyForReviewAt ?? nowIso()
+    };
   }
 
-  await statement.save();
+  await persistStatementPatch(companyId, statementId, {
+    status: nextStatus,
+    progress,
+    artifacts: Object.keys(artifactsPatch).length > 0 ? artifactsPatch : undefined
+  });
+
+  const statementForFinalization = await BankStatement.findOne({ _id: statementId, companyId });
 
   // Finalize the consolidated extracted-checks artifact EXACTLY ONCE per
   // statement run, once all checks have reached a terminal state. Writing it
@@ -1261,7 +1281,7 @@ const updateStatementProgressFromChecks = async (companyId: string, statementId:
     extractedChecksFinalizedStatements.add(finalizationKey);
     try {
       const bucketName = env.gcsBucketName;
-      const rootPrefix = String(statement.gcs?.rootPrefix ?? '');
+      const rootPrefix = String(statementForFinalization?.gcs?.rootPrefix ?? '');
       if (bucketName && rootPrefix) {
         const claimedStatement = await tryClaimExtractedChecksFinalization(companyId, statementId);
         if (!claimedStatement) {
@@ -1366,7 +1386,11 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         }
       });
       updateStatementProgress(statement, 'extracting', statement.progress);
-      await statement.save();
+      await persistStatementPatch(payload.companyId, payload.statementId, {
+        status: statement.status,
+        progress: statement.progress,
+        artifacts: statement.artifacts
+      });
       logStage('start', { ...logCtx, pdfPath, rootPrefix });
 
       logStage('downloading pdf', { ...logCtx, pdfPath });
@@ -1439,7 +1463,11 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       });
       updateStatementProgress(statement, 'structuring', statement.progress);
       statement.status = 'structuring' as any;
-      await statement.save();
+      await persistStatementPatch(payload.companyId, payload.statementId, {
+        status: statement.status,
+        progress: statement.progress,
+        artifacts: statement.artifacts
+      });
       logStage('completed, advancing to structuring', logCtx);
 
       artifacts.statementPageImages = rendered.pageImagePaths.join(',');
@@ -1462,7 +1490,11 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         }
       });
       updateStatementProgress(statement, 'structuring', statement.progress);
-      await statement.save();
+      await persistStatementPatch(payload.companyId, payload.statementId, {
+        status: statement.status,
+        progress: statement.progress,
+        artifacts: statement.artifacts
+      });
 
       const ocrPath = String(statement.artifacts?.ocrPath ?? buildOcrPath(rootPrefix, 'docai.json'));
       const ocrTextPath = String(
@@ -1504,13 +1536,18 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         });
       }
 
+      if (pdfLayoutSectionBounds.length > 0) {
+        applyLayoutSectionsToParsedTransactions(parsed, pdfLayoutPages, pdfLayoutSectionBounds);
+      }
+
       const transactionSections = buildTransactionSections(parsed, pdfLayoutSectionBounds);
       const checksClearedRows = buildChecksClearedRows(parsed, pdfLayoutSectionBounds, pdfLayoutChecks);
       const extractionIssues = buildExtractionIssues(parsed);
       const parserVersion = 'statement-parser.v2';
       const validationReport = buildStatementValidationReport({
         statementId: payload.statementId,
-        rows: parsed as any
+        rows: parsed as any,
+        profile: 'reconciliation_only'
       });
       const evidenceRows = buildStatementEvidenceRows({
         statementId: payload.statementId,
@@ -1520,10 +1557,12 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       });
       if (!validationReport.passed) {
         extractionIssues.push(
-          ...validationReport.mismatches.map(
-            (mismatch) =>
-              `[validation] ${mismatch.message} (expected ${mismatch.expected}, actual ${mismatch.actual})`
-          )
+          ...validationReport.mismatches.map((mismatch) => {
+            if (mismatch.code === 'balance_reconciliation_drift') {
+              return `Balance reconciliation drift detected (${Number(mismatch.actual ?? 0).toFixed(2)}).`;
+            }
+            return `[validation] ${mismatch.message} (expected ${mismatch.expected}, actual ${mismatch.actual})`;
+          })
         );
       }
       const statementMonth = String(
@@ -1729,6 +1768,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         offlineExtractionPath: offlineExtraction ? offlineExtractionPath : statement.artifacts?.offlineExtractionPath ?? undefined,
         evidencePath,
         validationReportPath,
+        pdfLayoutPath,
         geminiPath: normalizedPath,
         stageTimestamps: {
           structuringAt: statement.artifacts?.stageTimestamps?.structuringAt ?? nowIso(),
@@ -1746,7 +1786,12 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       statement.status = nextPhase as any;
       (statement as any).validationReport = validationReport;
       statement.issues = extractionIssues.length > 0 ? extractionIssues : [];
-      await statement.save();
+      await persistStatementPatch(payload.companyId, payload.statementId, {
+        status: statement.status,
+        progress: statement.progress,
+        issues: statement.issues,
+        artifacts: statement.artifacts
+      });
 
       artifacts.normalized = normalizedPath;
       artifacts.transactionsTable = transactionsTablePath;
@@ -1782,7 +1827,14 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       if (!statement || !payload.statementId) {
         throw new Error('checks.spawn requires a valid statementId');
       }
-      const rootPrefix = String(statement.gcs?.rootPrefix ?? '');
+      const freshStatement = await BankStatement.findOne({
+        _id: payload.statementId,
+        companyId: payload.companyId
+      });
+      if (!freshStatement) {
+        throw new Error('Statement not found for checks.spawn');
+      }
+      const rootPrefix = String(freshStatement.gcs?.rootPrefix ?? '');
       if (!rootPrefix) {
         throw new Error('Statement is missing gcs.rootPrefix');
       }
@@ -1799,7 +1851,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       // is already free of the noisy summary/subtotal rows that pollute
       // StatementTransactionModel. Reading it directly avoids re-doing the
       // candidate filtering we used to do against StatementTransactionModel.
-      const checksClearedTablePath = String(statement.artifacts?.checksClearedTablePath ?? '');
+      const checksClearedTablePath = String(freshStatement.artifacts?.checksClearedTablePath ?? '');
       type ClearedCheckRow = {
         localId?: string;
         pageNumber?: number | null;
@@ -1827,6 +1879,42 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
             statementId: payload.statementId,
             checksClearedTablePath,
             error: loadError instanceof Error ? loadError.message : String(loadError)
+          });
+        }
+      }
+
+      if (clearedRows.length === 0) {
+        const pdfLayoutPath = String(freshStatement.artifacts?.pdfLayoutPath ?? buildStatementPdfLayoutPath(rootPrefix));
+        try {
+          const rawLayout = await downloadFileBuffer(bucketName, pdfLayoutPath);
+          const parsedLayout = JSON.parse(rawLayout.toString('utf-8')) as {
+            coordinateTables?: { checksCleared?: ExtractedCheckRow[] };
+          };
+          const layoutChecks = parsedLayout?.coordinateTables?.checksCleared ?? [];
+          if (layoutChecks.length > 0) {
+            clearedRows = layoutChecks.map((row) => ({
+              localId: `layout-check-${row.checkNumber}`,
+              pageNumber: row.pageNumber,
+              postDate: row.date,
+              checkNumber: row.checkNumber,
+              amount: row.amount,
+              type: 'debit' as const,
+              layoutSection: 'checks_cleared',
+              checkNumberSource: 'pdf_layout'
+            }));
+            // eslint-disable-next-line no-console
+            console.info('[checks.spawn] loaded cleared checks from pdf layout artifact', {
+              statementId: payload.statementId,
+              count: clearedRows.length,
+              pdfLayoutPath
+            });
+          }
+        } catch (layoutLoadError) {
+          // eslint-disable-next-line no-console
+          console.warn('[checks.spawn] failed to load cleared checks from pdf layout artifact', {
+            statementId: payload.statementId,
+            pdfLayoutPath,
+            error: layoutLoadError instanceof Error ? layoutLoadError.message : String(layoutLoadError)
           });
         }
       }
@@ -1904,7 +1992,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       const uniqueOrderedCheckNumbers = Array.from(new Set(orderedCheckNumbers));
 
       let detectedCheckPages: number[] = [];
-      const statementOcrPathForChecks = String(statement.artifacts?.ocrPath ?? '');
+      const statementOcrPathForChecks = String(freshStatement.artifacts?.ocrPath ?? '');
       if (uniqueOrderedCheckNumbers.length > 0 && statementOcrPathForChecks) {
         try {
           const { pages: ocrPages } = await readStatementOcrPages(
@@ -1962,7 +2050,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         alignment?: { status?: string; matchedBy?: string };
       };
       let offlineCheckImages: OfflineCheckImageArtifact[] = [];
-      const offlineExtractionPath = String(statement.artifacts?.offlineExtractionPath ?? '');
+      const offlineExtractionPath = String(freshStatement.artifacts?.offlineExtractionPath ?? '');
       if (offlineExtractionPath) {
         try {
           const rawJson = await downloadFileBuffer(bucketName, offlineExtractionPath);
@@ -2000,34 +2088,31 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       for (let index = 0; index < candidates.length; index += 1) {
         const candidate = candidates[index];
         const checkId = new Types.ObjectId().toString();
-        // Prefer bbox already on the cleared-checks row; fall back to the
-        // matched StatementTransaction's sourceLocator bbox if we have one.
         const rowBBox = candidate.bbox;
         const txnBBox = candidate.sourceLocator?.bbox;
-        const parserBBox = (rowBBox && rowBBox.length === 4)
-          ? [rowBBox[0], rowBBox[1], rowBBox[2], rowBBox[3]]
-          : (txnBBox && txnBBox.length === 4)
-            ? [txnBBox[0], txnBBox[1], txnBBox[2], txnBBox[3]]
-            : undefined;
+        const parserBBox =
+          rowBBox && rowBBox.length === 4
+            ? ([rowBBox[0], rowBBox[1], rowBBox[2], rowBBox[3]] as [number, number, number, number])
+            : txnBBox && txnBBox.length === 4
+              ? ([txnBBox[0], txnBBox[1], txnBBox[2], txnBBox[3]] as [number, number, number, number])
+              : undefined;
+        const parserPageNumber =
+          candidate.pageNumber != null
+            ? Number(candidate.pageNumber)
+            : candidate.sourceLocator?.pageNumber != null
+              ? Number(candidate.sourceLocator.pageNumber)
+              : undefined;
         const checkNumberKey = candidate.checkNumber ? String(candidate.checkNumber).trim() : '';
-        const namedSlot = parserBBox
-          ? null
-          : (checkNumberKey ? manualSlotByCheckNumber.get(checkNumberKey) : null) ?? null;
+        const namedSlot = (checkNumberKey ? manualSlotByCheckNumber.get(checkNumberKey) : null) ?? null;
         const offlineMatch = checkNumberKey
           ? (offlineImageByCheckNumber.get(checkNumberKey) ?? []).find(
               (image) => image.amount == null || Math.abs(Number(image.amount) - Number(candidate.amount ?? 0)) < 0.01
             ) ?? null
           : null;
-        const frontPath = String(offlineMatch?.reviewCropPath ?? buildCheckCropPath(rootPrefix, checkId, 'front.png'));
 
-        // Final, bulletproof fallback: if neither the parser nor the named-
-        // slot lookup produced a bbox, compute one deterministically from the
-        // candidate's position using the hardcoded SouthState 3x6 grid preset.
-        // Prefers ordered-by-check-number index if one is available, falls
-        // back to a running counter otherwise.
         let computedSlot = null as ReturnType<typeof computeManualCheckSlot> | null;
-        if (!parserBBox && !namedSlot) {
-          const orderIndex = checkNumberKey ? checkNumberOrderIndex.get(checkNumberKey) : undefined;
+        const orderIndex = checkNumberKey ? checkNumberOrderIndex.get(checkNumberKey) : undefined;
+        if (!namedSlot) {
           const slotIndex = orderIndex != null ? orderIndex : unmappedSlotCursor;
           computedSlot = computeManualCheckSlot(slotIndex, {
             pages: detectedCheckPages.length > 0 ? detectedCheckPages : undefined,
@@ -2037,33 +2122,38 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
           if (orderIndex == null) unmappedSlotCursor += 1;
         }
 
-        const manualSlot = namedSlot ?? computedSlot;
-        const cropBBox = parserBBox
-          ?? (offlineMatch?.imageBox
-            ? [
-                Number(offlineMatch.imageBox.left ?? 0),
-                Number(offlineMatch.imageBox.top ?? 0),
-                Number(offlineMatch.imageBox.left ?? 0) + Number(offlineMatch.imageBox.width ?? 0),
-                Number(offlineMatch.imageBox.top ?? 0) + Number(offlineMatch.imageBox.height ?? 0)
-              ]
-            : undefined)
-          ?? (manualSlot ? [manualSlot.bbox.left, manualSlot.bbox.top, manualSlot.bbox.right, manualSlot.bbox.bottom] : undefined);
-        const pageNumber =
-          candidate.pageNumber != null
-            ? Number(candidate.pageNumber)
-            : candidate.sourceLocator?.pageNumber != null
-              ? Number(candidate.sourceLocator.pageNumber)
-              : offlineMatch?.page != null
-                ? Number(offlineMatch.page)
-              : manualSlot?.pageNumber;
+        const placement = resolveCheckImageCropPlacement({
+          checkNumber: checkNumberKey || undefined,
+          detectedCheckPages,
+          manualSlot: namedSlot ?? computedSlot,
+          offlineImage: offlineMatch,
+          parserBBox,
+          parserPageNumber,
+          parserRegionText: candidate.description
+        });
+
+        const cropBBox = placement?.cropBBox;
+        const pageNumber = placement?.pageNumber;
+        const frontPath = String(
+          placement?.cropImagePath ?? offlineMatch?.reviewCropPath ?? buildCheckCropPath(rootPrefix, checkId, 'front.png')
+        );
 
         if (!cropBBox) {
           // eslint-disable-next-line no-console
           console.warn('[checks.spawn] no crop bbox computed for candidate', {
             statementId: payload.statementId,
             checkNumber: checkNumberKey,
-            hasParserBBox: Boolean(parserBBox),
-            hasNamedSlot: Boolean(namedSlot)
+            hadParserBBox: Boolean(parserBBox),
+            hadNamedSlot: Boolean(namedSlot),
+            hadComputedSlot: Boolean(computedSlot),
+            detectedCheckPages
+          });
+        } else if (placement?.source === 'grid' && parserBBox) {
+          // eslint-disable-next-line no-console
+          console.info('[checks.spawn] ignored checks-cleared table bbox in favor of grid slot', {
+            statementId: payload.statementId,
+            checkNumber: checkNumberKey,
+            parserPageNumber
           });
         }
 
@@ -2118,27 +2208,31 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       }
 
       if (checks.length > 0) {
-        mergeStatementArtifacts(statement, {
+        mergeStatementArtifacts(freshStatement, {
           stageTimestamps: {
             checksQueuedAt: queuedAt
           }
         });
       } else {
-        mergeStatementArtifacts(statement, {
+        mergeStatementArtifacts(freshStatement, {
           stageTimestamps: {
             readyForReviewAt: queuedAt
           }
         });
       }
-      updateStatementProgress(statement, checks.length > 0 ? 'checks_queued' : 'ready_for_review', {
+      updateStatementProgress(freshStatement, checks.length > 0 ? 'checks_queued' : 'ready_for_review', {
         totalChecks: checks.length,
         checksQueued: checks.length,
         checksProcessing: 0,
         checksReady: 0,
         checksFailed: 0
       });
-      statement.status = checks.length > 0 ? ('checks_queued' as any) : ('ready_for_review' as any);
-      await statement.save();
+      freshStatement.status = checks.length > 0 ? ('checks_queued' as any) : ('ready_for_review' as any);
+      await persistStatementPatch(payload.companyId, payload.statementId, {
+        status: freshStatement.status,
+        progress: freshStatement.progress,
+        artifacts: freshStatement.artifacts
+      });
 
       if (checks.length > 0) {
         const { enqueueAccountingJob } = await import('./accountingQueue');
@@ -2246,6 +2340,22 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
           : null;
       let derivedPageNumber: number | undefined;
 
+      if (
+        cropBox &&
+        isLikelyChecksClearedTableCrop({
+          bbox: cropBox,
+          regionText: statementTxn?.description ?? check.extracted?.memo ?? undefined
+        })
+      ) {
+        // eslint-disable-next-line no-console
+        console.info('[check.process] discarding checks-cleared table bbox; will use check-image grid', {
+          statementId: payload.statementId,
+          checkId: payload.checkId,
+          checkNumber: check.extracted?.checkNumber ?? null
+        });
+        cropBox = null;
+      }
+
       // Final safety net: if the StatementCheck doc was created before the
       // checks.spawn layout fix landed and has no bbox, derive one from the
       // check's ordered position using the hardcoded SouthState 3x6 grid.
@@ -2253,6 +2363,22 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       // laid out in ascending order on the pages line up) but fall back to
       // createdAt-order so checks without check numbers still get a bbox.
       if (!cropBox) {
+        let detectedCheckPages: number[] = [];
+        const statementOcrPathForCrop = String(parentStatement?.artifacts?.ocrPath ?? '');
+        if (statementOcrPathForCrop) {
+          try {
+            const { pages: ocrPages } = await readStatementOcrPages(bucketName, statementOcrPathForCrop);
+            detectedCheckPages = detectCheckImagePages(
+              ocrPages.map((page) => ({
+                pageNumber: Number(page.pageNumber),
+                text: String(page.text ?? '')
+              }))
+            );
+          } catch {
+            detectedCheckPages = [];
+          }
+        }
+
         const peerChecks = await StatementCheckModel.find({
           companyId: payload.companyId,
           statementId: payload.statementId
@@ -2280,6 +2406,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
 
         if (orderIndex >= 0) {
           const computed = computeManualCheckSlot(orderIndex, {
+            pages: detectedCheckPages.length > 0 ? detectedCheckPages : undefined,
             fallbackStartPage: Number(check.artifacts?.pageNumber ?? 4) || 4,
             preset: DEFAULT_CHECK_IMAGE_PRESET
           });
@@ -2392,8 +2519,23 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       const structuredPath = extraction.artifacts.structuredPath ?? buildCheckStructuredPath(rootPrefix, check._id.toString());
       const frontPath = extraction.artifacts.cropImagePath ?? check.gcs?.frontPath ?? buildCheckCropPath(rootPrefix, check._id.toString(), 'front.png');
 
+      // eslint-disable-next-line no-console
+      console.info('[check.process] extraction result', {
+        statementId: payload.statementId,
+        checkId: payload.checkId,
+        pageNumber: pageNo,
+        cropBox,
+        detectedCheckNumber: extraction.extracted.checkNumber ?? null,
+        seededCheckNumber: check.extracted?.checkNumber ?? statementTxn?.checkNumber ?? null,
+        ocrProvider: extraction.ocr.provider,
+        ocrTextPreview: extraction.ocr.text.slice(0, 240)
+      });
+
       const extracted = {
-        checkNumber: extraction.extracted.checkNumber ?? statementTxn?.checkNumber ?? check.extracted?.checkNumber,
+        checkNumber:
+          check.extracted?.checkNumber ??
+          statementTxn?.checkNumber ??
+          extraction.extracted.checkNumber,
         date: extraction.extracted.date ?? statementTxn?.postDate ?? check.extracted?.date,
         payeeName: extraction.extracted.payeeName ?? statementTxn?.merchant ?? statementTxn?.description ?? check.extracted?.payeeName,
         amount: extraction.extracted.amount ?? statementTxn?.amount ?? check.extracted?.amount,
@@ -2685,6 +2827,17 @@ export const runAccountingTask = async (input: unknown): Promise<AccountingTaskR
       jobType: payload.jobType
     });
 
+    let nextJobType = nextJobMap[payload.jobType];
+    if (payload.jobType === 'statement.structure' && payload.statementId) {
+      const latest = await BankStatement.findOne({
+        _id: payload.statementId,
+        companyId: payload.companyId
+      });
+      if (latest && String(latest.status) === 'needs_parser_review') {
+        nextJobType = undefined;
+      }
+    }
+
     return {
       taskId: String(payload.meta.taskId ?? `${payload.jobType}-${Date.now()}`),
       companyId: payload.companyId,
@@ -2692,7 +2845,7 @@ export const runAccountingTask = async (input: unknown): Promise<AccountingTaskR
       checkId: payload.checkId,
       jobType: payload.jobType,
       status: 'completed',
-      nextJobType: nextJobMap[payload.jobType]
+      nextJobType
     };
   } catch (error) {
     const message = String((error as Error).message);
@@ -2702,21 +2855,11 @@ export const runAccountingTask = async (input: unknown): Promise<AccountingTaskR
     });
 
     if (statementJobTypes.includes(payload.jobType) && payload.statementId) {
-      const statement = await BankStatement.findOne({
-        _id: payload.statementId,
-        companyId: payload.companyId
+      await persistStatementFailure({
+        companyId: payload.companyId,
+        statementId: payload.statementId,
+        message
       });
-      if (statement) {
-        statement.status = 'failed' as any;
-        mergeStatementArtifacts(statement, {
-          stageTimestamps: {
-            failedAt: nowIso()
-          }
-        });
-        updateStatementProgress(statement, 'failed', statement.progress);
-        statement.issues = [...(statement.issues ?? []), message] as any;
-        await statement.save();
-      }
 
       if (payload.jobType === 'check.process' && payload.checkId) {
         const currentCheck = await StatementCheckModel.findOne({

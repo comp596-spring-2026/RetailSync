@@ -1,4 +1,5 @@
 
+import { coerceSharpInputBuffer, logImageInput } from '../../utils/imageInput';
 import type { Box, RenderedPdfPage } from './types';
 
 type PdfJsShape = {
@@ -23,53 +24,53 @@ type PdfJsShape = {
   };
 };
 
-let pdfJsPromise: Promise<PdfJsShape> | null = null;
-let canvasModulePromise: Promise<{
+type CanvasModule = {
   createCanvas: (width: number, height: number) => any;
   DOMMatrix?: unknown;
   ImageData?: unknown;
   Path2D?: unknown;
   Image?: unknown;
-  Canvas?: unknown;
-}> | null = null;
+};
 
-const loadCanvasModule = async () => {
+let pdfJsPromise: Promise<PdfJsShape> | null = null;
+let canvasModulePromise: Promise<CanvasModule> | null = null;
+
+const loadCanvasModule = async (): Promise<CanvasModule> => {
   if (!canvasModulePromise) {
-    canvasModulePromise = import('canvas')
-      .then((mod) => mod as unknown as {
-        createCanvas: (width: number, height: number) => any;
-        DOMMatrix?: unknown;
-        ImageData?: unknown;
-        Path2D?: unknown;
-        Image?: unknown;
-        Canvas?: unknown;
-      });
+    canvasModulePromise = import('@napi-rs/canvas').then((mod) => ({
+      createCanvas: mod.createCanvas,
+      DOMMatrix: mod.DOMMatrix,
+      ImageData: mod.ImageData,
+      Path2D: mod.Path2D,
+      Image: mod.Image
+    }));
   }
-  return canvasModulePromise;
+  return canvasModulePromise as Promise<CanvasModule>;
+};
+
+const assignCanvasGlobal = (key: string, value: unknown) => {
+  if (!value) return;
+  (globalThis as Record<string, unknown>)[key] = value;
 };
 
 const ensureCanvasGlobals = async () => {
   const canvas = await loadCanvasModule();
-  if (!(globalThis as Record<string, unknown>).DOMMatrix && canvas.DOMMatrix) {
-    (globalThis as Record<string, unknown>).DOMMatrix = canvas.DOMMatrix;
-  }
-  if (!(globalThis as Record<string, unknown>).ImageData && canvas.ImageData) {
-    (globalThis as Record<string, unknown>).ImageData = canvas.ImageData;
-  }
-  if (!(globalThis as Record<string, unknown>).Path2D && canvas.Path2D) {
-    (globalThis as Record<string, unknown>).Path2D = canvas.Path2D;
-  }
-  if (!(globalThis as Record<string, unknown>).Image && canvas.Image) {
-    (globalThis as Record<string, unknown>).Image = canvas.Image;
-  }
-  if (!(globalThis as Record<string, unknown>).Canvas && canvas.Canvas) {
-    (globalThis as Record<string, unknown>).Canvas = canvas.Canvas;
-  }
+  assignCanvasGlobal('DOMMatrix', canvas.DOMMatrix);
+  assignCanvasGlobal('ImageData', canvas.ImageData);
+  assignCanvasGlobal('Path2D', canvas.Path2D);
+  assignCanvasGlobal('Image', canvas.Image);
+  assignCanvasGlobal('HTMLImageElement', canvas.Image);
 };
+
+let pdfJsLoadOrder: Promise<void> | null = null;
 
 const loadPdfJs = async () => {
   if (!pdfJsPromise) {
+    pdfJsLoadOrder = ensureCanvasGlobals();
+    await pdfJsLoadOrder;
     pdfJsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((mod) => mod as unknown as PdfJsShape);
+  } else if (pdfJsLoadOrder) {
+    await pdfJsLoadOrder;
   }
   return pdfJsPromise;
 };
@@ -113,12 +114,17 @@ export const renderPdfPageToBuffer = async (
       canvasFactory
     }).promise;
 
+    logImageInput('renderPdfPage.canvas', canvas, { pageNumber, scale });
+    const rawPng = canvas.toBuffer('image/png');
+    logImageInput('renderPdfPage.png', rawPng, { pageNumber, scale });
+    const buffer = coerceSharpInputBuffer('renderPdfPage.png', rawPng);
+
     return {
       pageNumber,
       width: Math.ceil(viewport.width),
       height: Math.ceil(viewport.height),
       scale,
-      buffer: canvas.toBuffer('image/png')
+      buffer
     };
   } catch (error) {
     throw error;

@@ -189,6 +189,7 @@ describe('StatementDetailPage', () => {
               description: 'Staples payment',
               amount: 123.45,
               direction: 'debit',
+              section: 'electronic_debits',
               proposedTxnType: 'Expense',
               proposalConfidence: 0.96,
               reviewStatus: 'proposed',
@@ -204,6 +205,7 @@ describe('StatementDetailPage', () => {
               description: 'Store deposit',
               amount: 800,
               direction: 'credit',
+              section: 'deposits',
               reviewStatus: 'proposed',
               postingStatus: 'not_posted',
               status: 'structured',
@@ -514,31 +516,23 @@ describe('StatementDetailPage', () => {
       </Provider>
     );
 
-    expect(await screen.findByText(/^Workspace$/i)).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Overview/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Suggestions/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /File Manager/i })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: /^Overview$/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^Review Transactions$/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^Source Proof$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Reprocess$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Back$/i })).toBeInTheDocument();
-    expect(within(screen.getByTestId('overview-card-entries')).getByText(/^Entries$/i)).toBeInTheDocument();
-    expect(within(screen.getByTestId('overview-card-entries')).getByText(/^1$/i)).toBeInTheDocument();
-    expect(within(screen.getByTestId('overview-card-checks')).getByText(/^Checks$/i)).toBeInTheDocument();
-    expect(within(screen.getByTestId('overview-card-checks')).getByText(/^3$/i)).toBeInTheDocument();
+    expect(screen.getByTestId('statement-summary-card')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('tab', { name: /File Manager/i }));
+    await user.click(screen.getByRole('tab', { name: /^Source Proof$/i }));
     expect(screen.getByRole('button', { name: /Structured Tables 4/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('tab', { name: /Suggestions/i }));
-    expect(screen.getByRole('tab', { name: /Review/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Credits/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Debits/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Checks/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: /^Review Transactions$/i }));
     expect(screen.getByRole('button', { name: /Filters/i })).toBeInTheDocument();
-    expect(screen.getByText(/Showing/i)).toBeInTheDocument();
+    expect(screen.getByText(/sections · .*review rows/i)).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /Review/i }).length).toBeGreaterThan(0);
   });
 
-  it('shows grouped suggestion buckets for the statement review workflow', async () => {
+  it('shows section-grouped review rows for the statement review workflow', async () => {
     const user = userEvent.setup();
 
     render(
@@ -551,15 +545,11 @@ describe('StatementDetailPage', () => {
       </Provider>
     );
 
-    await screen.findByText(/^Workspace$/i);
-    await user.click(screen.getByRole('tab', { name: /Suggestions/i }));
+    await screen.findByRole('tab', { name: /^Overview$/i });
+    await user.click(screen.getByRole('tab', { name: /^Review Transactions$/i }));
 
-    expect(screen.getByRole('tab', { name: /Suggestions/i })).toBeInTheDocument();
     expect(screen.getAllByText(/Store deposit/i).length).toBeGreaterThan(0);
-    expect(screen.getByRole('tab', { name: /Review/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Credits/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Debits/i })).toBeInTheDocument();
     expect(screen.getAllByText(/Staples payment/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Showing/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/All \d+ rows|Showing 1-/i).length).toBeGreaterThan(0);
   });
 });

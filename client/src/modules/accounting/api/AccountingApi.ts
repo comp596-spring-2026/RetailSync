@@ -36,6 +36,7 @@ import {
   QuickBooksTransactionDetail,
   QuickBooksHubChartAccountCreateInput,
   QuickBooksHubChartAccountCreateResponse,
+  QuickBooksHubItemsResponse,
   QuickBooksSettings,
   QuickBooksWriteCreateInput,
   QuickBooksWriteDeleteInput,
@@ -54,6 +55,8 @@ import {
   StatementTransaction,
   StatementSuggestionsResponse,
   StatementReviewStatus,
+  StatementProposalPatch,
+  StatementQuickbooksPostResult,
   ResolveTransferSuggestionInput,
   RequestStatementUploadUrlInput
 } from '@retailsync/shared';
@@ -261,11 +264,23 @@ export class AccountingApi {
     statementId: string,
     suggestionId: string,
     source: 'transaction' | 'check',
-    reviewStatus: StatementReviewStatus
+    reviewStatus: StatementReviewStatus,
+    proposal?: StatementProposalPatch,
+    postToQuickBooks = true
   ) {
-    return api.patch(`/accounting/statements/${statementId}/suggestions/${suggestionId}/review`, {
+    return api.patch<{
+      data: {
+        suggestionId: string;
+        source: 'transaction' | 'check';
+        reviewStatus: StatementReviewStatus;
+        proposal?: StatementProposalPatch;
+        quickbooks?: StatementQuickbooksPostResult;
+      };
+    }>(`/accounting/statements/${statementId}/suggestions/${suggestionId}/review`, {
       source,
-      reviewStatus
+      reviewStatus,
+      postToQuickBooks,
+      ...(proposal ? { proposal } : {})
     });
   }
 
@@ -433,6 +448,26 @@ export class AccountingApi {
     return api.post<{
       data: QuickBooksHubChartAccountCreateResponse;
     }>('/integrations/quickbooks/hub/chart-of-accounts', payload);
+  }
+
+  getQuickbooksHubItems(params?: { page?: number; pageSize?: number; search?: string }) {
+    return this.listQuickBooksHub<QuickBooksHubItemsResponse>(
+      '/integrations/quickbooks/hub/items',
+      params
+    );
+  }
+
+  getQuickbooksWriteInvoices(params?: { customerId?: string; page?: number; pageSize?: number }) {
+    return api.get<{
+      data: QuickBooksWriteListResponse;
+    }>('/integrations/quickbooks/write/invoice', {
+      params: {
+        page: params?.page ?? 1,
+        pageSize: params?.pageSize ?? 100,
+        sort: '-date',
+        customerId: params?.customerId?.trim() || undefined
+      }
+    });
   }
 
   getQuickbooksHubEntities(entityType: QuickBooksHubEntityType, params?: Omit<QuickBooksHubEntitiesParams, 'entityType'>) {

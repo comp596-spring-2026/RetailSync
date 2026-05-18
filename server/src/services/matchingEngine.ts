@@ -1,3 +1,4 @@
+import { inferDefaultQuickBooksTxnType } from '@retailsync/shared';
 import { QuickBooksReferenceModel } from '../models/QuickBooksReference';
 import { LedgerEntryModel } from '../models/LedgerEntry';
 
@@ -21,7 +22,7 @@ type MatchingInput = {
 };
 
 type MatchingResult = {
-  qbTxnType: 'Expense' | 'Deposit' | 'Transfer' | 'Check';
+  qbTxnType: 'Expense' | 'Deposit' | 'Transfer' | 'Check' | 'SalesReceipt' | 'Payment';
   categoryAccountId?: string;
   payeeType?: 'vendor' | 'customer' | 'employee' | 'other';
   payeeId?: string;
@@ -76,7 +77,10 @@ export const buildMatchingProposal = async (input: MatchingInput): Promise<Match
   const joinedText = `${input.description} ${input.merchant ?? ''}`.trim();
   const hardRule = HARD_RULES.find((rule) => rule.pattern.test(joinedText));
 
-  let qbTxnType: MatchingResult['qbTxnType'] = input.type === 'debit' ? 'Expense' : 'Deposit';
+  let qbTxnType: MatchingResult['qbTxnType'] = inferDefaultQuickBooksTxnType({
+    type: input.type,
+    description: joinedText
+  });
   let categoryAccountId: string | undefined;
 
   if (hardRule) {
@@ -130,7 +134,7 @@ export const buildMatchingProposal = async (input: MatchingInput): Promise<Match
         `Entity resolution: ${best.displayName} (${best.entityType}) ${best.score.toFixed(2)}`
       );
       if (input.type === 'debit') {
-        qbTxnType = 'Check';
+        qbTxnType = input.check ? 'Check' : 'Expense';
       }
       if (checkNumber) {
         reasons.push(`Check number signal: ${checkNumber}`);
@@ -176,8 +180,14 @@ export const buildMatchingProposal = async (input: MatchingInput): Promise<Match
 
     const first = historical[0] as { proposal?: { qbTxnType?: MatchingResult['qbTxnType']; categoryAccountId?: string } };
     if (first?.proposal?.qbTxnType) {
-      qbTxnType = first.proposal.qbTxnType;
-      reasons.push(`Historical proposal reused txn type: ${qbTxnType}`);
+      const hist = first.proposal.qbTxnType;
+      const sensibleForDirection =
+        (input.type === 'credit' && (hist === 'Deposit' || hist === 'Transfer')) ||
+        (input.type === 'debit' && (hist === 'Expense' || hist === 'Check' || hist === 'Transfer'));
+      if (sensibleForDirection) {
+        qbTxnType = hist;
+        reasons.push(`Historical proposal reused txn type: ${qbTxnType}`);
+      }
     }
     if (first?.proposal?.categoryAccountId) {
       categoryAccountId = first.proposal.categoryAccountId;
@@ -185,7 +195,7 @@ export const buildMatchingProposal = async (input: MatchingInput): Promise<Match
     }
   }
 
-  if (input.type === 'debit' && checkPayeeName) {
+  if (input.type === 'debit' && input.check) {
     qbTxnType = 'Check';
     reasons.push('Check evidence present for debit transaction');
     score += 0.1;

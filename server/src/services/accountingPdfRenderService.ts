@@ -1,4 +1,5 @@
 import { getStorageClient } from '../integrations/google/storage.client';
+import { coerceSharpInputBuffer } from '../utils/imageInput';
 import { buildPageImagePath } from './accountingStorageService';
 import { getPdfPageCount, renderPdfPageToBuffer } from '../statement-extraction/offline/renderPdfPage';
 
@@ -45,10 +46,11 @@ export const renderStatementPdfPages = async (
 
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
     const rendered = await renderPdfPageToBuffer(args.pdfBuffer, pageNumber, scale);
+    const buffer = coerceSharpInputBuffer(`renderStatementPdfPages.page-${pageNumber}`, rendered.buffer);
     pages.push({
       pageNo: pageNumber,
       fileName: `page-${String(pageNumber).padStart(3, '0')}.png`,
-      buffer: rendered.buffer
+      buffer
     });
   }
 
@@ -64,7 +66,8 @@ export const persistRenderedStatementPages = async (args: PersistRenderedStateme
   for (const page of pages) {
     const objectPath = buildPageImagePath(args.rootPrefix, page.pageNo);
     const file = bucket.file(objectPath);
-    await file.save(page.buffer, {
+    const buffer = coerceSharpInputBuffer(`persistRenderedStatementPages.page-${page.pageNo}`, page.buffer);
+    await file.save(buffer, {
       contentType: 'image/png',
       resumable: false,
       validation: false

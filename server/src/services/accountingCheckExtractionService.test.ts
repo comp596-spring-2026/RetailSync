@@ -58,6 +58,22 @@ describe('accountingCheckExtractionService', () => {
     expect(result.reasons).toHaveLength(4);
   });
 
+  it('does not reuse statement page context check numbers when crop text is empty', async () => {
+    const { extractCheckFieldsFromOcr } = await import('./accountingCheckExtractionService');
+
+    const result = extractCheckFieldsFromOcr({
+      cropText: 'Pay to the Order of Vendor LLC',
+      pageContext: 'Check No. 44\nBeginning balance 15062.62',
+      fallback: {
+        checkNumber: '1002',
+        source: 'deterministic'
+      }
+    });
+
+    expect(result.extracted.checkNumber).toBe('1002');
+    expect(result.reasons[0]).toContain('Used seeded check number fallback');
+  });
+
   it('falls back to deterministic data when OCR text is sparse', async () => {
     const { extractCheckFieldsFromOcr } = await import('./accountingCheckExtractionService');
 

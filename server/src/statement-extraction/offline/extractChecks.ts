@@ -55,18 +55,29 @@ export const extractChecks = async (args: {
 
       if (!matchedBox) continue;
 
+      const checkRow = findMatchingCheckRow(caption, args.checkRows);
       const crop = await buildCropVariants({
         pageBuffer: renderedPage.buffer,
         pageWidth: renderedPage.width,
         pageHeight: renderedPage.height,
         imageBox: matchedBox
       });
+      const checkNumber = checkRow?.checkNumber ?? caption.checkNumber;
+      // eslint-disable-next-line no-console
+      console.info('[offline.extractChecks] crop', {
+        pageNumber,
+        checkNumber,
+        captionCheckNumber: caption.checkNumber,
+        imageBox: crop.imageBox,
+        reviewBox: crop.reviewBox,
+        imageBytes: crop.imageBuffer.byteLength,
+        reviewBytes: crop.reviewBuffer.byteLength
+      });
       const paths = await args.persistCrop({
-        checkNumber: caption.checkNumber,
+        checkNumber,
         imageBuffer: crop.imageBuffer,
         reviewBuffer: crop.reviewBuffer
       });
-      const checkRow = findMatchingCheckRow(caption, args.checkRows);
       const inferredBox = {
         left: captionBoxPx.left - 12,
         top: matchedBox.top,
@@ -76,7 +87,7 @@ export const extractChecks = async (args: {
 
       results.push({
         page: pageNumber,
-        checkNumber: checkRow?.checkNumber ?? caption.checkNumber,
+        checkNumber,
         amount: checkRow?.amount ?? caption.amount,
         imageBox: crop.imageBox,
         reviewBox: crop.reviewBox,

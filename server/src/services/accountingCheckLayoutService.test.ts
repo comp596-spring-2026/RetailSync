@@ -4,7 +4,10 @@ import {
   buildFallbackManualCheckSlots,
   computeManualCheckSlot,
   detectCheckImagePages,
-  isCheckImagePageText
+  isCheckImagePageText,
+  isLikelyChecksClearedTableCrop,
+  isLikelyTableRowCropBox,
+  resolveCheckImageCropPlacement
 } from './accountingCheckLayoutService';
 
 describe('accountingCheckLayoutService', () => {
@@ -135,6 +138,38 @@ describe('accountingCheckLayoutService', () => {
     it('returns null for invalid indexes', () => {
       expect(computeManualCheckSlot(-1)).toBeNull();
       expect(computeManualCheckSlot(Number.NaN)).toBeNull();
+    });
+  });
+
+  describe('check crop placement', () => {
+    it('flags wide flat regions as checks-cleared table rows', () => {
+      expect(isLikelyTableRowCropBox({ left: 40, top: 200, right: 900, bottom: 240 })).toBe(true);
+      expect(isLikelyTableRowCropBox({ left: 100, top: 140, right: 400, bottom: 320 })).toBe(false);
+    });
+
+    it('prefers grid slots over parser bboxes from summary pages', () => {
+      const gridSlot = computeManualCheckSlot(0, { pages: [8], fallbackStartPage: 8 });
+      const placement = resolveCheckImageCropPlacement({
+        checkNumber: '97',
+        detectedCheckPages: [8, 9],
+        manualSlot: gridSlot,
+        parserBBox: [40, 180, 120, 620],
+        parserPageNumber: 3,
+        parserRegionText: '97 12/03/2025 305.84\n98 12/02/2025 55.00'
+      });
+      expect(placement?.source).toBe('grid');
+      expect(placement?.pageNumber).toBe(8);
+    });
+
+    it('allows parser bboxes on detected check-image pages', () => {
+      const placement = resolveCheckImageCropPlacement({
+        detectedCheckPages: [8],
+        parserBBox: [100, 140, 400, 320],
+        parserPageNumber: 8,
+        parserRegionText: '#0097 12/03 $305.84'
+      });
+      expect(placement?.source).toBe('ocr_region');
+      expect(placement?.cropBBox).toEqual([100, 140, 400, 320]);
     });
   });
 });

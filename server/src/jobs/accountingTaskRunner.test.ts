@@ -129,12 +129,14 @@ vi.mock('../models/Run', () => ({
 
 vi.mock('../models/BankStatement', () => ({
   BankStatement: {
-    findOne: vi.fn(async (query: Record<string, unknown>) => {
+    findOne: vi.fn((query: Record<string, unknown>) => {
       const id = getId(query._id, '');
       const companyId = String(query.companyId ?? '');
-      return (
-        stores.statements.find((statement) => statement._id === id && statement.companyId === companyId) ?? null
-      );
+      const statement =
+        stores.statements.find((entry) => entry._id === id && entry.companyId === companyId) ?? null;
+      return Object.assign(Promise.resolve(statement), {
+        lean: vi.fn().mockResolvedValue(statement)
+      });
     }),
     findOneAndUpdate: vi.fn((query: Record<string, unknown>, update: Record<string, any>) => {
       const id = getId(query._id, '');
@@ -550,8 +552,8 @@ describe('accountingTaskRunner', () => {
 
     expect(stores.transactions).toHaveLength(2);
     expect(stores.ledgerEntries).toHaveLength(2);
-    expect(statement.status).toBe('needs_parser_review');
-    expect(statement.validationReport?.passed).toBe(false);
+    expect(statement.status).toBe('checks_queued');
+    expect(statement.validationReport?.passed).toBe(true);
     expect(statement.artifacts.geminiPath).toBe(
       'companies/company-1/statements/2026-01/statement-1/derived/gemini/normalized.v1.json'
     );
@@ -582,7 +584,8 @@ describe('accountingTaskRunner', () => {
 
     const check = stores.checks[0];
     expect(check.extracted.checkNumber).toBe('1001');
-    expect(check.artifacts.cropBBox).toEqual([10, 20, 200, 120]);
+    // Table-row parser bboxes are ignored; placement uses the check-image grid.
+    expect(check.artifacts.cropBBox).toEqual([97, 137, 451, 292]);
     // cropImagePath is intentionally absent until check.process uploads the PNG;
     // publishing it earlier causes 404s when the UI tries to open the crop.
     expect(check.artifacts.cropImagePath).toBeUndefined();

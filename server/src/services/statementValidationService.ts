@@ -44,8 +44,8 @@ export type ValidationReport = {
   statementId: string;
   passed: boolean;
   expected: {
-    beginningBalance: number;
-    endingBalance: number;
+    beginningBalance: number | null;
+    endingBalance: number | null;
     depositsCount: number;
     depositsTotal: number;
     electronicCreditsCount: number;
@@ -102,10 +102,14 @@ const sumBy = (rows: ParsedStatementRow[], predicate: (row: ParsedStatementRow) 
 const countBy = (rows: ParsedStatementRow[], predicate: (row: ParsedStatementRow) => boolean) =>
   rows.filter(predicate).length;
 
+export type StatementValidationProfile = 'reconciliation_only' | 'southstate_fixture';
+
 export const buildStatementValidationReport = (args: {
   statementId: string;
   rows: ParsedStatementRow[];
+  profile?: StatementValidationProfile;
 }): ValidationReport => {
+  const profile = args.profile ?? 'reconciliation_only';
   const rows = args.rows;
   const beginning = rows.find((row) => row.rowType === 'beginning_balance');
   const ending = [...rows].reverse().find((row) => row.rowType === 'ending_balance');
@@ -128,7 +132,7 @@ export const buildStatementValidationReport = (args: {
     excludedRowsCount: countBy(rows, (row) => !row.isPostingCandidate)
   };
 
-  const expected = southStateExpectedTruth;
+  const expected = profile === 'southstate_fixture' ? southStateExpectedTruth : null;
   const mismatches: ValidationMismatch[] = [];
   const pushMismatch = (
     code: string,
@@ -149,51 +153,83 @@ export const buildStatementValidationReport = (args: {
     }
   };
 
-  pushMismatch('beginning_balance_mismatch', expected.beginningBalance, actual.beginningBalance, 'Beginning balance mismatch', 0.01);
-  pushMismatch('ending_balance_mismatch', expected.endingBalance, actual.endingBalance, 'Ending balance mismatch', 0.01);
-  pushMismatch('deposits_count_mismatch', expected.depositsCount, actual.depositsCount, 'Deposits item count mismatch');
-  pushMismatch('deposits_total_mismatch', expected.depositsTotal, actual.depositsTotal, 'Deposits total mismatch', 0.01);
-  pushMismatch(
-    'electronic_credits_count_mismatch',
-    expected.electronicCreditsCount,
-    actual.electronicCreditsCount,
-    'Electronic credits item count mismatch'
-  );
-  pushMismatch(
-    'electronic_credits_total_mismatch',
-    expected.electronicCreditsTotal,
-    actual.electronicCreditsTotal,
-    'Electronic credits total mismatch',
-    0.01
-  );
-  pushMismatch('other_credits_count_mismatch', expected.otherCreditsCount, actual.otherCreditsCount, 'Other credits item count mismatch');
-  pushMismatch('other_credits_total_mismatch', expected.otherCreditsTotal, actual.otherCreditsTotal, 'Other credits total mismatch', 0.01);
-  pushMismatch(
-    'electronic_debits_count_mismatch',
-    expected.electronicDebitsCount,
-    actual.electronicDebitsCount,
-    'Electronic debits item count mismatch'
-  );
-  pushMismatch(
-    'electronic_debits_total_mismatch',
-    expected.electronicDebitsTotal,
-    actual.electronicDebitsTotal,
-    'Electronic debits total mismatch',
-    0.01
-  );
-  pushMismatch('checks_count_mismatch', expected.checksCount, actual.checksCount, 'Checks cleared item count mismatch');
-  pushMismatch('checks_total_mismatch', expected.checksTotal, actual.checksTotal, 'Checks cleared total mismatch', 0.01);
-  pushMismatch(
-    'daily_balances_count_mismatch',
-    expected.dailyBalancesCount,
-    actual.dailyBalancesCount,
-    'Daily balances count mismatch'
-  );
+  if (profile === 'southstate_fixture' && expected) {
+    pushMismatch('beginning_balance_mismatch', expected.beginningBalance, actual.beginningBalance, 'Beginning balance mismatch', 0.01);
+    pushMismatch('ending_balance_mismatch', expected.endingBalance, actual.endingBalance, 'Ending balance mismatch', 0.01);
+    pushMismatch('deposits_count_mismatch', expected.depositsCount, actual.depositsCount, 'Deposits item count mismatch');
+    pushMismatch('deposits_total_mismatch', expected.depositsTotal, actual.depositsTotal, 'Deposits total mismatch', 0.01);
+    pushMismatch(
+      'electronic_credits_count_mismatch',
+      expected.electronicCreditsCount,
+      actual.electronicCreditsCount,
+      'Electronic credits item count mismatch'
+    );
+    pushMismatch(
+      'electronic_credits_total_mismatch',
+      expected.electronicCreditsTotal,
+      actual.electronicCreditsTotal,
+      'Electronic credits total mismatch',
+      0.01
+    );
+    pushMismatch('other_credits_count_mismatch', expected.otherCreditsCount, actual.otherCreditsCount, 'Other credits item count mismatch');
+    pushMismatch('other_credits_total_mismatch', expected.otherCreditsTotal, actual.otherCreditsTotal, 'Other credits total mismatch', 0.01);
+    pushMismatch(
+      'electronic_debits_count_mismatch',
+      expected.electronicDebitsCount,
+      actual.electronicDebitsCount,
+      'Electronic debits item count mismatch'
+    );
+    pushMismatch(
+      'electronic_debits_total_mismatch',
+      expected.electronicDebitsTotal,
+      actual.electronicDebitsTotal,
+      'Electronic debits total mismatch',
+      0.01
+    );
+    pushMismatch('checks_count_mismatch', expected.checksCount, actual.checksCount, 'Checks cleared item count mismatch');
+    pushMismatch('checks_total_mismatch', expected.checksTotal, actual.checksTotal, 'Checks cleared total mismatch', 0.01);
+    pushMismatch(
+      'daily_balances_count_mismatch',
+      expected.dailyBalancesCount,
+      actual.dailyBalancesCount,
+      'Daily balances count mismatch'
+    );
+  } else if (beginning && ending) {
+    const credits = rows
+      .filter((row) => row.isPostingCandidate && row.type === 'credit')
+      .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+    const debits = rows
+      .filter((row) => row.isPostingCandidate && row.type === 'debit')
+      .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+    const expectedEnding = round2(Number(beginning.amount) + credits - debits);
+    const actualEnding = round2(Number(ending.amount));
+    pushMismatch(
+      'balance_reconciliation_drift',
+      expectedEnding,
+      actualEnding,
+      'Balance reconciliation drift',
+      1
+    );
+  }
 
   return {
     statementId: args.statementId,
     passed: mismatches.length === 0,
-    expected,
+    expected: expected ?? {
+      beginningBalance: beginning ? round2(Number(beginning.amount)) : null,
+      endingBalance: ending ? round2(Number(ending.amount)) : null,
+      depositsCount: actual.depositsCount,
+      depositsTotal: actual.depositsTotal,
+      electronicCreditsCount: actual.electronicCreditsCount,
+      electronicCreditsTotal: actual.electronicCreditsTotal,
+      otherCreditsCount: actual.otherCreditsCount,
+      otherCreditsTotal: actual.otherCreditsTotal,
+      electronicDebitsCount: actual.electronicDebitsCount,
+      electronicDebitsTotal: actual.electronicDebitsTotal,
+      checksCount: actual.checksCount,
+      checksTotal: actual.checksTotal,
+      dailyBalancesCount: actual.dailyBalancesCount
+    },
     actual,
     mismatches
   };
