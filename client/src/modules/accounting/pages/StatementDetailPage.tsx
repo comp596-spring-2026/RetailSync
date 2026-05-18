@@ -1,7 +1,10 @@
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import DescriptionIcon from '@mui/icons-material/Description';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
 import {
   Accordion,
@@ -11,21 +14,27 @@ import {
   Autocomplete,
   Box,
   Button,
+  ButtonGroup,
   Chip,
   CircularProgress,
-  Collapse,
+  ClickAwayListener,
   Dialog,
+  FormControlLabel,
+  Checkbox,
+  Grow,
+  MenuList,
+  Popper,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
+  Drawer,
   FormControl,
   Grid2 as Grid,
   IconButton,
   InputLabel,
   LinearProgress,
   MenuItem,
-  Pagination,
   Paper,
   Select,
   Stack,
@@ -42,13 +51,16 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import type {
   BankStatementDetail,
   QuickBooksHubChartAccount,
+  QuickBooksHubItem,
   StatementCheck,
   StatementRule,
   StatementTransaction,
   StatementReviewStatus,
   StatementSuggestionItem,
-  StatementSuggestionsResponse
+  StatementSuggestionsResponse,
+  StatementProposalPatch
 } from '@retailsync/shared';
+import { buildStatementPostingPreviewLines } from '@retailsync/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
@@ -73,10 +85,10 @@ import {
   getStatementViewerArtifacts,
   isImagePath
 } from '../utils/statementDetailHelpers';
+import { StatementOverviewTab } from '../components/statementDetail/StatementOverviewTab';
+import { StatementSourceProofTab } from '../components/statementDetail/StatementSourceProofTab';
+import { buildStatementOverview, sectionWorkflowHint } from '../utils/statementOverviewModel';
 import {
-  expenseCategoryPresets,
-  incomeCategoryPresets,
-  salesReceiptItemPresets,
   mapWorkflowToProposedType,
   suggestCategoryPreset,
   suggestWorkflowType,
@@ -85,6 +97,60 @@ import {
 } from '../utils/statementCategoryPresets';
 
 const shouldLogStatementProgress = import.meta.env.DEV;
+
+const chartAccountRefValue = (account: QuickBooksHubChartAccount) => account.qbId?.trim() || account.id;
+
+const accountLabelForRef = (
+  ref: string,
+  bankAccounts: QuickBooksHubChartAccount[],
+  lineAccounts: QuickBooksHubChartAccount[]
+) => {
+  const trimmed = ref.trim();
+  if (!trimmed) return '';
+  const match =
+    bankAccounts.find((a) => chartAccountRefValue(a) === trimmed || a.id === trimmed) ??
+    lineAccounts.find((a) => chartAccountRefValue(a) === trimmed || a.id === trimmed);
+  return match?.name ?? trimmed;
+};
+
+const REVIEW_SECTION_PAGE_SIZE = 20;
+
+const rowIssueLabels = (item: StatementSuggestionItem): string[] => {
+  const labels: string[] = [];
+  const reasons = item.reasons ?? [];
+  if (reasons.some((r) => /duplicate/i.test(r))) labels.push('Possible duplicate');
+  if (!item.payeeName?.trim() && ['vendor_payment', 'tax_payment'].includes(String(item.transactionFamily ?? ''))) {
+    labels.push('Missing vendor');
+  }
+  if (
+    item.transactionFamily === 'transfer' &&
+    ['needs_internal_account_match', 'needs_chart_of_accounts_account'].includes(
+      String(item.transferResolutionStatus ?? '')
+    )
+  ) {
+    labels.push('Needs account match');
+  }
+  return labels;
+};
+
+const workflowDisplayLabel = (item: StatementSuggestionItem, sectionKey: string): string =>
+  item.proposedTxnType ?? sectionWorkflowHint(sectionKey).primary;
+
+const defaultSectionVisibleCount = (total: number) =>
+  total <= REVIEW_SECTION_PAGE_SIZE ? total : REVIEW_SECTION_PAGE_SIZE;
+
+const getSectionVisibleCount = (limits: Record<string, number>, sectionKey: string, total: number) => {
+  const stored = limits[sectionKey];
+  const target = stored ?? defaultSectionVisibleCount(total);
+  return Math.min(target, total);
+};
+
+const reviewStatusFilterLabel = (value: string) => {
+  if (value === 'proposed') return 'Needs review';
+  if (value === 'approved') return 'Approved';
+  if (value === 'excluded') return 'Excluded';
+  return formatStatusLabel(value);
+};
 
 export const StatementDetailPage = () => {
   const dispatch = useAppDispatch();
@@ -121,11 +187,6 @@ export const StatementDetailPage = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
-  const [reviewQueue, setReviewQueue] = useState<
-    'review' | 'credits' | 'debits' | 'transfers' | 'checks' | 'excluded'
-  >('review');
-  const [reviewPage, setReviewPage] = useState(1);
-  const [reviewPageSize, setReviewPageSize] = useState(25);
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -134,10 +195,12 @@ export const StatementDetailPage = () => {
   const [familyFilter, setFamilyFilter] = useState('all');
   const [sectionFilter, setSectionFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [workflowFilter, setWorkflowFilter] = useState<'all' | 'Expense' | 'Deposit' | 'Transfer' | 'Check'>('all');
   const [sortBy, setSortBy] = useState<'date' | 'amount' | 'confidence' | 'page' | 'category' | 'review'>('date');
   const [quickFilter, setQuickFilter] = useState<string | null>(null);
   const [showEmptyGroups, setShowEmptyGroups] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  const [sectionRowLimit, setSectionRowLimit] = useState<Record<string, number>>({});
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editItem, setEditItem] = useState<StatementSuggestionItem | null>(null);
@@ -148,23 +211,33 @@ export const StatementDetailPage = () => {
     customer: string;
     categoryLabel: string;
     customCategory: string;
-    itemLabel: string;
+    salesItemRefId: string;
+    linkedInvoiceTxnId: string;
     depositToAccount: string;
     transferFromAccount: string;
     transferToAccount: string;
     memo: string;
     checkNumber: string;
+    lineAccountRef: string;
+    vendorQbId: string;
+    customerQbId: string;
+    matchExistingCheck: boolean;
   }>({
     vendor: '',
     customer: '',
     categoryLabel: '',
     customCategory: '',
-    itemLabel: '',
+    salesItemRefId: '',
+    linkedInvoiceTxnId: '',
     depositToAccount: '',
     transferFromAccount: '',
     transferToAccount: '',
     memo: '',
-    checkNumber: ''
+    checkNumber: '',
+    lineAccountRef: '',
+    vendorQbId: '',
+    customerQbId: '',
+    matchExistingCheck: true
   });
   const [contactOptions, setContactOptions] = useState<Record<'vendor' | 'customer', Array<{ id: string; qbId: string; displayName: string }>>>({
     vendor: [],
@@ -180,6 +253,11 @@ export const StatementDetailPage = () => {
   });
   const [contactCreating, setContactCreating] = useState(false);
   const [bankAccounts, setBankAccounts] = useState<QuickBooksHubChartAccount[]>([]);
+  const [lineAccounts, setLineAccounts] = useState<QuickBooksHubChartAccount[]>([]);
+  const [lineAccountsLoading, setLineAccountsLoading] = useState(false);
+  const lineAccountPrefilledRef = useRef(false);
+  const approveMenuAnchorRef = useRef<HTMLDivElement>(null);
+  const [approveMenuOpen, setApproveMenuOpen] = useState(false);
   const [createBankAccountOpen, setCreateBankAccountOpen] = useState(false);
   const [createBankAccountTarget, setCreateBankAccountTarget] = useState<
     'transferFrom' | 'transferTo' | 'depositTo' | 'check' | null
@@ -190,13 +268,37 @@ export const StatementDetailPage = () => {
     detailType: 'Checking' | 'Savings' | 'CashOnHand';
   }>({ name: '', accountNumber: '', detailType: 'Checking' });
   const [createBankAccountSubmitting, setCreateBankAccountSubmitting] = useState(false);
+  const [createLineAccountOpen, setCreateLineAccountOpen] = useState(false);
+  const [createLineAccountKind, setCreateLineAccountKind] = useState<'expense' | 'income'>('expense');
+  const [createLineAccountName, setCreateLineAccountName] = useState('');
+  const [createLineAccountSubmitting, setCreateLineAccountSubmitting] = useState(false);
+  const [qbItems, setQbItems] = useState<QuickBooksHubItem[]>([]);
+  const [qbItemsLoading, setQbItemsLoading] = useState(false);
+  const [qbItemSearch, setQbItemSearch] = useState('');
+  const [openInvoices, setOpenInvoices] = useState<
+    Array<{ qbTxnId: string; label: string; balanceAmount: number | null }>
+  >([]);
+  const [openInvoicesLoading, setOpenInvoicesLoading] = useState(false);
   const blobUrlsRef = useRef<Record<string, string>>({});
   const lastProgressLogRef = useRef<string>('');
   const lastCheckLogRef = useRef<string>('');
 
   useEffect(() => {
-    setReviewPage(1);
-  }, [reviewQueue, statementId]);
+    setSectionRowLimit({});
+  }, [
+    statementId,
+    sectionFilter,
+    statusFilter,
+    familyFilter,
+    workflowFilter,
+    dateFrom,
+    dateTo,
+    amountMin,
+    amountMax,
+    quickFilter,
+    sortBy,
+    showEmptyGroups
+  ]);
 
   const logProgressSnapshot = useCallback((source: 'refresh' | 'stream', payload: {
     status: string;
@@ -494,20 +596,196 @@ export const StatementDetailPage = () => {
     }
   };
 
+  const postingBlockingErrors = useMemo(() => {
+    if (!editModalOpen || !editItem || !statement) return [];
+    const errors: string[] = [];
+    const qb = mapWorkflowToProposedType(workflowType);
+    const lineRef = workflowForm.lineAccountRef.trim();
+    const bankPaidFrom = (workflowForm.transferFromAccount || statement.bankAccountId || '').trim();
+    const depositTo = (workflowForm.depositToAccount || statement.bankAccountId || '').trim();
+
+    if (['JournalEntry', 'Bill', 'BillPayment'].includes(workflowType)) {
+      errors.push(
+        'This workflow is not supported for automated statement posting yet. Choose Deposit, Customer Payment, Sales Receipt, Expense, Check, or Transfer.'
+      );
+    }
+
+    if (workflowType === 'Transfer') {
+      if (!workflowForm.transferFromAccount.trim()) errors.push('Select the transfer from bank account.');
+      if (!workflowForm.transferToAccount.trim()) errors.push('Select the transfer to bank account.');
+      if (
+        workflowForm.transferFromAccount &&
+        workflowForm.transferToAccount &&
+        workflowForm.transferFromAccount === workflowForm.transferToAccount
+      ) {
+        errors.push('Transfer from and to accounts must be different.');
+      }
+    }
+
+    if (qb === 'Deposit') {
+      if (!depositTo) errors.push('Select the bank account to deposit into.');
+      if (!lineRef) errors.push('Select an income / other credit line account.');
+      if (depositTo && lineRef && depositTo === lineRef) errors.push('Deposit-to bank and income line accounts must differ.');
+    }
+
+    if (qb === 'Expense' || qb === 'Check') {
+      if (!bankPaidFrom) errors.push('Select the bank account paid from.');
+      if (!workflowForm.vendor.trim()) errors.push('Enter a vendor or payee.');
+      if (!lineRef) errors.push('Select a QuickBooks expense line account.');
+      if (workflowType === 'Check' && !workflowForm.checkNumber.trim()) errors.push('Enter the check number.');
+      if (bankPaidFrom && lineRef && bankPaidFrom === lineRef) errors.push('Bank account and expense line must differ.');
+    }
+
+    if (workflowType === 'SalesReceipt') {
+      if (!depositTo) errors.push('Select the deposit-to bank account.');
+      if (!workflowForm.customer.trim()) errors.push('Select a customer.');
+      if (!workflowForm.salesItemRefId.trim()) errors.push('Select a QuickBooks product or service item.');
+    }
+
+    if (workflowType === 'CustomerPayment') {
+      if (!depositTo) errors.push('Select the deposit-to bank account.');
+      if (!workflowForm.customer.trim()) errors.push('Select a customer for the payment.');
+    }
+
+    return errors;
+  }, [editModalOpen, editItem, statement, workflowType, workflowForm]);
+
+  const postingPreviewLines = useMemo(() => {
+    if (!editItem || !statement) return [];
+    const qb = mapWorkflowToProposedType(workflowType);
+    if (!qb) return [];
+    const bankRef =
+      workflowType === 'Deposit' || workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment'
+        ? workflowForm.depositToAccount || statement.bankAccountId || ''
+        : workflowForm.transferFromAccount || statement.bankAccountId || '';
+    const lineRef = workflowForm.lineAccountRef.trim();
+    const transferTo = workflowForm.transferToAccount.trim();
+    return buildStatementPostingPreviewLines({
+      qbTxnType: qb,
+      amount: Number(editItem.amount ?? 0),
+      direction: editItem.direction,
+      bankAccountLabel: accountLabelForRef(bankRef, bankAccounts, lineAccounts),
+      lineAccountLabel: accountLabelForRef(lineRef, bankAccounts, lineAccounts),
+      transferToAccountLabel: accountLabelForRef(transferTo, bankAccounts, lineAccounts),
+      payeeName:
+        workflowType === 'SalesReceipt' || workflowType === 'Deposit' || workflowType === 'CustomerPayment'
+          ? workflowForm.customer
+          : workflowForm.vendor,
+      checkNumber: workflowForm.checkNumber,
+      matchedExisting: workflowType === 'Check' && workflowForm.matchExistingCheck
+    });
+  }, [
+    editItem,
+    statement,
+    workflowType,
+    workflowForm,
+    bankAccounts,
+    lineAccounts
+  ]);
+
+  const primaryApproveLabel = useMemo(() => {
+    switch (workflowType) {
+      case 'Deposit':
+        return 'Post deposit';
+      case 'SalesReceipt':
+        return 'Post sale';
+      case 'CustomerPayment':
+        return 'Post payment';
+      case 'Transfer':
+        return 'Post transfer';
+      case 'Check':
+        return 'Post check';
+      case 'Expense':
+        return 'Post expense';
+      default:
+        return 'Approve';
+    }
+  }, [workflowType]);
+
+  const buildStatementProposalPatch = useCallback((): StatementProposalPatch | undefined => {
+    if (!statement || !editItem) return undefined;
+    if (['JournalEntry', 'Bill', 'BillPayment'].includes(workflowType)) return undefined;
+    const qbTxnType = mapWorkflowToProposedType(workflowType);
+    if (!qbTxnType) return undefined;
+
+    const lineRef = workflowForm.lineAccountRef.trim();
+    const memo = workflowForm.memo.trim() || undefined;
+    const payeeName =
+      workflowType === 'SalesReceipt' || workflowType === 'Deposit' || workflowType === 'CustomerPayment'
+        ? workflowForm.customer.trim() || editItem.payeeName
+        : workflowForm.vendor.trim() || editItem.payeeName;
+    const payeeId =
+      workflowType === 'SalesReceipt' || workflowType === 'Deposit' || workflowType === 'CustomerPayment'
+        ? workflowForm.customerQbId.trim() || undefined
+        : workflowForm.vendorQbId.trim() || undefined;
+
+    if (qbTxnType === 'Transfer') {
+      return {
+        qbTxnType: 'Transfer',
+        bankAccountId: workflowForm.transferFromAccount.trim() || undefined,
+        transferTargetAccountId: workflowForm.transferToAccount.trim() || undefined,
+        payeeName: payeeName || undefined,
+        memo
+      };
+    }
+
+    const bankForDeposit = (workflowForm.depositToAccount || statement.bankAccountId || '').trim() || undefined;
+    const bankForOutflow = (workflowForm.transferFromAccount || statement.bankAccountId || '').trim() || undefined;
+    const bankAccountId =
+      qbTxnType === 'Deposit' || qbTxnType === 'SalesReceipt' || qbTxnType === 'Payment'
+        ? bankForDeposit
+        : bankForOutflow;
+
+    return {
+      qbTxnType,
+      bankAccountId,
+      categoryAccountId:
+        qbTxnType === 'SalesReceipt' || qbTxnType === 'Payment' ? undefined : lineRef || undefined,
+      payeeName: payeeName || undefined,
+      payeeId,
+      memo,
+      checkNumber: workflowType === 'Check' ? workflowForm.checkNumber.trim() || undefined : undefined,
+      matchExistingCheck: workflowType === 'Check' ? workflowForm.matchExistingCheck : undefined,
+      salesItemRefId:
+        workflowType === 'SalesReceipt' ? workflowForm.salesItemRefId.trim() || undefined : undefined,
+      linkedInvoiceTxnId:
+        workflowType === 'CustomerPayment' ? workflowForm.linkedInvoiceTxnId.trim() || undefined : undefined
+    };
+  }, [statement, editItem, workflowType, workflowForm]);
+
   const updateSuggestionReviewStatus = async (
     suggestion: StatementSuggestionItem,
-    reviewStatus: StatementReviewStatus
+    reviewStatus: StatementReviewStatus,
+    proposal?: StatementProposalPatch,
+    postToQuickBooks = false
   ) => {
     if (!statementId || mutating) return;
     setMutating(true);
     try {
-      await accountingApi.updateStatementSuggestionReview(
+      const response = await accountingApi.updateStatementSuggestionReview(
         statementId,
         suggestion.id,
         suggestion.source,
-        reviewStatus
+        reviewStatus,
+        proposal,
+        postToQuickBooks
       );
-      dispatch(showSnackbar({ message: 'Suggestion updated', severity: 'success' }));
+      const qb = response.data.data.quickbooks;
+      if (reviewStatus === 'approved' && postToQuickBooks && qb?.posted) {
+        dispatch(
+          showSnackbar({
+            message: qb.matchedExisting
+              ? `Matched existing QuickBooks check · ID ${qb.qbTxnId ?? ''}`
+              : `${qb.registerSummary ?? 'Posted to QuickBooks'}${qb.qbTxnId ? ` · ID ${qb.qbTxnId}` : ''}`,
+            severity: 'success'
+          })
+        );
+      } else if (reviewStatus === 'approved' && postToQuickBooks && qb && !qb.posted && qb.error) {
+        dispatch(showSnackbar({ message: qb.error, severity: 'error' }));
+        return;
+      } else {
+        dispatch(showSnackbar({ message: 'Suggestion updated', severity: 'success' }));
+      }
       await refreshProcessingPanel();
     } catch (apiError) {
       dispatch(
@@ -605,9 +883,11 @@ export const StatementDetailPage = () => {
         ...current,
         [entityType]: [newOption, ...current[entityType].filter((opt) => opt.qbId !== detail.qbId)]
       }));
-      setWorkflowForm((form) => (entityType === 'vendor'
-        ? { ...form, vendor: detail.displayName }
-        : { ...form, customer: detail.displayName }));
+      setWorkflowForm((form) =>
+        entityType === 'vendor'
+          ? { ...form, vendor: detail.displayName, vendorQbId: detail.qbId }
+          : { ...form, customer: detail.displayName, customerQbId: detail.qbId }
+      );
       dispatch(
         showSnackbar({
           message: `${entityType === 'vendor' ? 'Vendor' : 'Customer'} "${detail.displayName}" created in QuickBooks`,
@@ -641,9 +921,52 @@ export const StatementDetailPage = () => {
     }
   }, []);
 
+  const loadLineAccounts = useCallback(async () => {
+    setLineAccountsLoading(true);
+    try {
+      const [expenseResponse, revenueResponse] = await Promise.all([
+        accountingApi.getQuickbooksHubChartOfAccounts({
+          type: 'expense',
+          status: 'active',
+          page: 1,
+          pageSize: 500,
+          sort: 'name'
+        }),
+        accountingApi.getQuickbooksHubChartOfAccounts({
+          type: 'revenue',
+          status: 'active',
+          page: 1,
+          pageSize: 500,
+          sort: 'name'
+        })
+      ]);
+      const merged = [...(expenseResponse.data.data.items ?? []), ...(revenueResponse.data.data.items ?? [])];
+      const seen = new Set<string>();
+      setLineAccounts(
+        merged.filter((row) => {
+          if (seen.has(row.id)) return false;
+          seen.add(row.id);
+          return true;
+        })
+      );
+    } catch {
+      setLineAccounts([]);
+    } finally {
+      setLineAccountsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadBankAccounts();
   }, [loadBankAccounts]);
+
+  useEffect(() => {
+    if (!editModalOpen) {
+      lineAccountPrefilledRef.current = false;
+      return;
+    }
+    void loadLineAccounts();
+  }, [editModalOpen, loadLineAccounts]);
 
   const openCreateBankAccountDialog = useCallback(
     (target: 'transferFrom' | 'transferTo' | 'depositTo' | 'check') => {
@@ -669,13 +992,14 @@ export const StatementDetailPage = () => {
     setCreateBankAccountSubmitting(true);
     try {
       const response = await accountingApi.createQuickbooksHubChartAccount({
+        accountKind: 'bank',
         name: trimmedName,
         accountNumber: createBankAccountForm.accountNumber.trim() || undefined,
         detailType: createBankAccountForm.detailType
       });
       const created = response.data.data.account;
       await loadBankAccounts();
-      const newAccountId = created?.qbId ?? created?.id ?? '';
+      const newAccountId = chartAccountRefValue(created);
       if (newAccountId) {
         setWorkflowForm((form) => {
           if (createBankAccountTarget === 'transferFrom' || createBankAccountTarget === 'check') {
@@ -710,6 +1034,101 @@ export const StatementDetailPage = () => {
     loadBankAccounts
   ]);
 
+  const openCreateLineAccountDialog = useCallback((kind: 'expense' | 'income') => {
+    setCreateLineAccountKind(kind);
+    setCreateLineAccountName('');
+    setCreateLineAccountOpen(true);
+  }, []);
+
+  const closeCreateLineAccountDialog = useCallback(() => {
+    if (createLineAccountSubmitting) return;
+    setCreateLineAccountOpen(false);
+  }, [createLineAccountSubmitting]);
+
+  const submitCreateLineAccount = useCallback(async () => {
+    const trimmedName = createLineAccountName.trim();
+    if (!trimmedName) {
+      dispatch(showSnackbar({ message: 'Account name is required', severity: 'error' }));
+      return;
+    }
+    setCreateLineAccountSubmitting(true);
+    try {
+      const response = await accountingApi.createQuickbooksHubChartAccount({
+        accountKind: createLineAccountKind,
+        name: trimmedName
+      });
+      const created = response.data.data.account;
+      await loadLineAccounts();
+      const newAccountId = chartAccountRefValue(created);
+      if (newAccountId) {
+        setWorkflowForm((form) => ({ ...form, lineAccountRef: newAccountId }));
+      }
+      setCreateLineAccountOpen(false);
+      dispatch(
+        showSnackbar({
+          message: `${createLineAccountKind === 'income' ? 'Income' : 'Expense'} account created in QuickBooks`,
+          severity: 'success'
+        })
+      );
+    } catch (apiError) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Failed to create chart account'),
+          severity: 'error'
+        })
+      );
+    } finally {
+      setCreateLineAccountSubmitting(false);
+    }
+  }, [createLineAccountKind, createLineAccountName, dispatch, loadLineAccounts]);
+
+  const loadQbItems = useCallback(async (search = '') => {
+    setQbItemsLoading(true);
+    try {
+      const response = await accountingApi.getQuickbooksHubItems({
+        page: 1,
+        pageSize: 100,
+        search: search.trim() || undefined
+      });
+      setQbItems(response.data.data.items ?? []);
+    } catch {
+      setQbItems([]);
+    } finally {
+      setQbItemsLoading(false);
+    }
+  }, []);
+
+  const loadOpenInvoices = useCallback(async (customerQbId: string) => {
+    if (!customerQbId.trim()) {
+      setOpenInvoices([]);
+      return;
+    }
+    setOpenInvoicesLoading(true);
+    try {
+      const response = await accountingApi.getQuickbooksWriteInvoices({
+        customerId: customerQbId,
+        page: 1,
+        pageSize: 100
+      });
+      const items = (response.data.data.items ?? [])
+        .filter((row) => (row.balanceAmount ?? 0) > 0)
+        .map((row) => {
+          const doc = row.docNumber?.trim();
+          const balance = row.balanceAmount ?? 0;
+          const date = row.txnDate ?? '';
+          const label = doc
+            ? `Invoice #${doc} · ${formatMoney(balance)} open${date ? ` · ${date}` : ''}`
+            : `Invoice ${row.qbTxnId} · ${formatMoney(balance)} open`;
+          return { qbTxnId: row.qbTxnId, label, balanceAmount: row.balanceAmount };
+        });
+      setOpenInvoices(items);
+    } catch {
+      setOpenInvoices([]);
+    } finally {
+      setOpenInvoicesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = setTimeout(() => { void loadContactOptions('vendor', contactSearch.vendor); }, 250);
     return () => clearTimeout(timer);
@@ -720,6 +1139,25 @@ export const StatementDetailPage = () => {
     return () => clearTimeout(timer);
   }, [contactSearch.customer, loadContactOptions]);
 
+  useEffect(() => {
+    if (!editModalOpen || workflowType !== 'SalesReceipt') return;
+    const timer = setTimeout(() => { void loadQbItems(qbItemSearch); }, 250);
+    return () => clearTimeout(timer);
+  }, [editModalOpen, workflowType, qbItemSearch, loadQbItems]);
+
+  useEffect(() => {
+    if (!editModalOpen || workflowType !== 'CustomerPayment') {
+      setOpenInvoices([]);
+      return;
+    }
+    const customerQbId = workflowForm.customerQbId.trim();
+    if (!customerQbId) {
+      setOpenInvoices([]);
+      return;
+    }
+    void loadOpenInvoices(customerQbId);
+  }, [editModalOpen, workflowType, workflowForm.customerQbId, loadOpenInvoices]);
+
   const openEditModal = (item: StatementSuggestionItem, autoSaveAndNext = false) => {
     setEditItem(item);
     setSaveAndNext(autoSaveAndNext);
@@ -729,7 +1167,9 @@ export const StatementDetailPage = () => {
       description: item.description ?? '',
       transactionFamily: item.transactionFamily,
       proposedTxnType: item.proposedTxnType,
-      checkNumber: item.checkNumber
+      checkNumber: item.checkNumber,
+      section: item.section,
+      rowType: item.rowType
     });
     setWorkflowType(initialType);
     const suggestion = suggestCategoryPreset({
@@ -755,17 +1195,27 @@ export const StatementDetailPage = () => {
     } else if (initialType === 'Check') {
       defaultTransferFromAccount = defaultBankAccountId || (item.statementAccountMask ?? '');
     }
+    lineAccountPrefilledRef.current = false;
     setWorkflowForm({
       vendor: item.direction === 'debit' ? item.payeeName ?? '' : '',
       customer: item.direction === 'credit' ? item.payeeName ?? '' : '',
       categoryLabel: suggestion?.label ?? '',
       customCategory: '',
-      itemLabel: '',
-      depositToAccount: initialType === 'Deposit' && defaultBankAccountId ? defaultBankAccountId : '',
+      salesItemRefId: '',
+      linkedInvoiceTxnId: '',
+      depositToAccount:
+        (initialType === 'Deposit' || initialType === 'SalesReceipt' || initialType === 'CustomerPayment') &&
+        defaultBankAccountId
+          ? defaultBankAccountId
+          : '',
       transferFromAccount: defaultTransferFromAccount,
       transferToAccount: defaultTransferToAccount,
       memo: item.sourceText ?? '',
-      checkNumber: item.checkNumber ?? ''
+      checkNumber: item.checkNumber ?? '',
+      lineAccountRef: item.categoryAccountId?.trim() ?? '',
+      vendorQbId: '',
+      customerQbId: '',
+      matchExistingCheck: true
     });
   };
 
@@ -773,7 +1223,7 @@ export const StatementDetailPage = () => {
     if (!editModalOpen) return;
     const defaultBankAccountId = statement?.bankAccountId ?? '';
     if (!defaultBankAccountId) return;
-    if (workflowType === 'Check') {
+    if (workflowType === 'Check' || workflowType === 'Expense' || workflowType === 'Bill' || workflowType === 'BillPayment') {
       setWorkflowForm((form) => (form.transferFromAccount ? form : { ...form, transferFromAccount: defaultBankAccountId }));
     }
     if (workflowType === 'Transfer' && editItem) {
@@ -787,39 +1237,80 @@ export const StatementDetailPage = () => {
         );
       }
     }
-    if (workflowType === 'Deposit') {
+    if (workflowType === 'Deposit' || workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment') {
       setWorkflowForm((form) => (form.depositToAccount ? form : { ...form, depositToAccount: defaultBankAccountId }));
     }
   }, [editModalOpen, workflowType, statement?.bankAccountId, editItem]);
+
+  useEffect(() => {
+    if (!editModalOpen || !editItem || lineAccountsLoading || lineAccounts.length === 0 || lineAccountPrefilledRef.current) return;
+    const seed = editItem.categoryAccountId?.trim();
+    if (seed) {
+      const byId = lineAccounts.find((a) => chartAccountRefValue(a) === seed || a.id === seed);
+      setWorkflowForm((f) => ({ ...f, lineAccountRef: byId ? chartAccountRefValue(byId) : seed }));
+      lineAccountPrefilledRef.current = true;
+      return;
+    }
+    const preset = suggestCategoryPreset({
+      direction: editItem.direction,
+      description: editItem.description ?? ''
+    });
+    if (preset) {
+      const fuzzy = lineAccounts.find((a) => a.name === preset.label);
+      if (fuzzy) {
+        setWorkflowForm((f) => ({
+          ...f,
+          categoryLabel: preset.label,
+          lineAccountRef: chartAccountRefValue(fuzzy)
+        }));
+      }
+    }
+    lineAccountPrefilledRef.current = true;
+  }, [editModalOpen, editItem, lineAccounts, lineAccountsLoading]);
 
   const closeEditModal = () => {
     setEditModalOpen(false);
     setEditItem(null);
     setSaveAndNext(false);
+    setApproveMenuOpen(false);
   };
 
   const saveEditModal = async (action: 'save' | 'save_next' | 'save_rule' | 'mark_non_posting') => {
-    if (!editItem) return;
-    const category = workflowForm.categoryLabel === '__custom__'
-      ? workflowForm.customCategory
-      : workflowForm.categoryLabel;
-    const item: StatementSuggestionItem = {
+    if (!editItem || !statement) return;
+    if (action !== 'mark_non_posting' && postingBlockingErrors.length > 0) {
+      dispatch(
+        showSnackbar({
+          message: postingBlockingErrors[0],
+          severity: 'error'
+        })
+      );
+      return;
+    }
+
+    const proposalPatch = action === 'mark_non_posting' ? undefined : buildStatementProposalPatch();
+    const mergedSuggestion: StatementSuggestionItem = {
       ...editItem,
-      payeeName: workflowType === 'SalesReceipt' || workflowType === 'Deposit'
-        ? workflowForm.customer || editItem.payeeName
-        : workflowForm.vendor || editItem.payeeName,
-      categoryAccountId: category || editItem.categoryAccountId,
+      payeeName:
+        workflowType === 'SalesReceipt' || workflowType === 'Deposit' || workflowType === 'CustomerPayment'
+          ? workflowForm.customer || editItem.payeeName
+          : workflowForm.vendor || editItem.payeeName,
+      categoryAccountId: workflowForm.lineAccountRef.trim() || editItem.categoryAccountId,
       proposedTxnType: mapWorkflowToProposedType(workflowType) ?? editItem.proposedTxnType,
-      resolvedRelatedAccountId: workflowType === 'Transfer'
-        ? (workflowForm.transferToAccount || editItem.resolvedRelatedAccountId)
-        : editItem.resolvedRelatedAccountId,
-      checkNumber: workflowType === 'Check' ? workflowForm.checkNumber || editItem.checkNumber : editItem.checkNumber
+      resolvedRelatedAccountId:
+        workflowType === 'Transfer'
+          ? workflowForm.transferToAccount || editItem.resolvedRelatedAccountId
+          : editItem.resolvedRelatedAccountId,
+      checkNumber: workflowType === 'Check' ? workflowForm.checkNumber || editItem.checkNumber : editItem.checkNumber,
+      bankAccountId:
+        workflowType === 'Deposit' || workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment'
+          ? workflowForm.depositToAccount || statement.bankAccountId || editItem.bankAccountId
+          : workflowForm.transferFromAccount || statement.bankAccountId || editItem.bankAccountId
     };
-    setEditItem(item);
+
     if (action === 'mark_non_posting') {
-      await updateSuggestionReviewStatus(item, 'excluded');
+      await updateSuggestionReviewStatus(mergedSuggestion, 'excluded', undefined, false);
     } else {
-      await updateSuggestionReviewStatus(item, 'approved');
+      await updateSuggestionReviewStatus(mergedSuggestion, 'approved', proposalPatch, true);
     }
     if (action === 'save_rule' && editItem.source === 'transaction') {
       await createRuleFromEntry(editItem.id, 'soft');
@@ -827,10 +1318,10 @@ export const StatementDetailPage = () => {
     if (action === 'save_next' || saveAndNext) {
       const currentId = editItem.id;
       const ordered = suggestions?.items ?? [];
-      const idx = ordered.findIndex((item) => item.id === currentId);
+      const idx = ordered.findIndex((row) => row.id === currentId);
       const next = idx >= 0 ? ordered[idx + 1] : null;
       if (next) {
-        setEditItem(next);
+        openEditModal(next, false);
         return;
       }
     }
@@ -1137,16 +1628,6 @@ export const StatementDetailPage = () => {
       return <Alert severity="info">Suggestions are loading.</Alert>;
     }
 
-    const checksPendingCount = checks.filter((check) => check.status !== 'ready').length;
-    const unresolvedTransfers = suggestions.items.filter(
-      (item) =>
-        item.transactionFamily === 'transfer' &&
-        ['needs_internal_account_match', 'needs_chart_of_accounts_account', 'needs_review'].includes(
-          String(item.transferResolutionStatus)
-        )
-    ).length;
-    const hasDriftIssue = Boolean(statement?.issues?.some((issue) => /drift|validation/i.test(issue)));
-
     const groupTotals = (rows: StatementSuggestionItem[]) => ({
       count: rows.length,
       total: rows.reduce((sum, row) => sum + Math.abs(Number(row.amount ?? 0)), 0)
@@ -1155,7 +1636,18 @@ export const StatementDetailPage = () => {
     const matchesFilters = (item: StatementSuggestionItem) => {
       const needle = searchTerm.trim().toLowerCase();
       if (needle) {
-        const haystack = `${item.description} ${item.sourceText ?? ''} ${item.payeeName ?? ''}`.toLowerCase();
+        const haystack = [
+          item.description,
+          item.sourceText,
+          item.payeeName,
+          item.checkNumber,
+          String(Math.abs(item.amount)),
+          item.counterpartyBankHint,
+          item.statementAccountMask
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
         if (!haystack.includes(needle)) return false;
       }
       if (dateFrom && (item.date ?? '') < dateFrom) return false;
@@ -1165,7 +1657,15 @@ export const StatementDetailPage = () => {
       if (sectionFilter !== 'all' && item.section !== sectionFilter) return false;
       if (familyFilter !== 'all' && item.transactionFamily !== familyFilter) return false;
       if (statusFilter !== 'all' && item.reviewStatus !== statusFilter) return false;
+      if (workflowFilter !== 'all' && item.proposedTxnType !== workflowFilter) return false;
       if (quickFilter === 'unresolved' && !['needs_internal_account_match', 'needs_chart_of_accounts_account', 'needs_review'].includes(String(item.transferResolutionStatus))) return false;
+      if (quickFilter === 'needs_review' && item.reviewStatus !== 'proposed') return false;
+      if (
+        quickFilter === 'missing_vendor' &&
+        !(!item.payeeName?.trim() && ['vendor_payment', 'tax_payment'].includes(String(item.transactionFamily ?? '')))
+      ) {
+        return false;
+      }
       if (quickFilter === 'transfers' && item.transactionFamily !== 'transfer') return false;
       if (quickFilter === 'checks' && item.source !== 'check' && item.proposedTxnType !== 'Check') return false;
       if (quickFilter === 'high_amount' && Math.abs(item.amount) < 1000) return false;
@@ -1174,16 +1674,7 @@ export const StatementDetailPage = () => {
       return true;
     };
 
-    const scopedSuggestions = suggestions.items.filter((item) => {
-      if (!matchesFilters(item)) return false;
-      if (reviewQueue === 'review') return item.transactionFamily !== 'transfer' && item.reviewStatus !== 'excluded';
-      if (reviewQueue === 'credits') return item.direction === 'credit' && item.transactionFamily !== 'transfer';
-      if (reviewQueue === 'debits') return item.direction === 'debit' && item.section === 'electronic_debits';
-      if (reviewQueue === 'transfers') return item.transactionFamily === 'transfer';
-      if (reviewQueue === 'excluded') return item.reviewStatus === 'excluded';
-      if (reviewQueue === 'checks') return item.source === 'check' || item.proposedTxnType === 'Check';
-      return true;
-    });
+    const scopedSuggestions = suggestions.items.filter((item) => matchesFilters(item));
 
     const sortedItems = [...scopedSuggestions].sort((a, b) => {
       if (sortBy === 'amount') return Math.abs(b.amount) - Math.abs(a.amount);
@@ -1192,657 +1683,634 @@ export const StatementDetailPage = () => {
       return String(a.date ?? '').localeCompare(String(b.date ?? ''));
     });
 
-    const totalRows = sortedItems.length;
-    const totalPages = Math.max(1, Math.ceil(totalRows / reviewPageSize));
-    const safePage = Math.min(reviewPage, totalPages);
-    const startIndex = (safePage - 1) * reviewPageSize;
-    const endIndex = safePage * reviewPageSize;
-    const pageRows = sortedItems.slice(startIndex, endIndex);
+    const totalReviewRows = sortedItems.length;
+    const approvedRows = sortedItems.filter((item) => item.reviewStatus === 'approved').length;
+    const needsReviewRows = sortedItems.filter((item) => item.reviewStatus === 'proposed').length;
 
-    const groupedRows =
-      reviewQueue === 'transfers'
-        ? [
-            {
-              name: 'Unmatched transfers',
-              rows: pageRows.filter((item) =>
-                ['needs_internal_account_match', 'needs_chart_of_accounts_account', 'needs_review'].includes(
-                  String(item.transferResolutionStatus)
-                )
-              )
-            },
-            {
-              name: 'Matched transfers',
-              rows: pageRows.filter((item) => item.transferResolutionStatus === 'matched_transfer_ready')
-            }
-          ]
-        : reviewQueue === 'review'
-          ? [
-              {
-                name: 'Transactions to review',
-                rows: pageRows.filter((item) => item.reviewStatus === 'proposed')
-              },
-              {
-                name: 'Ready to post',
-                rows: pageRows.filter((item) => item.reviewStatus === 'approved' && item.postingStatus !== 'posted')
-              }
-            ]
-          : reviewQueue === 'credits'
-            ? [
-                { name: 'Deposits', rows: pageRows.filter((item) => item.section === 'deposits') },
-                { name: 'Electronic credits', rows: pageRows.filter((item) => item.section === 'electronic_credits') },
-                { name: 'Other credits', rows: pageRows.filter((item) => item.section === 'other_credits') }
-              ]
-            : reviewQueue === 'debits'
-              ? [
-                  { name: 'Electronic debits', rows: pageRows.filter((item) => item.section === 'electronic_debits') },
-                  { name: 'Tax payments', rows: pageRows.filter((item) => item.transactionFamily === 'tax_payment') },
-                  { name: 'Other debit transactions', rows: pageRows.filter((item) => item.transactionFamily !== 'tax_payment') }
-                ]
-          : [];
-    const visibleGroups = groupedRows.filter((group) => showEmptyGroups || group.rows.length > 0);
-
-    const renderSuggestionLine = (item: StatementSuggestionItem) => {
-      const rowExpanded = expandedRows[item.id] ?? false;
-      const statusText =
-        item.transferResolutionStatus && item.transferResolutionStatus !== 'matched_transfer_ready'
-          ? formatStatusLabel(item.transferResolutionStatus)
-          : formatStatusLabel(item.reviewStatus ?? 'proposed');
-
-      return (
-        <Accordion
-          key={`${reviewQueue}:${item.id}`}
-          expanded={rowExpanded}
-          onChange={(_event, expanded) => setExpandedRows((current) => ({ ...current, [item.id]: expanded }))}
-          disableGutters
-        >
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Box
-              sx={{
-                width: '100%',
-                display: 'grid',
-                gridTemplateColumns: '110px minmax(280px,1fr) 210px 130px 90px',
-                gap: 1,
-                alignItems: 'center'
-              }}
-            >
-              <Typography variant="body2">{formatMaybeDate(item.date)}</Typography>
-              <Stack direction="row" alignItems="center" spacing={0.75} sx={{ minWidth: 0 }}>
-                {item.source === 'check' || item.rowType === 'check_cleared' || item.checkNumber ? (
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    color="default"
-                    label={`Check #${item.checkNumber ?? item.id.slice(-6)}`}
-                    sx={{ flexShrink: 0, fontWeight: 600, borderRadius: 1 }}
-                  />
-                ) : null}
-                <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {item.description}
-                </Typography>
-                {statusText && statusText.toLowerCase() !== 'proposed' ? (
-                  <Chip size="small" label={statusText} variant="outlined" sx={{ flexShrink: 0 }} />
-                ) : null}
-              </Stack>
-              <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {formatStatusLabel(item.section ?? 'unknown')} · {formatStatusLabel(item.transactionFamily ?? 'other')}
-              </Typography>
-              <Typography variant="subtitle2" sx={{ textAlign: 'right', color: item.direction === 'credit' ? 'success.main' : 'error.main' }}>
-                {item.direction === 'credit' ? '+' : '-'}{formatMoney(Math.abs(item.amount))}
-              </Typography>
-              <Typography
-                variant="body2"
-                sx={{ color: 'primary.main', fontWeight: 700, cursor: 'pointer' }}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openEditModal(item);
-                }}
-              >
-                Review
-              </Typography>
-            </Box>
-          </AccordionSummary>
-          <AccordionDetails sx={{ pt: 0 }}>
-            <Stack spacing={1.25}>
-              {(() => {
-                const signedAmount = `${item.direction === 'credit' ? '+' : '-'}${formatMoney(Math.abs(Number(item.amount ?? 0)))}`;
-                const rawFields: Array<[string, string | null | undefined]> = [
-                  ['Posted date', formatMaybeDate(item.date) || null],
-                  ['Amount', signedAmount],
-                  ['Direction', item.direction ? formatStatusLabel(item.direction) : null],
-                  ['Section', item.section ? formatStatusLabel(item.section) : null],
-                  ['Transaction family', item.transactionFamily ? formatStatusLabel(item.transactionFamily) : null],
-                  ['Check #', item.checkNumber ?? null],
-                  ['Payee / vendor', item.payeeName ?? null],
-                  ['Proposed QB action', item.proposedTxnType ?? null],
-                  ['Counterparty hint', item.counterpartyBankHint ?? null],
-                  ['Transfer resolution', item.transferResolutionStatus ? formatStatusLabel(item.transferResolutionStatus) : null],
-                  ['Statement account', item.statementAccountMask ?? null],
-                  ['Mapped category', item.categoryAccountId ?? null],
-                  ['Mapped bank account', item.bankAccountId ?? null],
-                  ['Source page', item.sourcePage != null ? String(item.sourcePage) : null]
-                ];
-                const visibleFields = rawFields
-                  .filter(([, value]) => value != null && String(value).trim() !== '' && String(value).trim() !== '—')
-                  .map(([label, value]) => [label, String(value)] as [string, string]);
-
-                if (visibleFields.length === 0) return null;
-
-                return (
-                  <Box
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' },
-                      columnGap: 3,
-                      rowGap: 0.5
-                    }}
-                  >
-                    {visibleFields.map(([label, value]) => (
-                      <Stack
-                        key={label}
-                        direction="row"
-                        justifyContent="space-between"
-                        alignItems="baseline"
-                        spacing={1.5}
-                        sx={{ borderBottom: '1px dashed', borderColor: 'divider', py: 0.4 }}
-                      >
-                        <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                          {label}
-                        </Typography>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            fontWeight: 500,
-                            textAlign: 'right',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            minWidth: 0
-                          }}
-                          title={value}
-                        >
-                          {value}
-                        </Typography>
-                      </Stack>
-                    ))}
-                  </Box>
-                );
-              })()}
-
-              {item.matchedRuleNames && item.matchedRuleNames.length > 0 ? (
-                <Box>
-                  <Typography variant="caption" color="text.secondary">Matched rules</Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                    {item.matchedRuleNames.join(' · ')}
-                  </Typography>
-                </Box>
-              ) : null}
-
-              <Stack direction="row" spacing={1}>
-                <Button size="small" variant="outlined" onClick={() => openEditModal(item)}>Open Review Modal</Button>
-                {reviewQueue === 'transfers' && item.transferResolutionStatus !== 'matched_transfer_ready' ? (
-                  <Button size="small" variant="outlined" onClick={() => void resolveTransferWithExistingAccount(item)} disabled={mutating}>
-                    Resolve Mapping
-                  </Button>
-                ) : null}
-              </Stack>
-            </Stack>
-          </AccordionDetails>
-        </Accordion>
-      );
+    const resetReviewFilters = () => {
+      setSearchTerm('');
+      setDateFrom('');
+      setDateTo('');
+      setAmountMin('');
+      setAmountMax('');
+      setSectionFilter('all');
+      setFamilyFilter('all');
+      setStatusFilter('all');
+      setWorkflowFilter('all');
+      setQuickFilter(null);
+      setSortBy('date');
+      setShowEmptyGroups(false);
+      setSectionRowLimit({});
     };
+
+    const quickFilterTitle: Record<string, string> = {
+      unresolved: 'Unresolved transfers',
+      needs_review: 'Needs review',
+      missing_vendor: 'Missing vendor',
+      transfers: 'Transfers',
+      checks: 'Checks',
+      high_amount: 'High amount',
+      posting: 'Posting candidates',
+      unknown: 'Unknown classification'
+    };
+
+    const activeFilterParts: string[] = [];
+    if (sectionFilter !== 'all') activeFilterParts.push(`Section: ${formatStatusLabel(sectionFilter)}`);
+    if (statusFilter !== 'all') activeFilterParts.push(`Status: ${reviewStatusFilterLabel(statusFilter)}`);
+    if (familyFilter !== 'all') activeFilterParts.push(`Type: ${formatStatusLabel(familyFilter)}`);
+    if (workflowFilter !== 'all') activeFilterParts.push(`Workflow: ${workflowFilter}`);
+    if (quickFilter) activeFilterParts.push(`Quick: ${quickFilterTitle[quickFilter] ?? quickFilter}`);
+    if (dateFrom || dateTo) activeFilterParts.push('Date range set');
+    if (amountMin || amountMax) activeFilterParts.push('Amount range set');
+
+    const sectionMeta = statementOverview?.sections ?? [];
+    const sectionKeysFromOverview = sectionMeta.map((section) => section.key);
+    const sectionKeysFromItems = Array.from(
+      new Set(scopedSuggestions.map((item) => String(item.section ?? 'unknown')))
+    );
+    const orderedSectionKeys = [
+      ...sectionKeysFromOverview,
+      ...sectionKeysFromItems.filter((key) => !sectionKeysFromOverview.includes(key))
+    ].filter((key, index, array) => array.indexOf(key) === index);
+
+    const sectionGroups = orderedSectionKeys.map((sectionKey) => {
+      const meta = sectionMeta.find((section) => section.key === sectionKey);
+      const rows = sortedItems.filter((item) => String(item.section ?? 'unknown') === sectionKey);
+      const totals = groupTotals(rows);
+      const pending = rows.filter((item) => item.reviewStatus === 'proposed').length;
+      const sectionStatus =
+        rows.length === 0 ? 'Empty' : pending > 0 ? 'Needs review' : 'Ready';
+      return {
+        key: sectionKey,
+        label: meta?.label ?? formatStatusLabel(sectionKey),
+        direction: meta?.direction ?? (rows[0]?.direction === 'credit' ? 'credit' : 'debit'),
+        count: meta?.count.value ?? totals.count,
+        total: meta?.total.value ?? totals.total,
+        sourceLabel: meta?.sourceLabel,
+        status: sectionStatus,
+        rows
+      };
+    });
+    const visibleSectionGroups = sectionGroups.filter((group) => showEmptyGroups || group.rows.length > 0);
+    const firstVisibleSectionKey = visibleSectionGroups[0]?.key;
 
     return (
       <Stack spacing={2}>
-        {hasDriftIssue ? <Alert severity="warning">Reconciliation drift detected.</Alert> : null}
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>
+          Review Transactions
+        </Typography>
 
         <Paper variant="outlined" sx={{ p: 1.5, position: 'sticky', top: 8, zIndex: 3, bgcolor: 'background.paper' }}>
-          <Stack spacing={1}>
-            <Tabs value={reviewQueue} onChange={(_event, nextValue) => setReviewQueue(nextValue)} variant="scrollable" allowScrollButtonsMobile>
-              <Tab value="review" label={`Review (${suggestions.summary.needsReview})`} />
-              <Tab value="credits" label={`Credits (${suggestions.summary.credits})`} />
-              <Tab value="debits" label={`Debits (${suggestions.summary.debits})`} />
-              <Tab value="transfers" label={`Transfers (${suggestions.summary.transfers})`} />
-              <Tab value="checks" label={`Checks (${checks.length})`} />
-              <Tab value="excluded" label={`Excluded (${suggestions.summary.excluded})`} />
-            </Tabs>
-            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-              <Typography variant="caption" color="text.secondary">
-                Click filter icon to refine section/family/status.
-              </Typography>
-              <Button
+          <Stack spacing={1.25}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+              <TextField
                 size="small"
-                startIcon={<FilterListIcon />}
-                onClick={() => setFiltersOpen((current) => !current)}
-                variant={filtersOpen ? 'contained' : 'outlined'}
-              >
-                Filters
-              </Button>
+                placeholder="Search description, amount, check #, source line…"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                fullWidth
+              />
+              <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<FilterListIcon />}
+                  onClick={() => setFilterDrawerOpen(true)}
+                >
+                  Filters
+                </Button>
+                <Button size="small" variant="text" onClick={resetReviewFilters}>
+                  Clear
+                </Button>
+              </Stack>
             </Stack>
-            <Collapse in={filtersOpen}>
-              <Paper variant="outlined" sx={{ p: 1.5, mt: 1, bgcolor: 'background.default' }}>
-                <Grid container spacing={1.5}>
-                  <Grid size={{ xs: 12 }}>
-                    <Typography variant="overline" color="text.secondary">Search</Typography>
-                    <TextField
-                      size="small"
-                      placeholder="Search description, vendor, source line…"
-                      value={searchTerm}
-                      onChange={(event) => setSearchTerm(event.target.value)}
-                      fullWidth
-                      sx={{ mt: 0.5 }}
-                    />
-                  </Grid>
-
-                  <Grid size={{ xs: 12 }}>
-                    <Typography variant="overline" color="text.secondary">Scope</Typography>
-                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
-                      <FormControl size="small" sx={{ minWidth: 160 }}>
-                        <InputLabel>Section</InputLabel>
-                        <Select value={sectionFilter} label="Section" onChange={(event) => setSectionFilter(String(event.target.value))}>
-                          <MenuItem value="all">All sections</MenuItem>
-                          <MenuItem value="deposits">Deposits</MenuItem>
-                          <MenuItem value="electronic_credits">Electronic Credits</MenuItem>
-                          <MenuItem value="other_credits">Other Credits</MenuItem>
-                          <MenuItem value="electronic_debits">Electronic Debits</MenuItem>
-                          <MenuItem value="checks_cleared">Checks Cleared</MenuItem>
-                        </Select>
-                      </FormControl>
-                      <FormControl size="small" sx={{ minWidth: 160 }}>
-                        <InputLabel>Family</InputLabel>
-                        <Select value={familyFilter} label="Family" onChange={(event) => setFamilyFilter(String(event.target.value))}>
-                          <MenuItem value="all">All families</MenuItem>
-                          <MenuItem value="transfer">Transfer</MenuItem>
-                          <MenuItem value="tax_payment">Tax payment</MenuItem>
-                          <MenuItem value="vendor_payment">Vendor payment</MenuItem>
-                          <MenuItem value="settlement">Settlement</MenuItem>
-                          <MenuItem value="check">Check</MenuItem>
-                          <MenuItem value="other">Other</MenuItem>
-                        </Select>
-                      </FormControl>
-                      <FormControl size="small" sx={{ minWidth: 140 }}>
-                        <InputLabel>Review state</InputLabel>
-                        <Select value={statusFilter} label="Review state" onChange={(event) => setStatusFilter(String(event.target.value))}>
-                          <MenuItem value="all">All states</MenuItem>
-                          <MenuItem value="proposed">Pending</MenuItem>
-                          <MenuItem value="approved">Ready</MenuItem>
-                          <MenuItem value="excluded">Excluded</MenuItem>
-                        </Select>
-                      </FormControl>
-                    </Stack>
-                  </Grid>
-
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography variant="overline" color="text.secondary">Date range</Typography>
-                    <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-                      <TextField size="small" label="From" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
-                      <TextField size="small" label="To" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
-                    </Stack>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography variant="overline" color="text.secondary">Amount range</Typography>
-                    <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-                      <TextField size="small" label="Min $" value={amountMin} onChange={(event) => setAmountMin(event.target.value)} fullWidth />
-                      <TextField size="small" label="Max $" value={amountMax} onChange={(event) => setAmountMax(event.target.value)} fullWidth />
-                    </Stack>
-                  </Grid>
-
-                  <Grid size={{ xs: 12 }}>
-                    <Typography variant="overline" color="text.secondary">Display</Typography>
-                    <Stack direction="row" spacing={1} sx={{ mt: 0.5 }} useFlexGap flexWrap="wrap">
-                      <FormControl size="small" sx={{ minWidth: 140 }}>
-                        <InputLabel>Sort by</InputLabel>
-                        <Select value={sortBy} label="Sort by" onChange={(event) => setSortBy(event.target.value as any)}>
-                          <MenuItem value="date">Date</MenuItem>
-                          <MenuItem value="amount">Amount</MenuItem>
-                          <MenuItem value="page">Page</MenuItem>
-                          <MenuItem value="confidence">Confidence</MenuItem>
-                        </Select>
-                      </FormControl>
-                      <FormControl size="small" sx={{ width: 110 }}>
-                        <InputLabel>Rows</InputLabel>
-                        <Select value={String(reviewPageSize)} label="Rows" onChange={(event) => setReviewPageSize(Number(event.target.value))}>
-                          <MenuItem value="10">10</MenuItem>
-                          <MenuItem value="25">25</MenuItem>
-                          <MenuItem value="50">50</MenuItem>
-                        </Select>
-                      </FormControl>
-                      <Button size="small" variant="text" onClick={() => setShowEmptyGroups((current) => !current)}>
-                        {showEmptyGroups ? 'Hide empty groups' : 'Show empty groups'}
-                      </Button>
-                    </Stack>
-                  </Grid>
-
-                  <Grid size={{ xs: 12 }}>
-                    <Typography variant="overline" color="text.secondary">Quick filters</Typography>
-                    <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
-                      {[
-                        ['Unresolved transfers', 'unresolved'],
-                        ['Transfers', 'transfers'],
-                        ['Checks', 'checks'],
-                        ['High amount ($1K+)', 'high_amount'],
-                        ['Posting candidates', 'posting'],
-                        ['Unknown classification', 'unknown']
-                      ].map(([label, key]) => (
-                        <Chip
-                          key={key}
-                          size="small"
-                          label={label}
-                          color={quickFilter === key ? 'primary' : 'default'}
-                          variant={quickFilter === key ? 'filled' : 'outlined'}
-                          onClick={() => setQuickFilter((current) => (current === key ? null : key))}
-                        />
-                      ))}
-                      <Button
-                        size="small"
-                        variant="text"
-                        onClick={() => {
-                          setSearchTerm('');
-                          setDateFrom('');
-                          setDateTo('');
-                          setAmountMin('');
-                          setAmountMax('');
-                          setSectionFilter('all');
-                          setFamilyFilter('all');
-                          setStatusFilter('all');
-                          setQuickFilter(null);
-                        }}
-                      >
-                        Reset all
-                      </Button>
-                    </Stack>
-                  </Grid>
-                </Grid>
-              </Paper>
-            </Collapse>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography variant="body2" color="text.secondary">
+              {visibleSectionGroups.length} sections · {totalReviewRows} review rows · {approvedRows} approved ·{' '}
+              {needsReviewRows} needs review
+            </Typography>
+            {activeFilterParts.length > 0 ? (
               <Typography variant="caption" color="text.secondary">
-                Showing {totalRows === 0 ? 0 : startIndex + 1}-{Math.min(endIndex, totalRows)} of {totalRows}
+                Active filters: {activeFilterParts.join(' · ')}
               </Typography>
-              <Pagination count={totalPages} page={safePage} onChange={(_event, page) => setReviewPage(page)} size="small" />
-            </Stack>
+            ) : null}
           </Stack>
         </Paper>
 
-        {reviewQueue === 'checks' ? (
-          <Paper variant="outlined" sx={{ p: 0 }}>
-            <Box sx={{ px: 1.25, py: 0.75, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Typography variant="subtitle2">Checks cleared</Typography>
-                <Chip size="small" variant="outlined" label={checks.length} />
-              </Stack>
-              <Typography variant="caption" color="text.secondary">
-                Subtotal {formatMoney(checks.reduce((sum, check) => sum + Math.abs(Number(check.extracted?.amount ?? check.autoFill?.amount ?? 0)), 0))}
-              </Typography>
-            </Box>
-            <Box sx={{ px: 1.25, py: 1, display: 'grid', gridTemplateColumns: '100px 110px minmax(220px,1fr) minmax(200px,1fr) 130px 110px', gap: 1, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
-              <Typography variant="caption">Check #</Typography>
-              <Typography variant="caption">Date</Typography>
-              <Typography variant="caption">Payee</Typography>
-              <Typography variant="caption">Memo</Typography>
-              <Typography variant="caption" textAlign="right">Amount</Typography>
-              <Typography variant="caption" textAlign="right">Review</Typography>
-            </Box>
-            {checks.length === 0 ? (
-              <Box sx={{ p: 2 }}><Typography variant="body2" color="text.secondary">No checks pending review.</Typography></Box>
-            ) : (
-              sortedChecks.slice(startIndex, endIndex).map((check) => {
-                const hasCrop = Boolean(check.artifacts?.cropImagePath);
-                const displayNumber = check.extracted?.checkNumber ?? check.autoFill?.checkNumber ?? null;
-                const checkLabel = displayNumber ? `#${displayNumber}` : `(auto-id ${check.id.slice(-6)})`;
-                const expanded = expandedRows[check.id] ?? false;
-                const payee = check.extracted?.payeeName ?? check.autoFill?.payeeName ?? '';
-                const memo = check.extracted?.memo ?? check.autoFill?.memo ?? '';
-                const amount = Number(check.extracted?.amount ?? check.autoFill?.amount ?? 0);
-                return (
-                  <Accordion
-                    key={check.id}
-                    expanded={expanded}
-                    onChange={(_event, nextExpanded) => setExpandedRows((current) => ({ ...current, [check.id]: nextExpanded }))}
-                    disableGutters
-                    sx={{ borderBottom: '1px solid', borderColor: 'divider', '&::before': { display: 'none' } }}
-                  >
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 1.25 }}>
-                      <Box sx={{ width: '100%', display: 'grid', gridTemplateColumns: '100px 110px minmax(220px,1fr) minmax(200px,1fr) 130px 110px', gap: 1, alignItems: 'center' }}>
-                        <Stack direction="row" alignItems="center" spacing={0.5}>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{checkLabel}</Typography>
-                          {check.status !== 'ready' ? (
-                            <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: check.status === 'failed' ? 'error.main' : 'warning.main' }} title={formatStatusLabel(check.status)} />
-                          ) : null}
-                        </Stack>
-                        <Typography variant="body2">{formatMaybeDate(check.extracted?.date ?? check.autoFill?.date)}</Typography>
-                        <Typography variant="body2" sx={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={payee}>
-                          {payee || <Box component="span" sx={{ color: 'text.disabled' }}>—</Box>}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={memo}>
-                          {memo || '—'}
-                        </Typography>
-                        <Typography variant="subtitle2" sx={{ textAlign: 'right', color: 'error.main' }}>
-                          -{formatMoney(Math.abs(amount))}
-                        </Typography>
-                        <Typography
-                          variant="body2"
-                          sx={{ color: hasCrop ? 'primary.main' : 'text.disabled', fontWeight: 700, cursor: hasCrop ? 'pointer' : 'not-allowed', textAlign: 'right' }}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (!hasCrop) return;
-                            setSelectedCheckId(check.id);
-                            setStatementViewerTab(`check-${check.id}-crop`);
-                            setWorkspaceTab('artifacts');
-                          }}
-                        >
-                          Open crop
-                        </Typography>
-                      </Box>
-                    </AccordionSummary>
-                    <AccordionDetails sx={{ pt: 0 }}>
-                      <Stack spacing={1.25}>
-                        <Box
-                          sx={{
-                            display: 'grid',
-                            gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' },
-                            columnGap: 3,
-                            rowGap: 0.5
-                          }}
-                        >
-                          {(
-                            [
-                              ['Check #', displayNumber ?? '—'],
-                              ['Posted date', formatMaybeDate(check.extracted?.date ?? check.autoFill?.date) || '—'],
-                              ['Amount', formatMoney(Math.abs(amount))],
-                              ['Payee', payee || '—'],
-                              ['Memo', memo || '—'],
-                              ['Extraction source', check.extracted?.source ? formatStatusLabel(check.extracted.source) : '—'],
-                              ['Review status', formatStatusLabel(check.status)],
-                              ['Confidence', check.confidence?.overall != null ? `${Math.round(Number(check.confidence.overall) * 100)}%` : '—'],
-                              ['Matched txn', check.match?.statementTransactionId ?? '—'],
-                              ['Match confidence', check.match?.matchConfidence != null ? `${Math.round(Number(check.match.matchConfidence) * 100)}%` : '—'],
-                              ['Source page', check.artifacts?.pageNumber != null ? String(check.artifacts.pageNumber) : '—'],
-                              ['Retries', String(check.processing?.retryCount ?? 0)],
-                              ['Last processed', check.processing?.processedAt ? formatDate(check.processing.processedAt) : '—'],
-                              ['Crop available', hasCrop ? 'Yes' : 'Not yet'],
-                              ['Check id', check.id]
-                            ] as Array<[string, string]>
-                          ).map(([label, value]) => (
-                            <Stack
-                              key={label}
-                              direction="row"
-                              justifyContent="space-between"
-                              alignItems="baseline"
-                              spacing={1.5}
-                              sx={{ borderBottom: '1px dashed', borderColor: 'divider', py: 0.4 }}
-                            >
-                              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                                {label}
-                              </Typography>
-                              <Typography
-                                variant="body2"
-                                sx={{
-                                  fontWeight: 500,
-                                  textAlign: 'right',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  minWidth: 0
-                                }}
-                                title={value}
-                              >
-                                {value}
-                              </Typography>
-                            </Stack>
-                          ))}
-                        </Box>
+        <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600 }}>
+          Statement sections
+        </Typography>
 
-                        {check.processing?.lastError ? (
-                          <Alert severity="warning" sx={{ py: 0.5 }}>
-                            Last error: {check.processing.lastError}
-                          </Alert>
-                        ) : null}
-
-                        {!hasCrop ? (
-                          <Alert severity="info" sx={{ py: 0.5 }}>
-                            Cropped check image is not available yet.{' '}
-                            {check.status === 'queued' || check.status === 'processing'
-                              ? 'It is being rendered — refresh in a moment.'
-                              : check.status === 'failed'
-                                ? 'Processing failed before the crop could be generated. Retry statement processing to try again.'
-                                : 'The crop could not be generated for this check.'}
-                          </Alert>
-                        ) : null}
-
-                        {check.match?.reasons && check.match.reasons.length > 0 ? (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">Match reasons</Typography>
-                            <Box component="ul" sx={{ pl: 2.25, my: 0.5 }}>
-                              {check.match.reasons.map((reason, idx) => (
-                                <li key={idx}>
-                                  <Typography variant="body2">{reason}</Typography>
-                                </li>
-                              ))}
-                            </Box>
-                          </Box>
-                        ) : null}
-
-                        {hasCrop ? (
-                          <Box
-                            component="img"
-                            src="/test_check.png"
-                            alt={`Check ${displayNumber ?? check.id.slice(-6)}`}
-                            sx={{
-                              width: '100%',
-                              maxHeight: 250,
-                              objectFit: 'contain',
-                              bgcolor: 'grey.50',
-                              borderRadius: 1,
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              mt: 1,
-                              mb: 1
-                            }}
-                          />
-                        ) : null}
-
-                        <Stack direction="row" spacing={1}>
-                          <Button
-                            size="small"
-                            variant="contained"
-                            disabled={!hasCrop}
-                            onClick={() => {
-                              setSelectedCheckId(check.id);
-                              setStatementViewerTab(`check-${check.id}-crop`);
-                              setWorkspaceTab('artifacts');
-                            }}
-                          >
-                            Open in Artifacts
-                          </Button>
-                          {check.match?.statementTransactionId ? (
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={() => {
-                                const match = suggestions?.items.find((s) => s.id === check.match?.statementTransactionId);
-                                if (match) openEditModal(match);
-                              }}
-                            >
-                              Open matched transaction
-                            </Button>
-                          ) : null}
-                        </Stack>
-                      </Stack>
-                    </AccordionDetails>
-                  </Accordion>
-                );
-              })
-            )}
-          </Paper>
-        ) : reviewQueue === 'excluded' ? (
-          <Paper variant="outlined" sx={{ p: 0 }}>
-            <Box sx={{ px: 1.25, py: 1, display: 'grid', gridTemplateColumns: '170px 120px minmax(280px,1fr) 70px 220px', gap: 1, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
-              <Typography variant="caption">Type</Typography>
-              <Typography variant="caption">Date</Typography>
-              <Typography variant="caption">Description</Typography>
-              <Typography variant="caption">Page</Typography>
-              <Typography variant="caption">Reason</Typography>
-            </Box>
-            {entries.filter((entry) => entry.isPostingCandidate === false).length === 0 ? (
-              <Box sx={{ p: 2 }}><Typography variant="body2" color="text.secondary">No excluded rows.</Typography></Box>
-            ) : (
-              entries.filter((entry) => entry.isPostingCandidate === false).slice(startIndex, endIndex).map((entry) => (
-                <Box key={entry.id} sx={{ px: 1.25, py: 1, display: 'grid', gridTemplateColumns: '170px 120px minmax(280px,1fr) 70px 220px', gap: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-                  <Typography variant="body2">{formatStatusLabel(entry.rowType ?? 'noise')}</Typography>
-                  <Typography variant="body2">{formatMaybeDate(entry.postDate)}</Typography>
-                  <Typography variant="body2" sx={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{entry.description}</Typography>
-                  <Typography variant="body2" color="text.secondary">Pg {entry.sourceLocator?.pageNumber ?? '-'}</Typography>
-                  <Typography variant="body2" color="text.secondary">Non-posting classification</Typography>
-                </Box>
-              ))
-            )}
-          </Paper>
+        {visibleSectionGroups.length === 0 ? (
+          <Alert severity="info">No transactions match the current filters.</Alert>
         ) : (
-          <Paper variant="outlined" sx={{ p: 0 }}>
-            <Box sx={{ px: 1.25, py: 1, display: 'grid', gridTemplateColumns: '110px minmax(280px,1fr) 210px 130px 90px', gap: 1, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
-              <Typography variant="caption">Date</Typography>
-              <Typography variant="caption">Description</Typography>
-              <Typography variant="caption">Section · Family</Typography>
-              <Typography variant="caption" textAlign="right">Amount</Typography>
-              <Typography variant="caption">Review</Typography>
-            </Box>
-            {visibleGroups.length === 0 ? (
-              <Box sx={{ p: 2 }}>
-                <Typography variant="body2" color="text.secondary">No transactions match current filters.</Typography>
-              </Box>
-            ) : (
-              visibleGroups.map((group) => {
-                const subtotal = groupTotals(group.rows);
-                return (
-                  <Box key={group.name}>
+          visibleSectionGroups.map((group) => {
+            const isChecks = group.key === 'checks_cleared';
+            const showAccountCol = group.rows.some((item) => item.transactionFamily === 'transfer');
+            const sectionExpanded =
+              expandedRows[`section:${group.key}`] ?? group.key === firstVisibleSectionKey;
+            const directionLabel =
+              group.direction === 'credit' ? 'Credit' : group.direction === 'debit' ? 'Debit' : 'Unknown';
+            const totals = groupTotals(group.rows);
+            const totalInSection = group.rows.length;
+            const visibleCount = getSectionVisibleCount(sectionRowLimit, group.key, totalInSection);
+            const displayedRows = group.rows.slice(0, visibleCount);
+            const canShowMore = visibleCount < totalInSection;
+
+            return (
+              <Accordion
+                key={group.key}
+                expanded={sectionExpanded}
+                onChange={(_event, expanded) =>
+                  setExpandedRows((current) => ({ ...current, [`section:${group.key}`]: expanded }))
+                }
+                disableGutters
+                variant="outlined"
+                sx={{ borderRadius: 1, bgcolor: 'background.paper', '&:before': { display: 'none' } }}
+              >
+                <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 1.5, py: 1 }}>
+                  <Box sx={{ width: '100%', pr: 0.5 }}>
+                    <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                        {group.label}
+                      </Typography>
+                      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          {group.status}
+                        </Typography>
+                        <Tooltip
+                          title={
+                            group.status === 'Needs review'
+                              ? 'This section still has rows that need review.'
+                              : 'No proposed rows in this section for the current filters.'
+                          }
+                        >
+                          <InfoOutlinedIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
+                        </Tooltip>
+                      </Stack>
+                    </Stack>
+                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" sx={{ mt: 1 }}>
+                      <Typography variant="body2" color="text.secondary" component="span">
+                        {totalInSection} items · {formatMoney(totals.total)} · {directionLabel} ·{' '}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" component="span">
+                        {group.sourceLabel ? `Source: ${group.sourceLabel}` : 'Source unknown'}
+                      </Typography>
+                      <Tooltip title="How this section total and source were derived from the statement.">
+                        <InfoOutlinedIcon sx={{ fontSize: 18, color: 'text.disabled', ml: 0.25 }} />
+                      </Tooltip>
+                    </Stack>
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails sx={{ pt: 0, px: 0, pb: 0 }}>
+                  <Paper variant="outlined" sx={{ borderRadius: 0, borderLeft: 0, borderRight: 0, borderBottom: 0 }}>
                     <Box
                       sx={{
                         px: 1.25,
-                        py: 0.75,
-                        borderTop: '1px solid',
+                        py: 1,
+                        display: 'grid',
+                        gap: 1,
+                        borderBottom: '1px solid',
                         borderColor: 'divider',
-                        bgcolor: 'background.default',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 1
+                        bgcolor: 'grey.50',
+                        ...(isChecks
+                          ? { gridTemplateColumns: '92px 80px 100px minmax(160px,1fr) 88px 88px 72px' }
+                          : showAccountCol
+                            ? {
+                                gridTemplateColumns:
+                                  '100px minmax(180px,1fr) 100px minmax(100px,1fr) 100px 100px 100px 72px'
+                              }
+                            : { gridTemplateColumns: '100px minmax(200px,1fr) 100px 100px 100px 72px' })
                       }}
                     >
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Typography variant="subtitle2">{group.name}</Typography>
-                        <Chip size="small" label={subtotal.count} variant="outlined" />
-                      </Stack>
-                      <Typography variant="caption" color="text.secondary">
-                        Subtotal {formatMoney(subtotal.total)}
-                      </Typography>
+                      {isChecks ? (
+                        <>
+                          <Typography variant="caption" color="text.secondary">
+                            Date
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Check #
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Amount
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Payee hint
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Workflow
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Status
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Action
+                          </Typography>
+                        </>
+                      ) : (
+                        <>
+                          <Typography variant="caption" color="text.secondary">
+                            Date
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Description
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" textAlign="right">
+                            Amount
+                          </Typography>
+                          {showAccountCol ? (
+                            <Typography variant="caption" color="text.secondary">
+                              Account hint
+                            </Typography>
+                          ) : null}
+                          <Typography variant="caption" color="text.secondary">
+                            Workflow
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Status
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Action
+                          </Typography>
+                        </>
+                      )}
                     </Box>
-                    {group.rows.map((item) => renderSuggestionLine(item))}
-                  </Box>
-                );
-              })
-            )}
-          </Paper>
+                    {group.rows.length === 0 ? (
+                      <Box sx={{ p: 2 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          No rows in this section for the current filters.
+                        </Typography>
+                      </Box>
+                    ) : (
+                      displayedRows.map((item) => {
+                        const statusText =
+                          item.transferResolutionStatus && item.transferResolutionStatus !== 'matched_transfer_ready'
+                            ? formatStatusLabel(item.transferResolutionStatus)
+                            : formatStatusLabel(item.reviewStatus ?? 'proposed');
+                        const issues = rowIssueLabels(item);
+                        return (
+                          <Box
+                            key={item.id}
+                            sx={{
+                              px: 1.25,
+                              py: 1,
+                              display: 'grid',
+                              gap: 1,
+                              alignItems: 'flex-start',
+                              borderBottom: '1px solid',
+                              borderColor: 'divider',
+                              ...(isChecks
+                                ? { gridTemplateColumns: '92px 80px 100px minmax(160px,1fr) 88px 88px 72px' }
+                                : showAccountCol
+                                  ? {
+                                      gridTemplateColumns:
+                                        '100px minmax(180px,1fr) 100px minmax(100px,1fr) 100px 100px 100px 72px'
+                                    }
+                                  : { gridTemplateColumns: '100px minmax(200px,1fr) 100px 100px 100px 72px' })
+                            }}
+                          >
+                            {isChecks ? (
+                              <>
+                                <Typography variant="body2">{formatMaybeDate(item.date)}</Typography>
+                                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                  {item.checkNumber ?? '—'}
+                                </Typography>
+                                <Box sx={{ minWidth: 0 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                    {formatMoney(Math.abs(item.amount))}
+                                  </Typography>
+                                  {issues.length > 0 ? (
+                                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                                      {issues.map((label) => (
+                                        <Chip
+                                          key={label}
+                                          size="small"
+                                          variant="outlined"
+                                          color="warning"
+                                          label={label}
+                                        />
+                                      ))}
+                                    </Stack>
+                                  ) : null}
+                                </Box>
+                                <Typography variant="body2" color="text.secondary" noWrap title={item.payeeName ?? ''}>
+                                  {item.payeeName ?? '—'}
+                                </Typography>
+                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                  {workflowDisplayLabel(item, group.key)}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  {statusText}
+                                </Typography>
+                                <Button size="small" onClick={() => openEditModal(item)}>
+                                  Review
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Typography variant="body2">{formatMaybeDate(item.date)}</Typography>
+                                <Box sx={{ minWidth: 0 }}>
+                                  <Typography variant="body2" noWrap title={item.description}>
+                                    {item.description}
+                                  </Typography>
+                                  {issues.length > 0 ? (
+                                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                                      {issues.map((label) => (
+                                        <Chip
+                                          key={label}
+                                          size="small"
+                                          variant="outlined"
+                                          color="warning"
+                                          label={label}
+                                        />
+                                      ))}
+                                    </Stack>
+                                  ) : null}
+                                </Box>
+                                <Typography
+                                  variant="subtitle2"
+                                  sx={{
+                                    textAlign: 'right',
+                                    color: item.direction === 'credit' ? 'success.main' : 'error.main'
+                                  }}
+                                >
+                                  {item.direction === 'credit' ? '+' : '-'}
+                                  {formatMoney(Math.abs(item.amount))}
+                                </Typography>
+                                {showAccountCol ? (
+                                  <Typography variant="body2" color="text.secondary" noWrap>
+                                    {item.transactionFamily === 'transfer'
+                                      ? item.counterpartyBankHint ?? item.statementAccountMask ?? '—'
+                                      : '—'}
+                                  </Typography>
+                                ) : null}
+                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                  {workflowDisplayLabel(item, group.key)}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  {statusText}
+                                </Typography>
+                                <Button size="small" onClick={() => openEditModal(item)}>
+                                  Review
+                                </Button>
+                              </>
+                            )}
+                          </Box>
+                        );
+                      })
+                    )}
+                    {totalInSection > 0 ? (
+                      <Stack
+                        direction={{ xs: 'column', sm: 'row' }}
+                        justifyContent="space-between"
+                        alignItems={{ sm: 'center' }}
+                        spacing={1}
+                        sx={{ px: 1.5, py: 1.25, bgcolor: 'grey.50', borderTop: '1px solid', borderColor: 'divider' }}
+                      >
+                        <Typography variant="caption" color="text.secondary">
+                          {totalInSection <= REVIEW_SECTION_PAGE_SIZE
+                            ? `All ${totalInSection} rows`
+                            : `Showing 1-${visibleCount} of ${totalInSection}`}
+                        </Typography>
+                        {canShowMore ? (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() =>
+                              setSectionRowLimit((prev) => ({
+                                ...prev,
+                                [group.key]: Math.min(
+                                  totalInSection,
+                                  visibleCount + REVIEW_SECTION_PAGE_SIZE
+                                )
+                              }))
+                            }
+                          >
+                            Show {REVIEW_SECTION_PAGE_SIZE} more
+                          </Button>
+                        ) : null}
+                      </Stack>
+                    ) : null}
+                  </Paper>
+                </AccordionDetails>
+              </Accordion>
+            );
+          })
         )}
+
+        <Drawer
+          anchor="right"
+          open={filterDrawerOpen}
+          onClose={() => setFilterDrawerOpen(false)}
+          PaperProps={{ sx: { width: { xs: '100%', sm: 400 }, maxWidth: '100%' } }}
+        >
+          <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+              Filters
+            </Typography>
+            <IconButton aria-label="Close filters" onClick={() => setFilterDrawerOpen(false)} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Box>
+          <Divider />
+          <Stack spacing={2} sx={{ p: 2, overflow: 'auto', pb: 3 }}>
+            <TextField
+              size="small"
+              label="Search"
+              placeholder="Description, amount, check #, source line…"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              fullWidth
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel>Section</InputLabel>
+              <Select
+                value={sectionFilter}
+                label="Section"
+                onChange={(event) => setSectionFilter(String(event.target.value))}
+              >
+                <MenuItem value="all">All sections</MenuItem>
+                <MenuItem value="deposits">Deposits</MenuItem>
+                <MenuItem value="electronic_credits">Electronic Credits</MenuItem>
+                <MenuItem value="other_credits">Other Credits</MenuItem>
+                <MenuItem value="electronic_debits">Electronic Debits</MenuItem>
+                <MenuItem value="checks_cleared">Checks Cleared</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Status</InputLabel>
+              <Select value={statusFilter} label="Status" onChange={(event) => setStatusFilter(String(event.target.value))}>
+                <MenuItem value="all">All states</MenuItem>
+                <MenuItem value="proposed">Needs review</MenuItem>
+                <MenuItem value="approved">Approved</MenuItem>
+                <MenuItem value="excluded">Excluded</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Type</InputLabel>
+              <Select value={familyFilter} label="Type" onChange={(event) => setFamilyFilter(String(event.target.value))}>
+                <MenuItem value="all">All types</MenuItem>
+                <MenuItem value="transfer">Transfer</MenuItem>
+                <MenuItem value="tax_payment">Tax payment</MenuItem>
+                <MenuItem value="vendor_payment">Vendor payment</MenuItem>
+                <MenuItem value="settlement">Settlement</MenuItem>
+                <MenuItem value="check">Check</MenuItem>
+                <MenuItem value="other">Other</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Workflow</InputLabel>
+              <Select
+                value={workflowFilter}
+                label="Workflow"
+                onChange={(event) =>
+                  setWorkflowFilter(event.target.value as typeof workflowFilter)
+                }
+              >
+                <MenuItem value="all">All workflows</MenuItem>
+                <MenuItem value="Expense">Expense</MenuItem>
+                <MenuItem value="Deposit">Deposit</MenuItem>
+                <MenuItem value="Transfer">Transfer</MenuItem>
+                <MenuItem value="Check">Check</MenuItem>
+              </Select>
+            </FormControl>
+            <Stack spacing={1}>
+              <Typography variant="caption" color="text.secondary">
+                Date range
+              </Typography>
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  size="small"
+                  label="From"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+                <TextField
+                  size="small"
+                  label="To"
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => setDateTo(event.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+              </Stack>
+            </Stack>
+            <Stack spacing={1}>
+              <Typography variant="caption" color="text.secondary">
+                Amount range
+              </Typography>
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  size="small"
+                  label="Min $"
+                  value={amountMin}
+                  onChange={(event) => setAmountMin(event.target.value)}
+                  fullWidth
+                />
+                <TextField
+                  size="small"
+                  label="Max $"
+                  value={amountMax}
+                  onChange={(event) => setAmountMax(event.target.value)}
+                  fullWidth
+                />
+              </Stack>
+            </Stack>
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                Quick filters
+              </Typography>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                {(
+                  [
+                    ['Needs review', 'needs_review'],
+                    ['Missing vendor', 'missing_vendor'],
+                    ['Transfers', 'transfers'],
+                    ['Checks', 'checks'],
+                    ['High amount', 'high_amount']
+                  ] as const
+                ).map(([label, key]) => (
+                  <Chip
+                    key={key}
+                    size="small"
+                    label={label}
+                    color={quickFilter === key ? 'primary' : 'default'}
+                    variant={quickFilter === key ? 'filled' : 'outlined'}
+                    onClick={() => setQuickFilter((current) => (current === key ? null : key))}
+                  />
+                ))}
+              </Stack>
+            </Box>
+            <Accordion disableGutters elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="subtitle2">Advanced filters</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  <FormControl size="small" fullWidth>
+                    <InputLabel>Sort by</InputLabel>
+                    <Select
+                      value={sortBy}
+                      label="Sort by"
+                      onChange={(event) => setSortBy(event.target.value as typeof sortBy)}
+                    >
+                      <MenuItem value="date">Date</MenuItem>
+                      <MenuItem value="amount">Amount</MenuItem>
+                      <MenuItem value="page">Page</MenuItem>
+                      <MenuItem value="confidence">Confidence</MenuItem>
+                      <MenuItem value="category">Category</MenuItem>
+                      <MenuItem value="review">Review</MenuItem>
+                    </Select>
+                  </FormControl>
+                  <Button
+                    size="small"
+                    variant={showEmptyGroups ? 'contained' : 'outlined'}
+                    onClick={() => setShowEmptyGroups((v) => !v)}
+                  >
+                    {showEmptyGroups ? 'Showing empty sections' : 'Show empty sections'}
+                  </Button>
+                  <Chip
+                    size="small"
+                    label="Unresolved transfers"
+                    color={quickFilter === 'unresolved' ? 'primary' : 'default'}
+                    variant={quickFilter === 'unresolved' ? 'filled' : 'outlined'}
+                    onClick={() => setQuickFilter((c) => (c === 'unresolved' ? null : 'unresolved'))}
+                  />
+                  <Chip
+                    size="small"
+                    label="Posting candidates"
+                    color={quickFilter === 'posting' ? 'primary' : 'default'}
+                    variant={quickFilter === 'posting' ? 'filled' : 'outlined'}
+                    onClick={() => setQuickFilter((c) => (c === 'posting' ? null : 'posting'))}
+                  />
+                  <Chip
+                    size="small"
+                    label="Unknown classification"
+                    color={quickFilter === 'unknown' ? 'primary' : 'default'}
+                    variant={quickFilter === 'unknown' ? 'filled' : 'outlined'}
+                    onClick={() => setQuickFilter((c) => (c === 'unknown' ? null : 'unknown'))}
+                  />
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+            <Stack direction="row" justifyContent="space-between" spacing={1} sx={{ pt: 1 }}>
+              <Button
+                color="inherit"
+                onClick={() => {
+                  resetReviewFilters();
+                }}
+              >
+                Reset
+              </Button>
+              <Button variant="contained" onClick={() => setFilterDrawerOpen(false)}>
+                Apply
+              </Button>
+            </Stack>
+          </Stack>
+        </Drawer>
 
         <Dialog open={editModalOpen} onClose={closeEditModal} fullWidth maxWidth="md">
           <DialogTitle sx={{ pb: 1 }}>
@@ -1882,6 +2350,20 @@ export const StatementDetailPage = () => {
           <DialogContent dividers sx={{ bgcolor: 'background.default' }}>
             {editItem ? (
               <Stack spacing={2}>
+                {postingBlockingErrors.length > 0 ? (
+                  <Alert severity="warning">
+                    <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                      Fix these before approving (QuickBooks posting)
+                    </Typography>
+                    <Stack component="ul" sx={{ m: 0, pl: 2 }}>
+                      {postingBlockingErrors.map((msg) => (
+                        <Typography key={msg} component="li" variant="body2">
+                          {msg}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  </Alert>
+                ) : null}
                 <Paper variant="outlined" sx={{ p: 1.5 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
                     {editItem.description}
@@ -1975,7 +2457,9 @@ export const StatementDetailPage = () => {
                             description: editItem.description ?? '',
                             transactionFamily: editItem.transactionFamily,
                             proposedTxnType: editItem.proposedTxnType,
-                            checkNumber: editItem.checkNumber
+                            checkNumber: editItem.checkNumber,
+                            section: editItem.section,
+                            rowType: editItem.rowType
                           });
                           if (suggestedType === workflowType) return null;
                           return (
@@ -1992,12 +2476,22 @@ export const StatementDetailPage = () => {
                       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                         {(editItem.direction === 'debit'
                           ? (['Expense', 'Check', 'Bill', 'BillPayment', 'Transfer', 'JournalEntry'] as WorkflowTxnType[])
-                          : (['Deposit', 'SalesReceipt', 'Transfer', 'JournalEntry'] as WorkflowTxnType[])
+                          : (['Deposit', 'CustomerPayment', 'SalesReceipt', 'Transfer', 'JournalEntry'] as WorkflowTxnType[])
                         ).map((type) => (
                           <Chip
                             key={type}
                             size="small"
-                            label={type === 'BillPayment' ? 'Bill Payment' : type === 'SalesReceipt' ? 'Sales Receipt' : type === 'JournalEntry' ? 'Journal Entry' : type}
+                            label={
+                              type === 'BillPayment'
+                                ? 'Bill Payment'
+                                : type === 'SalesReceipt'
+                                  ? 'Sales Receipt'
+                                  : type === 'CustomerPayment'
+                                    ? 'Customer Payment'
+                                    : type === 'JournalEntry'
+                                      ? 'Journal Entry'
+                                      : type
+                            }
                             color={workflowType === type ? 'primary' : 'default'}
                             variant={workflowType === type ? 'filled' : 'outlined'}
                             onClick={() => setWorkflowType(type)}
@@ -2010,14 +2504,36 @@ export const StatementDetailPage = () => {
                     </Paper>
                   </Grid>
 
+                  {postingPreviewLines.length > 0 ? (
+                    <Grid size={{ xs: 12 }}>
+                      <Paper variant="outlined" sx={{ p: 1.5, bgcolor: 'action.hover' }}>
+                        <Typography variant="overline" color="text.secondary">
+                          Where this posts in QuickBooks
+                        </Typography>
+                        <Stack spacing={0.35} sx={{ mt: 0.75 }}>
+                          {postingPreviewLines.map((line) => (
+                            <Typography key={line} variant="body2">
+                              {line}
+                            </Typography>
+                          ))}
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                          Approving creates exactly one QuickBooks transaction and updates the bank register.
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                  ) : null}
+
                   <Grid size={{ xs: 12 }}>
                     <Paper variant="outlined" sx={{ p: 1.5 }}>
                       <Typography variant="overline" color="text.secondary">
                         {workflowType === 'SalesReceipt'
                           ? 'Sales receipt fields'
-                          : workflowType === 'Deposit'
-                            ? 'Deposit fields'
-                            : workflowType === 'Transfer'
+                          : workflowType === 'CustomerPayment'
+                            ? 'Customer payment fields'
+                            : workflowType === 'Deposit'
+                              ? 'Deposit fields'
+                              : workflowType === 'Transfer'
                               ? 'Transfer fields'
                               : workflowType === 'JournalEntry'
                                 ? 'Journal entry fields'
@@ -2065,7 +2581,11 @@ export const StatementDetailPage = () => {
                                   void createContact('vendor', workflowForm.vendor);
                                   return;
                                 }
-                                setWorkflowForm((form) => ({ ...form, vendor: value.displayName }));
+                                setWorkflowForm((form) => ({
+                                  ...form,
+                                  vendor: value.displayName,
+                                  vendorQbId: value.qbId
+                                }));
                               }}
                               renderInput={(params) => (
                                 <TextField
@@ -2087,44 +2607,54 @@ export const StatementDetailPage = () => {
                             />
                           </Grid>
                           <Grid size={{ xs: 12, md: 6 }}>
-                            <FormControl size="small" fullWidth>
-                              <InputLabel shrink>Category (expense / COGS)</InputLabel>
-                              <Select
-                                label="Category (expense / COGS)"
-                                value={workflowForm.categoryLabel}
-                                displayEmpty
-                                onChange={(event) => setWorkflowForm((form) => ({ ...form, categoryLabel: String(event.target.value ?? '') }))}
-                              >
-                                <MenuItem value=""><em>— Select category —</em></MenuItem>
-                                {Array.from(new Set(expenseCategoryPresets.map((preset) => preset.group))).map((group) => [
-                                  <MenuItem key={`h-${group}`} disabled divider sx={{ opacity: 0.6 }}>
-                                    {group}
-                                  </MenuItem>,
-                                  ...expenseCategoryPresets
-                                    .filter((preset) => preset.group === group)
-                                    .map((preset) => (
-                                      <MenuItem key={preset.id} value={preset.label} sx={{ pl: 3 }}>
-                                        {preset.label}
-                                      </MenuItem>
-                                    ))
-                                ])}
-                                <MenuItem value="__custom__" sx={{ fontStyle: 'italic' }}>+ Custom category…</MenuItem>
-                              </Select>
-                            </FormControl>
+                            <Autocomplete
+                              size="small"
+                              options={lineAccounts.filter((row) => row.type === 'expense')}
+                              loading={lineAccountsLoading}
+                              getOptionLabel={(option) => option.name}
+                              isOptionEqualToValue={(option, value) => chartAccountRefValue(option) === chartAccountRefValue(value)}
+                              filterOptions={(options) => [
+                                ...options,
+                                {
+                                  id: '__create_line__',
+                                  qbId: null,
+                                  name: '+ Create expense account in QuickBooks…',
+                                  type: 'expense',
+                                  detailType: null,
+                                  status: 'active' as const,
+                                  balance: null
+                                }
+                              ]}
+                              value={lineAccounts.find((row) => row.type === 'expense' && chartAccountRefValue(row) === workflowForm.lineAccountRef) ?? null}
+                              onChange={(_event, value) => {
+                                if (value?.id === '__create_line__') {
+                                  openCreateLineAccountDialog('expense');
+                                  return;
+                                }
+                                setWorkflowForm((form) => ({
+                                  ...form,
+                                  lineAccountRef: value ? chartAccountRefValue(value) : ''
+                                }));
+                              }}
+                              renderInput={(params) => (
+                                <TextField
+                                  {...params}
+                                  label="Expense category (QuickBooks account)"
+                                  placeholder="Search expense / COGS accounts"
+                                  InputLabelProps={{ shrink: true }}
+                                  InputProps={{
+                                    ...params.InputProps,
+                                    endAdornment: (
+                                      <>
+                                        {lineAccountsLoading ? <CircularProgress size={14} /> : null}
+                                        {params.InputProps.endAdornment}
+                                      </>
+                                    )
+                                  }}
+                                />
+                              )}
+                            />
                           </Grid>
-                          {workflowForm.categoryLabel === '__custom__' ? (
-                            <Grid size={{ xs: 12, md: 6 }}>
-                              <TextField
-                                size="small"
-                                label="Custom category name"
-                                placeholder="e.g. Marketing:Local Ads"
-                                value={workflowForm.customCategory}
-                                onChange={(event) => setWorkflowForm((form) => ({ ...form, customCategory: event.target.value }))}
-                                fullWidth
-                                InputLabelProps={{ shrink: true }}
-                              />
-                            </Grid>
-                          ) : null}
                           {workflowType === 'Check' ? (
                             <Grid size={{ xs: 12, md: 6 }}>
                               <TextField
@@ -2139,42 +2669,71 @@ export const StatementDetailPage = () => {
                             </Grid>
                           ) : null}
                           {workflowType === 'Check' ? (
-                            <Grid size={{ xs: 12, md: 6 }}>
-                              <TextField
-                                size="small"
-                                select={bankAccounts.length > 0}
-                                label="Paid from (bank account)"
-                                placeholder="e.g. Checking xxx1234"
-                                value={workflowForm.transferFromAccount}
-                                onChange={(event) => setWorkflowForm((form) => ({ ...form, transferFromAccount: event.target.value }))}
-                                fullWidth
-                                InputLabelProps={{ shrink: true }}
-                                helperText={
-                                  statement?.bankAccountId &&
-                                  workflowForm.transferFromAccount === statement.bankAccountId
-                                    ? 'Defaulted to the bank chart account selected at upload.'
-                                    : undefined
+                            <Grid size={{ xs: 12 }}>
+                              <FormControlLabel
+                                control={
+                                  <Checkbox
+                                    size="small"
+                                    checked={workflowForm.matchExistingCheck}
+                                    onChange={(event) =>
+                                      setWorkflowForm((form) => ({
+                                        ...form,
+                                        matchExistingCheck: event.target.checked
+                                      }))
+                                    }
+                                  />
                                 }
-                                SelectProps={bankAccounts.length > 0 ? { displayEmpty: true } : undefined}
-                              >
-                                {bankAccounts.length > 0
-                                  ? [
-                                      <MenuItem key="__none__" value="">
-                                        <em>— Select bank account —</em>
-                                      </MenuItem>,
-                                      ...bankAccounts.map((account) => {
-                                        const detail = account.detailType || account.type;
-                                        return (
-                                          <MenuItem key={account.id} value={account.id}>
-                                            {detail ? `${account.name} · ${detail}` : account.name}
-                                          </MenuItem>
-                                        );
-                                      })
-                                    ]
-                                  : null}
-                              </TextField>
+                                label="Match existing QuickBooks check with same number and amount (recommended)"
+                              />
                             </Grid>
                           ) : null}
+                          <Grid size={{ xs: 12, md: 6 }}>
+                            <TextField
+                              size="small"
+                              select={bankAccounts.length > 0}
+                              label="Paid from (bank account)"
+                              placeholder="e.g. Checking xxx1234"
+                              value={workflowForm.transferFromAccount}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                if (value === '__create__') {
+                                  openCreateBankAccountDialog('check');
+                                  return;
+                                }
+                                setWorkflowForm((form) => ({ ...form, transferFromAccount: value }));
+                              }}
+                              fullWidth
+                              InputLabelProps={{ shrink: true }}
+                              helperText={
+                                statement?.bankAccountId &&
+                                workflowForm.transferFromAccount === statement.bankAccountId
+                                  ? 'Defaulted to the bank chart account selected at upload.'
+                                  : undefined
+                              }
+                              SelectProps={bankAccounts.length > 0 ? { displayEmpty: true } : undefined}
+                            >
+                              {bankAccounts.length > 0
+                                ? [
+                                    <MenuItem key="__none__" value="">
+                                      <em>— Select bank account —</em>
+                                    </MenuItem>,
+                                    ...bankAccounts.map((account) => {
+                                      const detail = account.detailType || account.type;
+                                      const ref = chartAccountRefValue(account);
+                                      return (
+                                        <MenuItem key={account.id} value={ref}>
+                                          {detail ? `${account.name} · ${detail}` : account.name}
+                                        </MenuItem>
+                                      );
+                                    }),
+                                    <Divider key="div-pf" sx={{ my: 0.5 }} component="li" />,
+                                    <MenuItem key="__create__pf" value="__create__" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                                      + Create new bank account…
+                                    </MenuItem>
+                                  ]
+                                : null}
+                            </TextField>
+                          </Grid>
                           <Grid size={{ xs: 12 }}>
                             <TextField
                               size="small"
@@ -2229,7 +2788,11 @@ export const StatementDetailPage = () => {
                                   void createContact('customer', workflowForm.customer);
                                   return;
                                 }
-                                setWorkflowForm((form) => ({ ...form, customer: value.displayName }));
+                                setWorkflowForm((form) => ({
+                                  ...form,
+                                  customer: value.displayName,
+                                  customerQbId: value.qbId
+                                }));
                               }}
                               renderInput={(params) => (
                                 <TextField
@@ -2251,34 +2814,54 @@ export const StatementDetailPage = () => {
                             />
                           </Grid>
                           <Grid size={{ xs: 12, md: 6 }}>
-                            <FormControl size="small" fullWidth>
-                              <InputLabel shrink>Income category</InputLabel>
-                              <Select
-                                label="Income category"
-                                value={workflowForm.categoryLabel}
-                                displayEmpty
-                                onChange={(event) => setWorkflowForm((form) => ({ ...form, categoryLabel: String(event.target.value ?? '') }))}
-                              >
-                                <MenuItem value=""><em>— Select income category —</em></MenuItem>
-                                {incomeCategoryPresets.map((preset) => (
-                                  <MenuItem key={preset.id} value={preset.label}>{preset.label}</MenuItem>
-                                ))}
-                                <MenuItem value="__custom__" sx={{ fontStyle: 'italic' }}>+ Custom category…</MenuItem>
-                              </Select>
-                            </FormControl>
+                            <Autocomplete
+                              size="small"
+                              options={lineAccounts.filter((row) => row.type === 'revenue')}
+                              loading={lineAccountsLoading}
+                              getOptionLabel={(option) => option.name}
+                              isOptionEqualToValue={(option, value) => chartAccountRefValue(option) === chartAccountRefValue(value)}
+                              filterOptions={(options) => [
+                                ...options,
+                                {
+                                  id: '__create_line__',
+                                  qbId: null,
+                                  name: '+ Create income account in QuickBooks…',
+                                  type: 'revenue',
+                                  detailType: null,
+                                  status: 'active' as const,
+                                  balance: null
+                                }
+                              ]}
+                              value={lineAccounts.find((row) => row.type === 'revenue' && chartAccountRefValue(row) === workflowForm.lineAccountRef) ?? null}
+                              onChange={(_event, value) => {
+                                if (value?.id === '__create_line__') {
+                                  openCreateLineAccountDialog('income');
+                                  return;
+                                }
+                                setWorkflowForm((form) => ({
+                                  ...form,
+                                  lineAccountRef: value ? chartAccountRefValue(value) : ''
+                                }));
+                              }}
+                              renderInput={(params) => (
+                                <TextField
+                                  {...params}
+                                  label="Income / other credit account"
+                                  placeholder="Search income accounts"
+                                  InputLabelProps={{ shrink: true }}
+                                  InputProps={{
+                                    ...params.InputProps,
+                                    endAdornment: (
+                                      <>
+                                        {lineAccountsLoading ? <CircularProgress size={14} /> : null}
+                                        {params.InputProps.endAdornment}
+                                      </>
+                                    )
+                                  }}
+                                />
+                              )}
+                            />
                           </Grid>
-                          {workflowForm.categoryLabel === '__custom__' ? (
-                            <Grid size={{ xs: 12, md: 6 }}>
-                              <TextField
-                                size="small"
-                                label="Custom income category"
-                                value={workflowForm.customCategory}
-                                onChange={(event) => setWorkflowForm((form) => ({ ...form, customCategory: event.target.value }))}
-                                fullWidth
-                                InputLabelProps={{ shrink: true }}
-                              />
-                            </Grid>
-                          ) : null}
                           <Grid size={{ xs: 12, md: 6 }}>
                             <TextField
                               size="small"
@@ -2298,8 +2881,9 @@ export const StatementDetailPage = () => {
                                     </MenuItem>,
                                     ...bankAccounts.map((account) => {
                                       const detail = account.detailType || account.type;
+                                      const ref = chartAccountRefValue(account);
                                       return (
-                                        <MenuItem key={account.id} value={account.id}>
+                                        <MenuItem key={account.id} value={ref}>
                                           {detail ? `${account.name} · ${detail}` : account.name}
                                         </MenuItem>
                                       );
@@ -2307,6 +2891,147 @@ export const StatementDetailPage = () => {
                                   ]
                                 : null}
                             </TextField>
+                          </Grid>
+                          <Grid size={{ xs: 12 }}>
+                            <TextField
+                              size="small"
+                              label="Memo"
+                              value={workflowForm.memo}
+                              onChange={(event) => setWorkflowForm((form) => ({ ...form, memo: event.target.value }))}
+                              fullWidth
+                              multiline
+                              minRows={2}
+                              InputLabelProps={{ shrink: true }}
+                            />
+                          </Grid>
+                        </Grid>
+                      ) : null}
+
+                      {workflowType === 'CustomerPayment' ? (
+                        <Grid container spacing={1.25} sx={{ mt: 0.25 }}>
+                          <Grid size={{ xs: 12, md: 6 }}>
+                            <Autocomplete
+                              size="small"
+                              freeSolo
+                              options={contactOptions.customer}
+                              loading={contactLoading.customer}
+                              getOptionLabel={(option) => (typeof option === 'string' ? option : option.displayName)}
+                              value={workflowForm.customer}
+                              onInputChange={(_event, value) => {
+                                setWorkflowForm((form) => ({ ...form, customer: value }));
+                                setContactSearch((current) => ({ ...current, customer: value }));
+                              }}
+                              onChange={(_event, value) => {
+                                if (!value) {
+                                  setWorkflowForm((form) => ({
+                                    ...form,
+                                    customer: '',
+                                    customerQbId: '',
+                                    linkedInvoiceTxnId: ''
+                                  }));
+                                  return;
+                                }
+                                if (typeof value === 'string') {
+                                  setWorkflowForm((form) => ({
+                                    ...form,
+                                    customer: value,
+                                    customerQbId: '',
+                                    linkedInvoiceTxnId: ''
+                                  }));
+                                  return;
+                                }
+                                if (value.qbId === '__create__') {
+                                  void createContact('customer', workflowForm.customer);
+                                  return;
+                                }
+                                setWorkflowForm((form) => ({
+                                  ...form,
+                                  customer: value.displayName,
+                                  customerQbId: value.qbId,
+                                  linkedInvoiceTxnId: ''
+                                }));
+                              }}
+                              renderInput={(params) => (
+                                <TextField
+                                  {...params}
+                                  label="Customer"
+                                  placeholder="Search QuickBooks customers"
+                                  InputLabelProps={{ shrink: true }}
+                                />
+                              )}
+                            />
+                          </Grid>
+                          <Grid size={{ xs: 12, md: 6 }}>
+                            <TextField
+                              size="small"
+                              select={bankAccounts.length > 0}
+                              label="Deposit to account"
+                              value={workflowForm.depositToAccount}
+                              onChange={(event) =>
+                                setWorkflowForm((form) => ({ ...form, depositToAccount: event.target.value }))
+                              }
+                              fullWidth
+                              InputLabelProps={{ shrink: true }}
+                              SelectProps={bankAccounts.length > 0 ? { displayEmpty: true } : undefined}
+                            >
+                              {bankAccounts.length > 0
+                                ? [
+                                    <MenuItem key="__none__" value="">
+                                      <em>— Select bank account —</em>
+                                    </MenuItem>,
+                                    ...bankAccounts.map((account) => {
+                                      const detail = account.detailType || account.type;
+                                      const ref = chartAccountRefValue(account);
+                                      return (
+                                        <MenuItem key={account.id} value={ref}>
+                                          {detail ? `${account.name} · ${detail}` : account.name}
+                                        </MenuItem>
+                                      );
+                                    })
+                                  ]
+                                : null}
+                            </TextField>
+                          </Grid>
+                          <Grid size={{ xs: 12, md: 6 }}>
+                            <Autocomplete
+                              size="small"
+                              options={openInvoices}
+                              loading={openInvoicesLoading}
+                              disabled={!workflowForm.customerQbId.trim()}
+                              getOptionLabel={(option) => option.label}
+                              isOptionEqualToValue={(option, value) => option.qbTxnId === value.qbTxnId}
+                              value={
+                                openInvoices.find((row) => row.qbTxnId === workflowForm.linkedInvoiceTxnId) ?? null
+                              }
+                              onChange={(_event, value) => {
+                                setWorkflowForm((form) => ({
+                                  ...form,
+                                  linkedInvoiceTxnId: value?.qbTxnId ?? ''
+                                }));
+                              }}
+                              renderInput={(params) => (
+                                <TextField
+                                  {...params}
+                                  label="Apply to invoice (optional)"
+                                  placeholder={
+                                    workflowForm.customerQbId
+                                      ? 'Open invoices for this customer'
+                                      : 'Select a customer first'
+                                  }
+                                  InputLabelProps={{ shrink: true }}
+                                  helperText="Leave blank to record an unapplied customer payment."
+                                  InputProps={{
+                                    ...params.InputProps,
+                                    endAdornment: (
+                                      <>
+                                        {openInvoicesLoading ? <CircularProgress size={14} /> : null}
+                                        {params.InputProps.endAdornment}
+                                      </>
+                                    )
+                                  }}
+                                />
+                              )}
+                            />
                           </Grid>
                           <Grid size={{ xs: 12 }}>
                             <TextField
@@ -2351,18 +3076,22 @@ export const StatementDetailPage = () => {
                               }}
                               onChange={(_event, value) => {
                                 if (!value) {
-                                  setWorkflowForm((form) => ({ ...form, customer: '' }));
+                                  setWorkflowForm((form) => ({ ...form, customer: '', customerQbId: '' }));
                                   return;
                                 }
                                 if (typeof value === 'string') {
-                                  setWorkflowForm((form) => ({ ...form, customer: value }));
+                                  setWorkflowForm((form) => ({ ...form, customer: value, customerQbId: '' }));
                                   return;
                                 }
                                 if (value.qbId === '__create__') {
                                   void createContact('customer', workflowForm.customer);
                                   return;
                                 }
-                                setWorkflowForm((form) => ({ ...form, customer: value.displayName }));
+                                setWorkflowForm((form) => ({
+                                  ...form,
+                                  customer: value.displayName,
+                                  customerQbId: value.qbId
+                                }));
                               }}
                               renderInput={(params) => (
                                 <TextField
@@ -2384,36 +3113,41 @@ export const StatementDetailPage = () => {
                             />
                           </Grid>
                           <Grid size={{ xs: 12, md: 6 }}>
-                            <FormControl size="small" fullWidth>
-                              <InputLabel shrink>Product / service item</InputLabel>
-                              <Select
-                                label="Product / service item"
-                                value={workflowForm.itemLabel}
-                                displayEmpty
-                                onChange={(event) => setWorkflowForm((form) => ({ ...form, itemLabel: String(event.target.value ?? '') }))}
-                              >
-                                <MenuItem value=""><em>— Select item —</em></MenuItem>
-                                {salesReceiptItemPresets.map((item) => (
-                                  <MenuItem key={item.id} value={item.label}>
-                                    {item.label} · posts to {item.income}
-                                  </MenuItem>
-                                ))}
-                                <MenuItem value="__custom__" sx={{ fontStyle: 'italic' }}>+ Custom item…</MenuItem>
-                              </Select>
-                            </FormControl>
+                            <Autocomplete
+                              size="small"
+                              options={qbItems}
+                              loading={qbItemsLoading}
+                              getOptionLabel={(option) =>
+                                option.type ? `${option.name} · ${option.type}` : option.name
+                              }
+                              isOptionEqualToValue={(option, value) => option.id === value.id}
+                              value={qbItems.find((row) => row.id === workflowForm.salesItemRefId) ?? null}
+                              onInputChange={(_event, value) => setQbItemSearch(value)}
+                              onChange={(_event, value) => {
+                                setWorkflowForm((form) => ({
+                                  ...form,
+                                  salesItemRefId: value?.id ?? ''
+                                }));
+                              }}
+                              renderInput={(params) => (
+                                <TextField
+                                  {...params}
+                                  label="Product / service item"
+                                  placeholder="Search QuickBooks items"
+                                  InputLabelProps={{ shrink: true }}
+                                  InputProps={{
+                                    ...params.InputProps,
+                                    endAdornment: (
+                                      <>
+                                        {qbItemsLoading ? <CircularProgress size={14} /> : null}
+                                        {params.InputProps.endAdornment}
+                                      </>
+                                    )
+                                  }}
+                                />
+                              )}
+                            />
                           </Grid>
-                          {workflowForm.itemLabel === '__custom__' ? (
-                            <Grid size={{ xs: 12, md: 6 }}>
-                              <TextField
-                                size="small"
-                                label="Custom item name"
-                                value={workflowForm.customCategory}
-                                onChange={(event) => setWorkflowForm((form) => ({ ...form, customCategory: event.target.value }))}
-                                fullWidth
-                                InputLabelProps={{ shrink: true }}
-                              />
-                            </Grid>
-                          ) : null}
                           <Grid size={{ xs: 12, md: 6 }}>
                             <TextField
                               size="small"
@@ -2433,8 +3167,9 @@ export const StatementDetailPage = () => {
                                     </MenuItem>,
                                     ...bankAccounts.map((account) => {
                                       const detail = account.detailType || account.type;
+                                      const ref = chartAccountRefValue(account);
                                       return (
-                                        <MenuItem key={account.id} value={account.id}>
+                                        <MenuItem key={account.id} value={ref}>
                                           {detail ? `${account.name} · ${detail}` : account.name}
                                         </MenuItem>
                                       );
@@ -2445,7 +3180,7 @@ export const StatementDetailPage = () => {
                           </Grid>
                           <Grid size={{ xs: 12 }}>
                             <Alert severity="info" sx={{ py: 0.5 }}>
-                              Use <strong>Manufacturer Buydown</strong> item for credits tied to vendor buydowns; the amount posts to the &ldquo;Manufacturer Buydown Income&rdquo; account the item maps to.
+                              Revenue posts through the QuickBooks item&rsquo;s income account mapping — no separate line account is required on sales receipts.
                             </Alert>
                           </Grid>
                           <Grid size={{ xs: 12 }}>
@@ -2494,8 +3229,9 @@ export const StatementDetailPage = () => {
                               </MenuItem>
                               {bankAccounts.map((account) => {
                                 const detail = account.detailType || account.type;
+                                const ref = chartAccountRefValue(account);
                                 return (
-                                  <MenuItem key={`from-${account.id}`} value={account.id}>
+                                  <MenuItem key={`from-${account.id}`} value={ref}>
                                     {detail ? `${account.name} · ${detail}` : account.name}
                                   </MenuItem>
                                 );
@@ -2535,7 +3271,7 @@ export const StatementDetailPage = () => {
                               {bankAccounts.map((account) => {
                                 const detail = account.detailType || account.type;
                                 return (
-                                  <MenuItem key={`to-${account.id}`} value={account.id}>
+                                  <MenuItem key={`to-${account.id}`} value={chartAccountRefValue(account)}>
                                     {detail ? `${account.name} · ${detail}` : account.name}
                                   </MenuItem>
                                 );
@@ -2618,7 +3354,14 @@ export const StatementDetailPage = () => {
                               <Button
                                 color="inherit"
                                 size="small"
-                                onClick={() => setWorkflowForm((form) => ({ ...form, categoryLabel: suggestion.label }))}
+                                onClick={() => {
+                                  const match = lineAccounts.find((a) => a.name === suggestion.label);
+                                  setWorkflowForm((form) => ({
+                                    ...form,
+                                    categoryLabel: suggestion.label,
+                                    lineAccountRef: match ? chartAccountRefValue(match) : form.lineAccountRef
+                                  }));
+                                }}
                               >
                                 Apply
                               </Button>
@@ -2681,27 +3424,52 @@ export const StatementDetailPage = () => {
           </DialogContent>
           <DialogActions sx={{ justifyContent: 'space-between', px: 2, py: 1 }}>
             <Button onClick={closeEditModal} color="inherit">Cancel</Button>
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} alignItems="center">
               <Button
                 color="error"
-                onClick={() => editItem && void updateSuggestionReviewStatus(editItem, 'excluded')}
+                onClick={() => editItem && void updateSuggestionReviewStatus(editItem, 'excluded', undefined, false)}
                 disabled={!editItem || mutating}
               >
                 Exclude
               </Button>
-              <Button
-                onClick={() => void saveEditModal('save_next')}
-                disabled={!editItem || mutating}
+              <ButtonGroup variant="contained" ref={approveMenuAnchorRef} disabled={!editItem || mutating || postingBlockingErrors.length > 0}>
+                <Button onClick={() => void saveEditModal('save')}>
+                  {primaryApproveLabel}
+                </Button>
+                <Button
+                  size="small"
+                  aria-label="More approve actions"
+                  onClick={() => setApproveMenuOpen((open) => !open)}
+                >
+                  <ArrowDropDownIcon />
+                </Button>
+              </ButtonGroup>
+              <Popper
+                open={approveMenuOpen}
+                anchorEl={approveMenuAnchorRef.current}
+                placement="top-end"
+                transition
+                sx={{ zIndex: (theme) => theme.zIndex.modal + 2 }}
               >
-                Approve &amp; Next
-              </Button>
-              <Button
-                variant="contained"
-                onClick={() => void saveEditModal('save')}
-                disabled={!editItem || mutating}
-              >
-                Approve
-              </Button>
+                {({ TransitionProps }) => (
+                  <Grow {...TransitionProps}>
+                    <Paper elevation={8}>
+                      <ClickAwayListener onClickAway={() => setApproveMenuOpen(false)}>
+                        <MenuList dense>
+                          <MenuItem
+                            onClick={() => {
+                              setApproveMenuOpen(false);
+                              void saveEditModal('save_next');
+                            }}
+                          >
+                            {primaryApproveLabel} &amp; next
+                          </MenuItem>
+                        </MenuList>
+                      </ClickAwayListener>
+                    </Paper>
+                  </Grow>
+                )}
+              </Popper>
             </Stack>
           </DialogActions>
         </Dialog>
@@ -2709,178 +3477,27 @@ export const StatementDetailPage = () => {
     );
   };
 
-  const renderRulesBody = () => (
-    <Paper variant="outlined" sx={{ p: 1.5 }}>
-      <Stack spacing={1}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography variant="subtitle2">Rules</Typography>
-          <Chip size="small" variant="outlined" label={`${rules.length} configured`} />
-        </Stack>
-        {rules.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No rules yet. Create soft/hard rules from Suggestions to reduce repetitive review.
-          </Typography>
-        ) : (
-          rules.slice(0, 50).map((rule) => (
-            <Paper key={rule.id} variant="outlined" sx={{ p: 1, bgcolor: 'background.default' }}>
-              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between">
-                <Stack spacing={0.25}>
-                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                    {rule.name}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {rule.conditions.contains ? `Contains "${rule.conditions.contains}"` : 'No contains filter'} •{' '}
-                    {rule.conditions.direction ? `Direction ${rule.conditions.direction}` : 'Any direction'}
-                  </Typography>
-                </Stack>
-                <Stack direction="row" spacing={0.75}>
-                  <Chip size="small" color={rule.hardness === 'hard' ? 'warning' : 'default'} label={rule.hardness} />
-                  <Chip size="small" variant="outlined" label={rule.action.type} />
-                </Stack>
-              </Stack>
-            </Paper>
-          ))
-        )}
-      </Stack>
-    </Paper>
+  const statementOverview = useMemo(
+    () =>
+      statement
+        ? buildStatementOverview({
+            statement,
+            entries,
+            liveMetrics,
+            ocrText: statement.artifacts?.ocrTextPath
+              ? artifactText[statement.artifacts.ocrTextPath]
+              : null
+          })
+        : null,
+    [statement, entries, liveMetrics, artifactText]
   );
 
-  const overviewStats = useMemo(() => {
-    const nonPostingRowTypes = new Set([
-      'section_header',
-      'beginning_balance',
-      'ending_balance',
-      'daily_balance',
-      'summary_total',
-      'noise'
-    ]);
-    const postingEntries = entries.filter((entry) => {
-      if (entry.isPostingCandidate === false) return false;
-      if (entry.rowType && nonPostingRowTypes.has(String(entry.rowType))) return false;
-      return true;
-    });
-    const entryCount = postingEntries.length;
-    const checkCount = checks.length;
-    const creditTotal = postingEntries
-      .filter((entry) => entry.type === 'credit')
-      .reduce((sum, entry) => sum + Math.abs(Number(entry.amount ?? 0)), 0);
-    const debitTotal = postingEntries
-      .filter((entry) => entry.type === 'debit')
-      .reduce((sum, entry) => sum + Math.abs(Number(entry.amount ?? 0)), 0);
-    const startingBalance = liveMetrics?.startingBalance ?? null;
-    const endingBalance = liveMetrics?.endingBalance ?? null;
-
-    return {
-      entryCount,
-      checkCount,
-      creditTotal,
-      debitTotal,
-      startingBalance,
-      endingBalance
-    };
-  }, [checks.length, entries, liveMetrics]);
-
-  const renderOverviewBody = () => (
-    <Stack spacing={2}>
-      {statement?.issues?.length ? (
-        <Alert severity="error">
-          {statement.issues.join(' | ')}
-        </Alert>
-      ) : null}
-      {sortedChecks.some((check) => check.status === 'failed' && check.processing.lastError) ? (
-        <Alert severity="error">
-          {sortedChecks
-            .filter((check) => check.status === 'failed' && check.processing.lastError)
-            .slice(0, 3)
-            .map((check) => check.processing.lastError)
-            .join(' | ')}
-        </Alert>
-      ) : null}
-      <Paper variant="outlined" sx={{ p: 1.5 }}>
-        <Typography variant="subtitle2">Statement summary</Typography>
-        <Grid container spacing={1} sx={{ mt: 0.5 }}>
-          <Grid size={{ xs: 6, md: 4 }}>
-            <Paper
-              data-testid="overview-card-entries"
-              variant="outlined"
-              onClick={() => setWorkspaceTab('suggestions')}
-              sx={{ p: 1.25, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
-            >
-              <Typography variant="caption" color="text.secondary">
-                Entries
-              </Typography>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                {overviewStats.entryCount}
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid size={{ xs: 6, md: 4 }}>
-            <Paper
-              data-testid="overview-card-checks"
-              variant="outlined"
-              onClick={() => setWorkspaceTab('suggestions')}
-              sx={{ p: 1.25, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
-            >
-              <Typography variant="caption" color="text.secondary">
-                Checks
-              </Typography>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                {overviewStats.checkCount}
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid size={{ xs: 6, md: 4 }}>
-            <Paper variant="outlined" sx={{ p: 1.25 }}>
-              <Typography variant="caption" color="text.secondary">
-                Starting
-              </Typography>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                {formatMoney(overviewStats.startingBalance)}
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid size={{ xs: 6, md: 4 }}>
-            <Paper variant="outlined" sx={{ p: 1.25 }}>
-              <Typography variant="caption" color="text.secondary">
-                Ending
-              </Typography>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                {formatMoney(overviewStats.endingBalance)}
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid size={{ xs: 6, md: 4 }}>
-            <Paper variant="outlined" sx={{ p: 1.25 }}>
-              <Typography variant="caption" color="text.secondary">
-                Credits
-              </Typography>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                {formatMoney(overviewStats.creditTotal)}
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid size={{ xs: 6, md: 4 }}>
-            <Paper variant="outlined" sx={{ p: 1.25 }}>
-              <Typography variant="caption" color="text.secondary">
-                Debits
-              </Typography>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                {formatMoney(overviewStats.debitTotal)}
-              </Typography>
-            </Paper>
-          </Grid>
-        </Grid>
-      </Paper>
-
-      <Paper variant="outlined" sx={{ p: 1.5 }}>
-        <Typography variant="subtitle2">How this works</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-          Processing updates automatically. Use Suggestions to approve or exclude proposals. Use File Manager to
-          inspect extracted files for troubleshooting or audits.
-        </Typography>
-      </Paper>
-    </Stack>
-  );
+  const renderOverviewBody = () => {
+    if (!statementOverview) {
+      return <Alert severity="info">Statement overview is loading.</Alert>;
+    }
+    return <StatementOverviewTab overview={statementOverview} />;
+  };
 
   if (!canView) {
     return <NoAccess />;
@@ -3211,6 +3828,43 @@ export const StatementDetailPage = () => {
         </DialogActions>
       </Dialog>
 
+      <Dialog
+        open={createLineAccountOpen}
+        onClose={closeCreateLineAccountDialog}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>
+          {createLineAccountKind === 'income' ? 'Create income account' : 'Create expense account'}
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            label="Account name"
+            value={createLineAccountName}
+            onChange={(event) => setCreateLineAccountName(event.target.value)}
+            autoFocus
+            required
+            size="small"
+            fullWidth
+            sx={{ mt: 0.5 }}
+            InputLabelProps={{ shrink: true }}
+            placeholder={createLineAccountKind === 'income' ? 'e.g. Sales of Product Income' : 'e.g. Office Supplies'}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeCreateLineAccountDialog} disabled={createLineAccountSubmitting}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void submitCreateLineAccount()}
+            disabled={createLineAccountSubmitting}
+            startIcon={createLineAccountSubmitting ? <CircularProgress size={14} color="inherit" /> : undefined}
+          >
+            {createLineAccountSubmitting ? 'Creating…' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <LoadingEmptyStateWrapper
         loading={loading}
@@ -3220,93 +3874,65 @@ export const StatementDetailPage = () => {
       >
         {statement && (
           <>
-            {statement.issues.length > 0 && <Alert severity="warning">{statement.issues.join(' | ')}</Alert>}
-
             <Grid container spacing={2} alignItems="stretch">
               <Grid size={{ xs: 12, lg: 12 }}>
-                <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
-                  <Stack spacing={2}>
-                    <Typography variant="subtitle1">Workspace</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Use Artifacts to inspect extracted files, or Suggestions to review proposed accounting decisions.
-                    </Typography>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                  }}
+                >
+                  <Tabs
+                    value={workspaceTab}
+                    onChange={(_, next: WorkspaceTab) => setWorkspaceTab(next)}
+                    variant="fullWidth"
+                    scrollButtons={false}
+                    sx={{
+                      flexShrink: 0,
+                      borderBottom: 1,
+                      borderColor: 'divider',
+                      bgcolor: 'background.paper',
+                      minHeight: 48,
+                      '& .MuiTabs-flexContainer': { gap: 0 },
+                      '& .MuiTab-root': {
+                        textTransform: 'none',
+                        fontWeight: 500,
+                        fontSize: '0.9375rem',
+                        letterSpacing: 0,
+                        minHeight: 48,
+                        py: 1.25
+                      },
+                      '& .MuiTabs-indicator': {
+                        height: 2
+                      }
+                    }}
+                  >
+                    <Tab value="overview" label="Overview" />
+                    <Tab value="review_transactions" label="Review Transactions" />
+                    <Tab value="source_proof" label="Source Proof" />
+                  </Tabs>
 
-                    <Divider />
-
-                    <Tabs
-                      value={workspaceTab}
-                      onChange={(_, next: WorkspaceTab) => setWorkspaceTab(next)}
-                    >
-                      <Tab value="overview" label="Overview" />
-                      <Tab value="suggestions" label="Suggestions" />
-                      <Tab value="rules" label="Rules" />
-                      <Tab value="artifacts" label="File Manager" />
-                    </Tabs>
-
+                  <Stack spacing={2} sx={{ p: 2, flex: 1, minHeight: 0, overflow: 'auto' }}>
                     {workspaceTab === 'overview' ? renderOverviewBody() : null}
-                    {workspaceTab === 'rules' ? renderRulesBody() : null}
-                    {workspaceTab === 'artifacts' ? (
-                      <>
-                        <Grid container spacing={1.5}>
-                          <Grid size={{ xs: 12, lg: 4 }}>
-                            <Paper variant="outlined" sx={{ p: 1.25 }}>
-                              <Stack spacing={1}>
-                                <Typography variant="subtitle2">File Manager</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  Browse folders and open a file preview.
-                                </Typography>
-                                {artifactGroups.map((group) => (
-                                  <Accordion
-                                    key={group.folder}
-                                    disableGutters
-                                    defaultExpanded={group.items.some((item) => item.key === statementViewerTab)}
-                                  >
-                                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                      <Stack direction="row" spacing={1} alignItems="center">
-                                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                          {group.folder}
-                                        </Typography>
-                                        <Chip size="small" variant="outlined" label={group.items.length} />
-                                      </Stack>
-                                    </AccordionSummary>
-                                    <AccordionDetails>
-                                      <Stack spacing={0.75}>
-                                        {group.items.map((artifact) => (
-                                          <Button
-                                            key={artifact.key}
-                                            size="small"
-                                            variant={statementViewerTab === artifact.key ? 'contained' : 'outlined'}
-                                            onClick={() => setStatementViewerTab(artifact.key)}
-                                            sx={{ justifyContent: 'flex-start' }}
-                                          >
-                                            {artifact.label}
-                                          </Button>
-                                        ))}
-                                      </Stack>
-                                    </AccordionDetails>
-                                  </Accordion>
-                                ))}
-                              </Stack>
-                            </Paper>
-                          </Grid>
-                          <Grid size={{ xs: 12, lg: 8 }}>
-                            <Paper variant="outlined" sx={{ p: 1.25 }}>
-                              <Stack spacing={1}>
-                                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-                                  <Typography variant="subtitle2">Preview</Typography>
-                                  {currentArtifact ? (
-                                    <Chip size="small" variant="outlined" label={`Viewing: ${currentArtifact.label}`} />
-                                  ) : null}
-                                </Stack>
-                                {renderViewerBody()}
-                              </Stack>
-                            </Paper>
-                          </Grid>
-                        </Grid>
-                      </>
+                    {workspaceTab === 'source_proof' ? (
+                      <StatementSourceProofTab
+                        statement={statement}
+                        checks={checks}
+                        artifactGroups={artifactGroups}
+                        statementViewerTab={statementViewerTab}
+                        onSelectViewerTab={setStatementViewerTab}
+                        artifactText={artifactText}
+                        artifactBlobUrls={artifactBlobUrls}
+                        artifactLoading={artifactLoading}
+                        artifactErrors={artifactErrors}
+                        renderViewerBody={renderViewerBody}
+                      />
                     ) : null}
 
-                    {workspaceTab === 'suggestions' ? renderSuggestionsBody() : null}
+                    {workspaceTab === 'review_transactions' ? renderSuggestionsBody() : null}
                   </Stack>
                 </Paper>
               </Grid>

@@ -10,6 +10,7 @@ import {
   createStatementRuleSchema,
   updateStatementRuleSchema,
   statementRuleSchema,
+  inferDefaultQuickBooksTxnType,
   resolveTransferSuggestionSchema,
   updateStatementEntryReviewSchema,
   updateStatementSuggestionReviewSchema,
@@ -21,7 +22,7 @@ import {
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Request, Response } from 'express';
-import { Types } from 'mongoose';
+import { Types, type HydratedDocument } from 'mongoose';
 import { env } from '../config/env';
 import { getStorageClient } from '../integrations/google/storage.client';
 import { enqueueAccountingJob } from '../jobs/accountingQueue';
@@ -29,7 +30,7 @@ import { BankStatement } from '../models/BankStatement';
 import { ChartOfAccountModel } from '../models/ChartOfAccount';
 import { LedgerEntryModel } from '../models/LedgerEntry';
 import { RunModel } from '../models/Run';
-import { StatementTransactionModel } from '../models/StatementTransaction';
+import { StatementTransactionModel, type StatementTransactionDoc } from '../models/StatementTransaction';
 import { StatementCheckModel } from '../models/StatementCheck';
 import { StatementRuleModel } from '../models/StatementRule';
 import { createQuickBooksHubChartAccount } from '../services/quickbooksTaxService';
@@ -50,6 +51,8 @@ import { extractPdfTextItemsFromBuffer, groupItemsIntoLines } from '../statement
 import { parseStatementLines } from '../statement-extraction/offline/parseStatement';
 import { getPdfPageCount, scalePdfBoxToImageBox } from '../statement-extraction/offline/renderPdfPage';
 import type { Box, CheckCaption, CheckRow, DetectedCheckImage, StatementTransaction } from '../statement-extraction/offline/types';
+import { persistStatementFailure } from '../services/bankStatementPersistence';
+import { postApprovedLedgerEntryByStatementTransactionId } from '../services/quickbooksSyncService';
 import { evaluateStatementRules, listStatementRules } from '../services/statementRuleService';
 import { fail, ok } from '../utils/apiResponse';
 
@@ -669,6 +672,7 @@ const buildStatementArtifacts = (statement: any) => {
     offlineExtractionPath: artifacts.offlineExtractionPath ?? undefined,
     evidencePath: artifacts.evidencePath ?? undefined,
     validationReportPath: artifacts.validationReportPath ?? undefined,
+    pdfLayoutPath: artifacts.pdfLayoutPath ?? undefined,
     geminiPath: artifacts.geminiPath ?? undefined,
     detectionEvidence: artifacts.detectionEvidence ?? undefined,
     detectedStatementMonth: artifacts.detectedStatementMonth ?? undefined,
@@ -996,14 +1000,20 @@ const buildStatementSuggestions = async (statement: any) => {
     );
   });
   const getPostingMappingWarnings = (proposal: {
-    qbTxnType?: 'Expense' | 'Deposit' | 'Transfer' | 'Check';
+    qbTxnType?: 'Expense' | 'Deposit' | 'Transfer' | 'Check' | 'SalesReceipt' | 'Payment';
     bankAccountId?: string;
     categoryAccountId?: string;
+    payeeName?: string;
+    payeeId?: string;
   }) => {
     const warnings: string[] = [];
     if (!proposal.qbTxnType) return warnings;
     if (
-      (proposal.qbTxnType === 'Expense' || proposal.qbTxnType === 'Deposit' || proposal.qbTxnType === 'Check') &&
+      (proposal.qbTxnType === 'Expense' ||
+        proposal.qbTxnType === 'Deposit' ||
+        proposal.qbTxnType === 'Check' ||
+        proposal.qbTxnType === 'SalesReceipt' ||
+        proposal.qbTxnType === 'Payment') &&
       !proposal.bankAccountId
     ) {
       warnings.push('Missing bank account mapping (Chart of Accounts) for QuickBooks posting');
@@ -1013,6 +1023,23 @@ const buildStatementSuggestions = async (statement: any) => {
       !proposal.categoryAccountId
     ) {
       warnings.push('Missing category account mapping (Chart of Accounts) for QuickBooks posting');
+    }
+    if (
+      (proposal.qbTxnType === 'Expense' ||
+        proposal.qbTxnType === 'Deposit' ||
+        proposal.qbTxnType === 'Check' ||
+        proposal.qbTxnType === 'SalesReceipt') &&
+      proposal.bankAccountId &&
+      proposal.categoryAccountId &&
+      proposal.bankAccountId === proposal.categoryAccountId
+    ) {
+      warnings.push('Bank account and line/category account must differ for QuickBooks posting');
+    }
+    if (proposal.qbTxnType === 'Payment' && !proposal.payeeName && !proposal.payeeId) {
+      warnings.push('Customer payment requires a QuickBooks customer');
+    }
+    if (proposal.qbTxnType === 'SalesReceipt' && !proposal.payeeName && !proposal.payeeId) {
+      warnings.push('Sales receipt requires a QuickBooks customer');
     }
     return warnings;
   };
@@ -1044,6 +1071,15 @@ const buildStatementSuggestions = async (statement: any) => {
         bankAccountId: bankAccountIdFromRule ?? txn.proposal?.bankAccountId ?? undefined,
         categoryAccountId: categoryAccountIdFromRule ?? txn.proposal?.categoryAccountId ?? undefined
       };
+      resolvedProposal.qbTxnType =
+        resolvedProposal.qbTxnType ??
+        inferDefaultQuickBooksTxnType({
+          type: direction,
+          section: txn.section,
+          transactionFamily: txn.transactionFamily,
+          rowType: txn.rowType,
+          description: ruleDescription
+        });
       const transferHint = parseMaskedAccountHint(String(txn.description ?? ''));
       const flowText = String(txn.description ?? '').toLowerCase();
       const directionRelativeToStatement =
@@ -1155,6 +1191,15 @@ const buildStatementSuggestions = async (statement: any) => {
         bankAccountId: selectedRule?.action?.bankAccountId ?? undefined,
         categoryAccountId: selectedRule?.action?.categoryAccountId ?? undefined
       };
+      resolvedProposal.qbTxnType =
+        resolvedProposal.qbTxnType ??
+        inferDefaultQuickBooksTxnType({
+          type: 'debit',
+          section: 'checks_cleared',
+          transactionFamily: 'check',
+          rowType: 'check_cleared',
+          description
+        });
       return {
         id: String(check._id),
         source: 'check' as const,
@@ -1767,12 +1812,11 @@ export const createStatement = async (req: Request, res: Response) => {
         await statement.save();
       }
     } catch (enqueueError) {
-      statement.status = 'failed' as any;
-      statement.issues = [
-        ...(statement.issues ?? []),
-        `Queue dispatch failed: ${String((enqueueError as Error).message)}`
-      ] as any;
-      await statement.save();
+      await persistStatementFailure({
+        companyId,
+        statementId: statement._id.toString(),
+        message: `Queue dispatch failed: ${String((enqueueError as Error).message)}`
+      });
       throw enqueueError;
     }
 
@@ -1792,36 +1836,11 @@ export const createStatement = async (req: Request, res: Response) => {
           ? 502
           : 500;
     if (statement) {
-      statement.status = 'failed';
-      statement.issues = [
-        ...new Set([
-          ...(Array.isArray(statement.issues) ? statement.issues.map((issue: unknown) => String(issue)) : []),
-          failure.clientMessage
-        ])
-      ];
-      statement.progress = {
-        phase: 'failed',
-        totalChecks: Number(statement.progress?.totalChecks ?? 0),
-        checksQueued: Number(statement.progress?.checksQueued ?? 0),
-        checksProcessing: Number(statement.progress?.checksProcessing ?? 0),
-        checksReady: Number(statement.progress?.checksReady ?? 0),
-        checksFailed: Number(statement.progress?.checksFailed ?? 0),
-        completedChecks:
-          Number(statement.progress?.checksReady ?? 0) + Number(statement.progress?.checksFailed ?? 0),
-        remainingChecks: Math.max(
-          Number(statement.progress?.totalChecks ?? 0) -
-            (Number(statement.progress?.checksReady ?? 0) + Number(statement.progress?.checksFailed ?? 0)),
-          0
-        )
-      };
-      statement.artifacts = {
-        ...(statement.artifacts ?? {}),
-        stageTimestamps: {
-          ...(statement.artifacts?.stageTimestamps ?? {}),
-          failedAt: nowIso()
-        }
-      };
-      await statement.save();
+      await persistStatementFailure({
+        companyId: String(companyId),
+        statementId: statement._id.toString(),
+        message: failure.clientMessage
+      });
     }
     // eslint-disable-next-line no-console
     console.error('[accounting.create-statement] failed', {
@@ -2150,7 +2169,15 @@ export const createRuleFromStatementTransaction = async (req: Request, res: Resp
       },
       action: {
         type: 'suggestTxnType',
-        proposedTxnType: transaction.proposal?.qbTxnType ?? (transaction.type === 'credit' ? 'Deposit' : 'Expense'),
+        proposedTxnType:
+          transaction.proposal?.qbTxnType ??
+          inferDefaultQuickBooksTxnType({
+            type: transaction.type as 'debit' | 'credit',
+            section: transaction.section ?? undefined,
+            transactionFamily: transaction.transactionFamily ?? undefined,
+            rowType: transaction.rowType ?? undefined,
+            description: String(transaction.description ?? transaction.merchant ?? '')
+          }),
         bankAccountId: transaction.proposal?.bankAccountId ?? undefined,
         payeeName: transaction.proposal?.payeeName ?? undefined,
         categoryAccountId: transaction.proposal?.categoryAccountId ?? undefined,
@@ -2217,25 +2244,119 @@ export const updateStatementSuggestionReview = async (req: Request, res: Respons
   const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
   if (!statement) return fail(res, 'Statement not found', 404);
 
+  let entry: HydratedDocument<StatementTransactionDoc> | null = null;
   if (parsed.data.source === 'transaction') {
-    const entry = await StatementTransactionModel.findOne({
+    entry = await StatementTransactionModel.findOne({
       _id: req.params.suggestionId,
       statementId: req.params.id,
       companyId: req.companyId
     });
     if (!entry) return fail(res, 'Suggestion not found', 404);
-    entry.proposal = {
-      ...(entry.proposal ?? {}),
-      status: parsed.data.reviewStatus
-    } as any;
-    entry.reviewStatus = parsed.data.reviewStatus as any;
-    await entry.save();
+  } else {
+    entry = await StatementTransactionModel.findOne({
+      statementCheckId: req.params.suggestionId,
+      statementId: req.params.id,
+      companyId: req.companyId
+    });
+    if (!entry) {
+      return fail(
+        res,
+        'This check is not linked to a statement transaction yet. Reprocess the statement or wait for check matching before approving.',
+        409,
+        { code: 'check_not_linked_to_transaction', checkId: req.params.suggestionId }
+      );
+    }
+  }
+
+  const proposalPatch = parsed.data.proposal;
+  const reviewStatus = parsed.data.reviewStatus;
+
+  const mergedProposal = {
+    ...(entry.proposal ?? {}),
+    ...(proposalPatch ?? {}),
+    status: reviewStatus
+  } as any;
+
+  if (
+    (mergedProposal.qbTxnType === 'Expense' ||
+      mergedProposal.qbTxnType === 'Deposit' ||
+      mergedProposal.qbTxnType === 'Check' ||
+      mergedProposal.qbTxnType === 'SalesReceipt') &&
+    mergedProposal.bankAccountId &&
+    mergedProposal.categoryAccountId &&
+    mergedProposal.bankAccountId === mergedProposal.categoryAccountId
+  ) {
+    return fail(res, 'Bank account and line/category account must differ for QuickBooks posting', 422);
+  }
+
+  if (
+    mergedProposal.qbTxnType === 'Payment' &&
+    !mergedProposal.payeeId &&
+    !mergedProposal.payeeName
+  ) {
+    return fail(res, 'Customer payment requires a customer or payer', 422);
+  }
+
+  if (
+    mergedProposal.qbTxnType === 'Transfer' &&
+    mergedProposal.bankAccountId &&
+    mergedProposal.transferTargetAccountId &&
+    mergedProposal.bankAccountId === mergedProposal.transferTargetAccountId
+  ) {
+    return fail(res, 'Transfer from and to accounts must differ', 422);
+  }
+
+  entry.proposal = mergedProposal;
+  entry.reviewStatus = reviewStatus as any;
+  await entry.save();
+
+  await LedgerEntryModel.updateMany(
+    {
+      companyId: req.companyId,
+      statementId: req.params.id,
+      statementTransactionId: entry._id.toString()
+    },
+    {
+      $set: {
+        proposal: mergedProposal,
+        reviewStatus: reviewStatus as any
+      }
+    }
+  );
+
+  let quickbooks: Record<string, unknown> | undefined;
+  const shouldPost =
+    reviewStatus === 'approved' && parsed.data.postToQuickBooks !== false;
+  if (shouldPost) {
+    const postResult = await postApprovedLedgerEntryByStatementTransactionId(
+      String(req.companyId),
+      entry._id.toString()
+    );
+    if (postResult.ok) {
+      quickbooks = {
+        posted: true,
+        qbTxnId: postResult.qbTxnId,
+        qbTxnType: postResult.qbTxnType,
+        matchedExisting: postResult.matchedExisting ?? false,
+        registerSummary: postResult.registerSummary,
+        previewLines: postResult.previewLines
+      };
+    } else {
+      quickbooks = {
+        posted: false,
+        error: postResult.error,
+        previewLines: []
+      };
+      return fail(res, postResult.error, 422, { quickbooks });
+    }
   }
 
   return ok(res, {
     suggestionId: req.params.suggestionId,
     source: parsed.data.source,
-    reviewStatus: parsed.data.reviewStatus
+    reviewStatus,
+    proposal: mergedProposal,
+    quickbooks
   });
 };
 
@@ -2664,6 +2785,7 @@ export const getStatementStream = async (req: Request, res: Response) => {
     structuredReady: Boolean(artifacts?.structuredStatementPath),
     evidenceReady: Boolean(artifacts?.evidencePath),
     validationReady: Boolean(artifacts?.validationReportPath),
+    pdfLayoutReady: Boolean(artifacts?.pdfLayoutPath),
     geminiReady: Boolean(artifacts?.geminiPath),
     stageTimestamps: artifacts?.stageTimestamps
   });

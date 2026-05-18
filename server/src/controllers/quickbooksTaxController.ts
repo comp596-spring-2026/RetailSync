@@ -3,6 +3,7 @@ import {
   quickBooksAccountRegisterQuerySchema,
   quickBooksHubChartOfAccountsQuerySchema,
   quickBooksHubChartAccountCreateInputSchema,
+  quickBooksHubItemsQuerySchema,
   quickBooksContactCreateInputSchema,
   quickBooksContactUpdateInputSchema,
   quickBooksHubEntitiesQuerySchema,
@@ -39,6 +40,7 @@ import {
   getQuickBooksTransactionDetail,
   listQuickBooksHubChartOfAccounts,
   createQuickBooksHubChartAccount,
+  listQuickBooksHubItems,
   listQuickBooksHubEntities,
   listQuickBooksHubOperations,
   listQuickBooksLiveTransactions,
@@ -233,11 +235,33 @@ export const postQuickBooksHubChartOfAccounts = async (req: Request, res: Respon
       companyId,
       name: parsed.data.name,
       accountNumber: parsed.data.accountNumber,
+      accountKind: parsed.data.accountKind,
       detailType: parsed.data.detailType
     });
     return ok(res, { account }, 201);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'QuickBooks hub chart account create failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const getQuickBooksHubItems = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const parsed = quickBooksHubItemsQuerySchema.safeParse(req.query ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  try {
+    const data = await listQuickBooksHubItems({
+      companyId,
+      ...parsed.data
+    });
+    return ok(res, data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks hub items fetch failed';
     return fail(res, message, mapQuickBooksTaxErrorStatus(message));
   }
 };

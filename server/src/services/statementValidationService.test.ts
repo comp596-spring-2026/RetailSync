@@ -81,7 +81,8 @@ describe('statementValidationService', () => {
 
     const report = buildStatementValidationReport({
       statementId: 'statement-1',
-      rows: rows as any
+      rows: rows as any,
+      profile: 'southstate_fixture'
     });
 
     expect(report.passed).toBe(true);
@@ -118,10 +119,48 @@ describe('statementValidationService', () => {
 
     const report = buildStatementValidationReport({
       statementId: 'statement-2',
-      rows: rows as any
+      rows: rows as any,
+      profile: 'southstate_fixture'
     });
 
     expect(report.passed).toBe(false);
     expect(report.mismatches.some((mismatch) => mismatch.code === 'deposits_count_mismatch')).toBe(true);
+  });
+
+  it('uses reconciliation-only validation in production profile', () => {
+    const rows = [
+      {
+        localId: 'begin',
+        postDate: '2025-11-29',
+        amount: 1000,
+        type: 'credit' as const,
+        rowType: 'beginning_balance' as const,
+        section: 'account_summary' as const,
+        description: 'Beginning Balance',
+        isPostingCandidate: false,
+        sourceLocator: { pageNumber: 1, sourceText: 'Beginning Balance' }
+      },
+      ...buildRows({ rowType: 'deposit', section: 'deposits', direction: 'credit', count: 3, amount: 100 }),
+      {
+        localId: 'ending',
+        postDate: '2025-12-31',
+        amount: 1300,
+        type: 'credit' as const,
+        rowType: 'ending_balance' as const,
+        section: 'account_summary' as const,
+        description: 'Ending Balance',
+        isPostingCandidate: false,
+        sourceLocator: { pageNumber: 1, sourceText: 'Ending Balance' }
+      }
+    ];
+
+    const report = buildStatementValidationReport({
+      statementId: 'statement-3',
+      rows: rows as any,
+      profile: 'reconciliation_only'
+    });
+
+    expect(report.passed).toBe(true);
+    expect(report.mismatches).toHaveLength(0);
   });
 });

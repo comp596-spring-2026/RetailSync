@@ -233,6 +233,7 @@ export const StatementsPage = () => {
     setCreatingAccount(true);
     try {
       const response = await accountingApi.createQuickbooksHubChartAccount({
+        accountKind: 'bank',
         name: newAccountName.trim(),
         accountNumber: newAccountNumber.trim() || undefined,
         detailType: newAccountDetailType

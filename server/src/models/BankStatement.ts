@@ -61,6 +61,7 @@ const statementArtifactsSchema = new Schema(
     offlineExtractionPath: { type: String, required: false },
     evidencePath: { type: String, required: false },
     validationReportPath: { type: String, required: false },
+    pdfLayoutPath: { type: String, required: false },
     geminiPath: { type: String, required: false },
     detectionEvidence: { type: String, required: false },
     detectedStatementMonth: { type: String, required: false },

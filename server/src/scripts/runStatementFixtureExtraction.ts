@@ -18,6 +18,7 @@ import {
 import { renderStatementPdfPages } from '../services/accountingPdfRenderService';
 import { extractStatementPagesFromPdfBuffer } from '../services/accountingPdfTextExtractionService';
 import {
+  applyLayoutSectionsToParsedTransactions,
   deriveSectionBoundsFromLayout,
   extractChecksClearedFromLayout,
   extractDailyBalancesFromLayout,
@@ -533,6 +534,11 @@ export const runStatementFixtureExtraction = async () => {
       checkRegions: []
     })) as any
   );
+  applyLayoutSectionsToParsedTransactions(
+    productionParsed,
+    pdfLayoutPages,
+    pdfLayoutSectionBounds
+  );
   const normalizedTransactions = productionParsed;
   const normalizedChecksClearedRows = buildProductionChecksClearedRows(
     productionParsed as any,
@@ -546,7 +552,8 @@ export const runStatementFixtureExtraction = async () => {
   const extractionIssues = buildProductionExtractionIssues(productionParsed as any);
   const validationReport = buildStatementValidationReport({
     statementId,
-    rows: productionParsed as any
+    rows: productionParsed as any,
+    profile: 'southstate_fixture'
   });
 
   await writeJson(toLocalPath(buildJsonPath(rootPrefix, 'tables/transactions.json')), normalizedTransactions);
