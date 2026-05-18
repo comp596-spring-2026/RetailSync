@@ -1,6 +1,8 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+RUN apk add --no-cache build-base cairo-dev pango-dev jpeg-dev giflib-dev librsvg-dev python3
+
 RUN corepack enable
 
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
@@ -17,7 +19,7 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN apk add --no-cache wget && addgroup -S nodejs && adduser -S nodeuser -G nodejs
+RUN apk add --no-cache wget cairo pango jpeg giflib librsvg && addgroup -S nodejs && adduser -S nodeuser -G nodejs
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/tsconfig.base.json ./tsconfig.base.json
