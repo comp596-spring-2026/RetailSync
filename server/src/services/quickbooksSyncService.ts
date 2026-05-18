@@ -393,18 +393,6 @@ export const postLedgerEntryToQuickBooks = async (
     (await resolvePostingAccountLabel(companyId, proposal.transferTargetAccountId)) ??
     'Other bank account';
 
-  const previewLines = buildStatementPostingPreviewLines({
-    qbTxnType: proposal.qbTxnType,
-    amount: entry.amount,
-    direction: entry.type,
-    bankAccountLabel: bankLabel,
-    lineAccountLabel: lineLabel,
-    transferToAccountLabel: transferToLabel,
-    payeeName: proposal.payeeName,
-    checkNumber: proposal.checkNumber,
-    matchedExisting: false
-  });
-
   try {
     let qbTxnId: string | undefined;
     let matchedExisting = false;
