@@ -58,6 +58,7 @@ const statementArtifactsSchema = new Schema(
     suggestionsOutputPath: { type: String, required: false },
     processingSummaryPath: { type: String, required: false },
     structuredStatementPath: { type: String, required: false },
+    offlineExtractionPath: { type: String, required: false },
     evidencePath: { type: String, required: false },
     validationReportPath: { type: String, required: false },
     geminiPath: { type: String, required: false },

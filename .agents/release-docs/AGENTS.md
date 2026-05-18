@@ -47,11 +47,11 @@ This specialist makes sure the repository says what the product actually is.
 - active routes in `client/src/app/App.tsx`
 - visible nav in `client/src/app/layout/DashboardLayout.tsx`
 - current docs under `docs/wireframes`
-- current audit under `docs/testing/2026-04-19-full-module-audit.md`
+- current testing summary under `docs/testing/testing-strategy.md`
 
 ## Anti-Patterns
 
 - copying stale roadmap language into current-state docs
 - treating partial confidence as full confidence
 - documenting hidden routes as primary workspaces
-- forgetting to update module audits after major UI reshapes
+- forgetting to update testing/status docs after major UI reshapes

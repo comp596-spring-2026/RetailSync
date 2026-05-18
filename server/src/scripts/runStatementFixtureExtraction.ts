@@ -74,6 +74,7 @@ const TRANSACTION_SECTION_HEADERS = [
   'Other Credits',
   'Electronic Debits',
   'Checks Cleared',
+  'Daily Balances',
   'Account Summary'
 ] as const;
 
@@ -557,6 +558,11 @@ export const runStatementFixtureExtraction = async () => {
   const renderedPageMap = new Map(renderedPages.map((page) => [page.pageNo, page]));
   const pageObservationByNumber = new Map(pageObservations.map((page) => [page.pageNumber, page]));
   const checkPages = pageObservations.filter((page) => pageClassificationByNumber.get(page.pageNumber)?.isCheckPage);
+  const checksClearedByNumber = new Map(
+    normalizedChecksClearedRows
+      .filter((row) => typeof row.checkNumber === 'string' && row.checkNumber.trim().length > 0)
+      .map((row) => [String(row.checkNumber).padStart(4, '0'), row] as const)
+  );
 
   for (const page of checkPages) {
     const renderedPage = renderedPageMap.get(page.pageNumber);
@@ -576,12 +582,19 @@ export const runStatementFixtureExtraction = async () => {
       const ocrJsonPath = buildCheckOcrPath(rootPrefix, checkKey, 'ocr.json');
       const structuredPath = buildCheckStructuredPath(rootPrefix, checkKey);
       try {
+        const clearedRow = checksClearedByNumber.get(String(pageCheckNumber).padStart(4, '0'));
         const result = await runStatementCheckExtraction({
           pdfBuffer,
           pageNumber: page.pageNumber,
           cropBox: anchoredCheck.bbox,
           checkKey,
           pageContext: page.text,
+          fallback: {
+            checkNumber: pageCheckNumber,
+            date: clearedRow?.postDate ?? undefined,
+            amount: clearedRow?.amount,
+            source: 'deterministic'
+          },
           internalPdfPageText: page.text,
           persistArtifacts: false
         });
@@ -665,6 +678,12 @@ export const runStatementFixtureExtraction = async () => {
             cropBox: slot.bbox,
             checkKey,
             pageContext,
+            fallback: {
+              checkNumber: row.checkNumber ?? undefined,
+              date: row.postDate ?? undefined,
+              amount: row.amount,
+              source: 'deterministic'
+            },
             internalPdfPageText: pageContext,
             persistArtifacts: false
           });
@@ -730,6 +749,10 @@ export const runStatementFixtureExtraction = async () => {
             cropBox: slot.bbox,
             checkKey,
             pageContext,
+            fallback: {
+              checkNumber: row.checkNumber ?? undefined,
+              source: 'deterministic'
+            },
             internalPdfPageText: pageContext,
             persistArtifacts: false
           });

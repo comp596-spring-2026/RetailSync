@@ -63,17 +63,6 @@ classes: {
     }
   }
 
-  ai: {
-    style: {
-      fill: "#fff1f2"
-      stroke: "#e11d48"
-      stroke-width: 2
-      font-color: "#881337"
-      border-radius: 12
-      shadow: true
-    }
-  }
-
   integration: {
     style: {
       fill: "#fff7ed"
@@ -96,7 +85,7 @@ classes: {
   }
 }
 
-title: RetailSync - Real System Architecture {
+title: RetailSync - Local Development Architecture {
   shape: text
   near: top-center
   style: {
@@ -106,7 +95,7 @@ title: RetailSync - Real System Architecture {
   }
 }
 
-subtitle: End-to-end flow of the platform from client-side SPA to cloud infrastructure and AI integration. {
+subtitle: Docker-based local runtime for the client, API, database, and connected services. {
   shape: text
   near: top-center
   style: {
@@ -115,134 +104,102 @@ subtitle: End-to-end flow of the platform from client-side SPA to cloud infrastr
   }
 }
 
-admin: {
-  label: "Admin User"
+user_app: {
+  label: "User"
   class: user
 }
 
-retailer: {
-  label: "Retail Manager"
-  class: user
-}
-
-frontend_layer: {
-  label: "Frontend Layer"
+docker_stack: {
+  label: "Docker Compose Stack"
   class: group
   direction: down
 
-  firebase_hosting: {
-    label: "Firebase Hosting"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/firebase/firebase-plain.svg"
+  client_container: {
+    label: "Client Container"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/docker/docker-original.svg"
     class: group
     direction: down
 
+    nginx: {
+      label: "Nginx"
+      icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/nginx/nginx-original.svg"
+      class: frontend
+    }
+
     react_app: {
-      label: "React SPA (Vite/TS)"
+      label: "React SPA Build\n(Vite/TypeScript)"
       icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/vitejs/vitejs-original.svg"
       class: frontend
     }
   }
-}
 
-backend_layer: {
-  label: "Backend Layer"
-  class: group
-  direction: down
-
-  cloud_run: {
-    label: "Google Cloud Run"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg"
+  server_container: {
+    label: "Server Container"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/docker/docker-original.svg"
     class: group
     direction: down
 
     express_server: {
-      label: "Node.js / Express Server"
+      label: "Node.js / Express API"
       icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/nodejs/nodejs-original.svg"
       class: backend
     }
   }
+
+  mongo_container: {
+    label: "Mongo Container"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/docker/docker-original.svg"
+    class: group
+    direction: down
+
+    mongo_db: {
+      label: "MongoDB"
+      shape: cylinder
+      icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/mongodb/mongodb-original.svg"
+      class: database
+    }
+  }
 }
 
-database_layer: {
-  label: "Database Layer"
+supporting_services: {
+  label: "Supporting Services"
   class: group
   direction: down
 
-  mongo_db: {
-    label: "MongoDB"
-    shape: cylinder
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/mongodb/mongodb-original.svg"
+  gcs_bucket: {
+    label: "Google Cloud Storage Bucket"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg"
     class: database
   }
 
-}
-
-gcp_infrastructure: {
-  label: "Google Cloud Infrastructure"
-  class: group
-  direction: down
-
-  cloud_tasks: {
-    label: "Cloud Tasks (Queues)"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg"
-    class: infra
-  }
-
-  gcs_bucket: {
-    label: "Cloud Storage (GCS)"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg"
-    class: infra
-  }
-
-}
-
-ai_services: {
-  label: "Google AI Services"
-  class: group
-  direction: down
-
-  gemini_vision: {
-    label: "Gemini Vision API (OCR)"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/google/google-original.svg"
-    class: ai
-  }
-
-  gemini_api: {
-    label: "Gemini API (Reasoning)"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/google/google-original.svg"
-    class: ai
-  }
-}
-
-third_party_layer: {
-  label: "Third-Party Integrations"
-  class: group
-  direction: down
-
-
   google_auth: {
-    label: "Google Auth (SSO)"
+    label: "Google OAuth"
     icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/google/google-original.svg"
+    class: integration
+  }
+
+  google_sheets: {
+    label: "Google Sheets"
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/google/google-original.svg"
+    class: integration
+  }
+
+  quickbooks: {
+    label: "QuickBooks APIs"
+    icon: "https://cdn.simpleicons.org/intuit/236CFF"
     class: integration
   }
 }
 
-# --- Connections ---
+user_app -> docker_stack.client_container.nginx: "opens web app"
 
-admin -> frontend_layer.firebase_hosting.react_app: "uses"
-retailer -> frontend_layer.firebase_hosting.react_app: "uses"
+docker_stack.client_container.nginx -> docker_stack.client_container.react_app: "serves static SPA"
+docker_stack.client_container.react_app -> docker_stack.client_container.nginx: "calls /api"
+docker_stack.client_container.nginx -> docker_stack.server_container.express_server: "reverse proxies /api to server:4000"
 
-frontend_layer.firebase_hosting.react_app -> backend_layer.cloud_run.express_server: "API requests"
+docker_stack.server_container.express_server -> docker_stack.mongo_container.mongo_db: "reads / writes app data"
+docker_stack.server_container.express_server -> supporting_services.gcs_bucket: "stores statement files and artifacts"
 
-backend_layer.cloud_run.express_server -> third_party_layer.google_auth: "Authenticates"
-
-backend_layer.cloud_run.express_server -> gcp_infrastructure.cloud_tasks: "Enqueues pipeline jobs"
-backend_layer.cloud_run.express_server -> gcp_infrastructure.gcs_bucket: "Uploads PDFs & Extracts Data"
-
-gcp_infrastructure.cloud_tasks -> backend_layer.cloud_run.express_server: "Triggers Webhooks"
-
-backend_layer.cloud_run.express_server -> database_layer.mongo_db: "Read/Write data"
-backend_layer.cloud_run.express_server -> ai_services.gemini_vision: "OCR Processing"
-backend_layer.cloud_run.express_server -> ai_services.gemini_api: "Proposals & POS Assistant"
-
-
+docker_stack.server_container.express_server -> supporting_services.google_auth: "OAuth login / token exchange"
+docker_stack.server_container.express_server -> supporting_services.google_sheets: "imports / exports spreadsheet data"
+docker_stack.server_container.express_server -> supporting_services.quickbooks: "OAuth + accounting sync"

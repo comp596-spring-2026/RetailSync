@@ -113,9 +113,7 @@ export const env = {
   tasksQueueSync: process.env.TASKS_QUEUE_SYNC ?? SERVER_RUNTIME_DEFAULTS.tasksQueueSync,
   tasksOidcServiceAccountEmail: process.env.TASKS_OIDC_SERVICE_ACCOUNT_EMAIL,
   apiServiceName: process.env.API_SERVICE_NAME,
-  statementPdfRenderCommand: process.env.STATEMENT_PDF_RENDER_COMMAND ?? SERVER_RUNTIME_DEFAULTS.statementPdfRenderCommand,
-  statementPdfRenderDpi: Number(process.env.STATEMENT_PDF_RENDER_DPI ?? SERVER_RUNTIME_DEFAULTS.statementPdfRenderDpi),
-  statementPdfRenderTimeoutMs: Number(process.env.STATEMENT_PDF_RENDER_TIMEOUT_MS ?? SERVER_RUNTIME_DEFAULTS.statementTimeoutMs),
+  useTesseractFallback: parseBooleanFlag(process.env.USE_TESSERACT_FALLBACK),
   statementOcrProvider: process.env.STATEMENT_OCR_PROVIDER ?? SERVER_RUNTIME_DEFAULTS.statementOcrProvider,
   statementOcrVisionEndpoint:
     process.env.STATEMENT_OCR_VISION_ENDPOINT ?? SERVER_RUNTIME_DEFAULTS.statementOcrVisionEndpoint,

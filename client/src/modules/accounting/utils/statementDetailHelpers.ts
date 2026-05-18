@@ -168,6 +168,7 @@ export const getStatementArtifactItems = (statement: BankStatementDetail) => {
     ['Suggestions output', artifacts.suggestionsOutputPath],
     ['Processing summary', artifacts.processingSummaryPath],
     ['Structured statement', artifacts.structuredStatementPath],
+    ['Offline extraction', artifacts.offlineExtractionPath],
     ['Evidence', artifacts.evidencePath],
     ['Validation report', artifacts.validationReportPath]
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
@@ -283,6 +284,15 @@ export const getStatementViewerArtifacts = (
           path: artifacts.structuredStatementPath,
           kind: 'text',
           emptyMessage: 'Structured statement output is not ready yet.'
+        }
+      : null,
+    artifacts?.offlineExtractionPath
+      ? {
+          key: 'offlineExtraction',
+          label: 'Offline Extraction',
+          path: artifacts.offlineExtractionPath,
+          kind: 'text',
+          emptyMessage: 'Offline extraction output is not ready yet.'
         }
       : null,
     artifacts?.evidencePath

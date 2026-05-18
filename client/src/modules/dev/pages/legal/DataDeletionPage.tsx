@@ -13,7 +13,7 @@ export const DataDeletionPage = () => {
     >
       <Stack spacing={2}>
         <Typography variant="body2" color="text.secondary">
-          Last updated: February 25, 2026
+          Last updated: May 17, 2026
         </Typography>
         <Typography variant="body2">
           To request deletion of your RetailSync account and related data, email{' '}
@@ -29,12 +29,17 @@ export const DataDeletionPage = () => {
         </Typography>
         <Typography variant="h6">What can be deleted</Typography>
         <Typography variant="body2">
-          We can delete account profile data, workspace membership, POS import records, roles, and application settings associated with your
-          workspace.
+          We can delete account profile data, workspace membership, POS import records, statement-processing records and artifacts, roles,
+          and application settings associated with your workspace.
         </Typography>
         <Typography variant="h6">What may be retained</Typography>
         <Typography variant="body2">
           Limited operational logs may be temporarily retained for security and incident response requirements before scheduled removal.
+        </Typography>
+        <Typography variant="h6">Identity confirmation</Typography>
+        <Typography variant="body2">
+          Deletion requests may require confirmation from the workspace owner or the requesting account email so we can prevent unauthorized
+          deletion of company data.
         </Typography>
         <Typography variant="h6">Processing timeline</Typography>
         <Typography variant="body2">

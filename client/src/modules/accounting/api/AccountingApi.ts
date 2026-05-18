@@ -306,6 +306,14 @@ export class AccountingApi {
     }>('/accounting/statements/detect-month', formData);
   }
 
+  playgroundOfflineExtraction(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post<{
+      data: unknown;
+    }>('/accounting/playground/offline-extraction', formData);
+  }
+
   createStatement(payload: CreateBankStatementInput) {
     return api.post<{
       data: {

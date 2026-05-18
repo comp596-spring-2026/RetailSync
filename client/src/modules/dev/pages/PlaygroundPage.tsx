@@ -27,6 +27,7 @@ import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { PageHeader } from '../../../components';
 import { api } from '../../../app/api';
+import { StatementExtractionPlayground } from '../components/StatementExtractionPlayground';
 
 type CheckStatus = 'idle' | 'running' | 'ok' | 'error';
 
@@ -837,6 +838,7 @@ export const PlaygroundPage = () => {
             <Tab label="Environment" />
             <Tab label="Connections" />
             <Tab label="Crop Lab" />
+            <Tab label="Statement + Check Lab" />
           </Tabs>
         </CardContent>
       </Card>
@@ -1044,6 +1046,8 @@ export const PlaygroundPage = () => {
       )}
 
       {tab === 3 && <CropPresetLab />}
+
+      {tab === 4 && <StatementExtractionPlayground />}
     </Stack>
   );
 };

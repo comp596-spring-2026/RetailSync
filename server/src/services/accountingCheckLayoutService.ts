@@ -11,7 +11,7 @@ export type ManualCheckLayoutPreset = {
 };
 
 // Pixel coordinates assume the statement PDF is rendered at the project's
-// configured statementPdfRenderDpi (see env.statementPdfRenderDpi). This
+// configured statement PDF render DPI (default 144). This
 // 3x6 layout was calibrated against SouthState statement check-image pages,
 // but the same shape is the norm for most US bank statement check images,
 // so we use it as the default template for any page we classify as a
