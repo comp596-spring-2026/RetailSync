@@ -106,6 +106,7 @@ const allowedCrossModuleImports = [
   'modules/auth/pages/CreateCompanyPage.tsx:15 imports "../../users/api" -> modules/users/api',
   'modules/auth/pages/JoinCompanyPage.tsx:12 imports "../../users/state" -> modules/users/state',
   'modules/auth/state/authSlice.ts:4 imports "../../users/state" -> modules/users/state',
+  'modules/dev/components/StatementExtractionPlayground.tsx:23 imports "../../accounting/api" -> modules/accounting/api',
   'modules/pos/components/ImportPOSDataModal.tsx:48 imports "../../settings/api" -> modules/settings/api',
   'modules/pos/components/ImportPOSDataModal.tsx:51 imports "../../settings/state" -> modules/settings/state',
   'modules/pos/pages/POSWorkspacePage.tsx:31 imports "../../settings/state" -> modules/settings/state',
