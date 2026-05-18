@@ -116,47 +116,52 @@ docker_stack: {
 
   client_container: {
     label: "Client Container"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/docker/docker-original.svg"
+    icon: "./icons/docker.svg"
     class: group
     direction: down
 
     nginx: {
       label: "Nginx"
-      icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/nginx/nginx-original.svg"
+      icon: "./icons/nginx.svg"
       class: frontend
     }
 
     react_app: {
-      label: "React SPA Build\n(Vite/TypeScript)"
-      icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/vitejs/vitejs-original.svg"
+      label: "React Static Build\nVite / TypeScript"
+      icon: "./icons/vite.svg"
       class: frontend
     }
   }
 
   server_container: {
     label: "Server Container"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/docker/docker-original.svg"
+    icon: "./icons/docker.svg"
     class: group
     direction: down
 
     express_server: {
       label: "Node.js / Express API"
-      icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/nodejs/nodejs-original.svg"
+      icon: "./icons/nodejs.svg"
       class: backend
     }
   }
 
   mongo_container: {
     label: "Mongo Container"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/docker/docker-original.svg"
+    icon: "./icons/docker.svg"
     class: group
     direction: down
 
     mongo_db: {
       label: "MongoDB"
       shape: cylinder
-      icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/mongodb/mongodb-original.svg"
+      icon: "./icons/mongodb.svg"
       class: database
+    }
+
+    mongo_volume: {
+      label: "Mongo Volume\nPersistent Local Data"
+      class: infra
     }
   }
 }
@@ -168,25 +173,25 @@ supporting_services: {
 
   gcs_bucket: {
     label: "Google Cloud Storage Bucket"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg"
+    icon: "./icons/googlecloud.svg"
     class: database
   }
 
   google_auth: {
     label: "Google OAuth"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/google/google-original.svg"
+    icon: "./icons/google.svg"
     class: integration
   }
 
   google_sheets: {
     label: "Google Sheets"
-    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/google/google-original.svg"
+    icon: "./icons/google.svg"
     class: integration
   }
 
   quickbooks: {
     label: "QuickBooks APIs"
-    icon: "https://cdn.simpleicons.org/intuit/236CFF"
+    icon: "./icons/quickbooks.svg"
     class: integration
   }
 }
@@ -198,8 +203,9 @@ docker_stack.client_container.react_app -> docker_stack.client_container.nginx: 
 docker_stack.client_container.nginx -> docker_stack.server_container.express_server: "reverse proxies /api to server:4000"
 
 docker_stack.server_container.express_server -> docker_stack.mongo_container.mongo_db: "reads / writes app data"
-docker_stack.server_container.express_server -> supporting_services.gcs_bucket: "stores statement files and artifacts"
+docker_stack.mongo_container.mongo_db -> docker_stack.mongo_container.mongo_volume: "persists local data"
 
+docker_stack.server_container.express_server -> supporting_services.gcs_bucket: "stores statement files and artifacts"
 docker_stack.server_container.express_server -> supporting_services.google_auth: "OAuth login / token exchange"
 docker_stack.server_container.express_server -> supporting_services.google_sheets: "imports / exports spreadsheet data"
 docker_stack.server_container.express_server -> supporting_services.quickbooks: "OAuth + accounting sync"

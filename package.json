@@ -9,7 +9,8 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "ci": "pnpm install --frozen-lockfile && pnpm -r build && pnpm -r test && pnpm lint && pnpm typecheck"
+    "ci": "pnpm install --frozen-lockfile && pnpm -r build && pnpm -r test && pnpm lint && pnpm typecheck",
+    "diagram:architecture": "bash scripts/generate-retailsync-architecture.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

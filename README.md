@@ -156,7 +156,7 @@ RetailSync/
 
 The official architecture diagram for this repo is the local-development Docker topology used in the app and supporting docs.
 
-- **D2 Architectural Definition**: [docs/retailsync-architecture.d2](docs/retailsync-architecture.d2)
+- **D2 Architectural Definition**: [docs/diagrams/retailsync-local-architecture.d2](docs/diagrams/retailsync-local-architecture.d2)
 - **Rendered official diagram asset**: [client/public/architecture-diagram.png](client/public/architecture-diagram.png)
 
 <p align="center">
