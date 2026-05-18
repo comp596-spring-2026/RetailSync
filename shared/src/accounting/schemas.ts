@@ -67,7 +67,14 @@ export const statementCheckStatusSchema = z.enum([
   'failed'
 ]);
 
-export const quickbooksTxnTypeSchema = z.enum(['Expense', 'Deposit', 'Transfer', 'Check']);
+export const quickbooksTxnTypeSchema = z.enum([
+  'Expense',
+  'Deposit',
+  'Transfer',
+  'Check',
+  'SalesReceipt',
+  'Payment'
+]);
 
 export const confidenceBreakdownSchema = z.object({
   imageQuality: z.number().min(0).max(1).optional(),
@@ -562,9 +569,38 @@ export const updateStatementEntryReviewSchema = z.object({
   reviewStatus: statementReviewStatusSchema
 });
 
+export const statementProposalPatchSchema = z.object({
+  qbTxnType: quickbooksTxnTypeSchema.optional(),
+  bankAccountId: z.string().trim().optional(),
+  categoryAccountId: z.string().trim().optional(),
+  payeeName: z.string().trim().optional(),
+  payeeId: z.string().trim().optional(),
+  memo: z.string().trim().optional(),
+  transferTargetAccountId: z.string().trim().optional(),
+  checkNumber: z.string().trim().optional(),
+  matchExistingCheck: z.boolean().optional(),
+  salesItemRefId: z.string().trim().optional(),
+  linkedInvoiceTxnId: z.string().trim().optional()
+});
+
+export const statementQuickbooksPostResultSchema = z.object({
+  posted: z.boolean(),
+  qbTxnId: z.string().trim().optional(),
+  qbTxnType: quickbooksTxnTypeSchema.optional(),
+  matchedExisting: z.boolean().optional(),
+  registerSummary: z.string().trim().optional(),
+  previewLines: z.array(z.string().trim()).default([]),
+  error: z.string().trim().optional()
+});
+
+export type StatementProposalPatch = z.infer<typeof statementProposalPatchSchema>;
+export type StatementQuickbooksPostResult = z.infer<typeof statementQuickbooksPostResultSchema>;
+
 export const updateStatementSuggestionReviewSchema = z.object({
   source: z.enum(['transaction', 'check']),
-  reviewStatus: statementReviewStatusSchema
+  reviewStatus: statementReviewStatusSchema,
+  proposal: statementProposalPatchSchema.optional(),
+  postToQuickBooks: z.boolean().optional()
 });
 
 export const resolveTransferSuggestionSchema = z.object({
@@ -943,10 +979,30 @@ export const quickBooksHubChartOfAccountsResponseSchema =
     items: z.array(quickBooksHubChartAccountSchema)
   });
 
+export const quickBooksHubChartAccountKindSchema = z.enum(['bank', 'expense', 'income']);
+
 export const quickBooksHubChartAccountCreateInputSchema = z.object({
+  accountKind: quickBooksHubChartAccountKindSchema.optional(),
   name: z.string().trim().min(1).max(100),
   accountNumber: z.string().trim().max(30).optional(),
-  detailType: z.enum(['Checking', 'Savings', 'CashOnHand']).optional().default('Checking')
+  detailType: z.enum(['Checking', 'Savings', 'CashOnHand']).optional()
+});
+
+export const quickBooksHubItemSchema = z.object({
+  id: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  type: z.string().trim().nullable(),
+  active: z.boolean()
+});
+
+export const quickBooksHubItemsQuerySchema = z.object({
+  page: quickBooksHubPageSchema,
+  pageSize: quickBooksHubPageSizeSchema,
+  search: z.string().trim().optional()
+});
+
+export const quickBooksHubItemsResponseSchema = quickBooksHubListResponseMetaSchema.extend({
+  items: z.array(quickBooksHubItemSchema)
 });
 
 export const quickBooksHubChartAccountCreateResponseSchema = z.object({
@@ -1395,6 +1451,9 @@ export type QuickBooksHubChartAccountCreateInput = z.infer<
 export type QuickBooksHubChartAccountCreateResponse = z.infer<
   typeof quickBooksHubChartAccountCreateResponseSchema
 >;
+export type QuickBooksHubItem = z.infer<typeof quickBooksHubItemSchema>;
+export type QuickBooksHubItemsQuery = z.infer<typeof quickBooksHubItemsQuerySchema>;
+export type QuickBooksHubItemsResponse = z.infer<typeof quickBooksHubItemsResponseSchema>;
 export type QuickBooksHubEntity = z.infer<typeof quickBooksHubEntitySchema>;
 export type QuickBooksHubEntitiesQuery = z.infer<typeof quickBooksHubEntitiesQuerySchema>;
 export type QuickBooksHubEntitiesResponse = z.infer<typeof quickBooksHubEntitiesResponseSchema>;

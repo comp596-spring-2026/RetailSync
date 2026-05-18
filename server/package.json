@@ -2,6 +2,9 @@
   "name": "@retailsync/server",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -22,9 +25,9 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
+    "@napi-rs/canvas": "^0.1.100",
     "@retailsync/shared": "workspace:*",
     "bcryptjs": "^2.4.3",
-    "canvas": "^3.2.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "csv-parse": "^5.6.0",

@@ -1,9 +1,12 @@
+import { inferDefaultQuickBooksTxnType } from '@retailsync/shared';
+
 export type WorkflowTxnType =
   | 'Expense'
   | 'Check'
   | 'Bill'
   | 'BillPayment'
   | 'Deposit'
+  | 'CustomerPayment'
   | 'SalesReceipt'
   | 'Transfer'
   | 'JournalEntry';
@@ -263,18 +266,42 @@ export const suggestWorkflowType = (args: {
   transactionFamily?: string;
   proposedTxnType?: string;
   checkNumber?: string | null;
+  section?: string;
+  rowType?: string;
 }): WorkflowTxnType => {
-  if (args.proposedTxnType === 'Transfer' || args.transactionFamily === 'transfer') return 'Transfer';
-  if (args.proposedTxnType === 'Check' || args.checkNumber) return 'Check';
-  if (args.proposedTxnType === 'Bill') return 'Bill';
-  if (args.proposedTxnType === 'SalesReceipt') return 'SalesReceipt';
+  const inferred = inferDefaultQuickBooksTxnType({
+    type: args.direction,
+    section: args.section,
+    transactionFamily: args.transactionFamily,
+    rowType: args.rowType,
+    description: args.description
+  });
+
+  if (args.proposedTxnType === 'Transfer' || args.transactionFamily === 'transfer') {
+    return 'Transfer';
+  }
+
   if (args.direction === 'credit') {
+    if (args.proposedTxnType === 'SalesReceipt') return 'SalesReceipt';
+    if (inferred === 'Transfer') return 'Transfer';
     const salesMatch = incomeCategoryPresets.find((preset) => preset.keywords.test(args.description));
-    if (salesMatch && (salesMatch.id === 'income.sales' || salesMatch.id === 'income.merchant' || salesMatch.id === 'income.buydown' || salesMatch.id === 'income.lottery')) {
+    if (
+      salesMatch &&
+      (salesMatch.id === 'income.sales' ||
+        salesMatch.id === 'income.merchant' ||
+        salesMatch.id === 'income.buydown' ||
+        salesMatch.id === 'income.lottery')
+    ) {
       return 'SalesReceipt';
     }
     return 'Deposit';
   }
+
+  // debit — money leaving the bank
+  if (args.proposedTxnType === 'Bill') return 'Bill';
+  if (args.proposedTxnType === 'Check' && inferred === 'Check') return 'Check';
+  if (inferred === 'Transfer') return 'Transfer';
+  if (inferred === 'Check') return 'Check';
   return 'Expense';
 };
 
@@ -286,7 +313,9 @@ export const suggestCategoryPreset = (args: {
   return pool.find((preset) => preset.keywords.test(args.description)) ?? null;
 };
 
-export const mapWorkflowToProposedType = (type: WorkflowTxnType): 'Expense' | 'Deposit' | 'Transfer' | 'Check' | undefined => {
+export const mapWorkflowToProposedType = (
+  type: WorkflowTxnType
+): 'Expense' | 'Deposit' | 'Transfer' | 'Check' | 'SalesReceipt' | 'Payment' | undefined => {
   switch (type) {
     case 'Expense':
     case 'Bill':
@@ -296,8 +325,11 @@ export const mapWorkflowToProposedType = (type: WorkflowTxnType): 'Expense' | 'D
     case 'Check':
       return 'Check';
     case 'Deposit':
-    case 'SalesReceipt':
       return 'Deposit';
+    case 'SalesReceipt':
+      return 'SalesReceipt';
+    case 'CustomerPayment':
+      return 'Payment';
     case 'Transfer':
       return 'Transfer';
     default:
@@ -316,9 +348,11 @@ export const workflowTypeDescription = (type: WorkflowTxnType) => {
     case 'BillPayment':
       return 'Payment applied to an existing Bill. Needs the original bill reference.';
     case 'Deposit':
-      return 'Money in recorded as Other Income, refund, interest, etc. Single ledger line.';
+      return 'Money in recorded as Other Income, refund, interest, etc. Posts a Deposit (bank + income line).';
+    case 'CustomerPayment':
+      return 'Customer payment against invoices or unapplied credit. Posts a QuickBooks Payment to the bank account.';
     case 'SalesReceipt':
-      return 'Money in from a sale. Splits revenue across Items (Retail, Buydown, Lottery, Gift Card…).';
+      return 'Money in from a sale. Posts a Sales Receipt (customer + item) into the bank account.';
     case 'Transfer':
       return 'Movement between two bank accounts owned by the company. No P&L impact.';
     case 'JournalEntry':

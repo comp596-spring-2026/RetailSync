@@ -1,19 +1,62 @@
+import mongoose from 'mongoose';
 import { ChartOfAccountModel } from '../models/ChartOfAccount';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { LedgerEntryModel } from '../models/LedgerEntry';
 import { QuickBooksReferenceModel } from '../models/QuickBooksReference';
 import { StatementTransactionModel } from '../models/StatementTransaction';
 import { ensureDefaultChartOfAccounts } from './ledgerService';
+import { buildStatementPostingPreviewLines } from '@retailsync/shared';
 import {
   QuickBooksAccountRecord,
   createQuickBooksCheckTransaction,
   createQuickBooksDepositTransaction,
   createQuickBooksExpenseTransaction,
   createQuickBooksJournalEntry,
+  createQuickBooksPaymentTransaction,
+  createQuickBooksSalesReceiptTransaction,
   createQuickBooksTransferTransaction,
+  findDefaultQuickBooksServiceItem,
+  findMatchingQuickBooksCheckPurchase,
   listQuickBooksAccounts,
   listQuickBooksEntities
 } from '../integrations/quickbooks';
+
+export type LedgerProposalForPosting = {
+  qbTxnType?: 'Expense' | 'Deposit' | 'Transfer' | 'Check' | 'SalesReceipt' | 'Payment';
+  bankAccountId?: string;
+  categoryAccountId?: string;
+  payeeType?: 'vendor' | 'customer' | 'employee' | 'other';
+  payeeId?: string;
+  payeeName?: string;
+  transferTargetAccountId?: string;
+  memo?: string;
+  checkNumber?: string;
+  matchExistingCheck?: boolean;
+  salesItemRefId?: string;
+  linkedInvoiceTxnId?: string;
+};
+
+export type LedgerEntryForPosting = {
+  _id: string;
+  date: string;
+  description: string;
+  amount: number;
+  type: 'debit' | 'credit';
+  statementTransactionId: string;
+  fallbackJournalLines?: Array<{ accountCode: string; debit: number; credit: number; description?: string }>;
+  proposal?: LedgerProposalForPosting;
+};
+
+export type PostLedgerEntryResult =
+  | {
+      ok: true;
+      qbTxnId: string;
+      qbTxnType: NonNullable<LedgerProposalForPosting['qbTxnType']>;
+      matchedExisting?: boolean;
+      registerSummary: string;
+      previewLines: string[];
+    }
+  | { ok: false; error: string };
 
 type SyncStatus = 'idle' | 'running' | 'success' | 'error';
 type SyncJobType = 'quickbooks.refresh_reference_data' | 'quickbooks.post_approved';
@@ -261,6 +304,319 @@ const setPostingFailure = async (entryId: string, companyId: string, error: stri
   );
 };
 
+const resolvePostingAccountRef = async (companyId: string, ref?: string | null): Promise<string | undefined> => {
+  const trimmed = String(ref ?? '').trim();
+  if (!trimmed) return undefined;
+  if (mongoose.isValidObjectId(trimmed)) {
+    const doc = await ChartOfAccountModel.findOne({
+      companyId,
+      _id: new mongoose.Types.ObjectId(trimmed)
+    })
+      .select('qbAccountId name')
+      .lean();
+    const qb = doc?.qbAccountId?.trim();
+    if (qb) return qb;
+  }
+  return trimmed;
+};
+
+const resolvePostingAccountLabel = async (companyId: string, ref?: string | null): Promise<string | undefined> => {
+  const trimmed = String(ref ?? '').trim();
+  if (!trimmed) return undefined;
+  if (mongoose.isValidObjectId(trimmed)) {
+    const doc = await ChartOfAccountModel.findOne({
+      companyId,
+      _id: new mongoose.Types.ObjectId(trimmed)
+    })
+      .select('name qbAccountId')
+      .lean();
+    if (doc?.name) return String(doc.name);
+  }
+  return trimmed;
+};
+
+const resolvePayeeRefId = async (
+  companyId: string,
+  proposal: LedgerProposalForPosting,
+  direction: 'debit' | 'credit'
+): Promise<string | undefined> => {
+  const direct = String(proposal.payeeId ?? '').trim();
+  if (direct && !mongoose.isValidObjectId(direct)) {
+    return direct;
+  }
+  if (direct && mongoose.isValidObjectId(direct)) {
+    const entity = await QuickBooksReferenceModel.findOne({
+      companyId,
+      _id: new mongoose.Types.ObjectId(direct)
+    })
+      .select('qbId')
+      .lean();
+    if (entity?.qbId) return String(entity.qbId);
+  }
+  const payeeName = String(proposal.payeeName ?? '').trim();
+  if (!payeeName) return undefined;
+  const entityTypes =
+    proposal.payeeType === 'vendor'
+      ? ['vendor']
+      : proposal.payeeType === 'customer'
+        ? ['customer']
+        : direction === 'debit'
+          ? ['vendor']
+          : ['customer'];
+  const entity = await QuickBooksReferenceModel.findOne({
+    companyId,
+    entityType: { $in: entityTypes },
+    active: true,
+    displayName: new RegExp(`^${payeeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')
+  })
+    .select('qbId')
+    .lean();
+  return entity?.qbId ? String(entity.qbId) : undefined;
+};
+
+export const postLedgerEntryToQuickBooks = async (
+  companyId: string,
+  entry: LedgerEntryForPosting
+): Promise<PostLedgerEntryResult> => {
+  const proposal = entry.proposal;
+  if (!proposal?.qbTxnType) {
+    return { ok: false, error: 'Missing proposal.qbTxnType' };
+  }
+
+  const resolvedBank = await resolvePostingAccountRef(companyId, proposal.bankAccountId);
+  const resolvedCategory = await resolvePostingAccountRef(companyId, proposal.categoryAccountId);
+  const resolvedTransferTarget = await resolvePostingAccountRef(companyId, proposal.transferTargetAccountId);
+  const bankLabel = (await resolvePostingAccountLabel(companyId, proposal.bankAccountId)) ?? 'Bank account';
+  const lineLabel =
+    (await resolvePostingAccountLabel(companyId, proposal.categoryAccountId)) ?? 'Line account';
+  const transferToLabel =
+    (await resolvePostingAccountLabel(companyId, proposal.transferTargetAccountId)) ??
+    'Other bank account';
+
+  try {
+    let qbTxnId: string | undefined;
+    let matchedExisting = false;
+
+    if (proposal.qbTxnType === 'Expense') {
+      if (!resolvedBank || !resolvedCategory) {
+        throw new Error('Expense requires bankAccountId and categoryAccountId');
+      }
+      if (resolvedBank === resolvedCategory) {
+        throw new Error('Expense bank and category accounts must differ');
+      }
+      const payeeRefId = await resolvePayeeRefId(companyId, proposal, entry.type);
+      const result = await createQuickBooksExpenseTransaction({
+        companyId,
+        txnDate: entry.date,
+        amount: Math.abs(entry.amount),
+        bankAccountId: resolvedBank,
+        categoryAccountId: resolvedCategory,
+        payeeRefId,
+        memo: proposal.memo ?? entry.description
+      });
+      qbTxnId = result.txnId;
+    } else if (proposal.qbTxnType === 'Deposit') {
+      if (!resolvedBank || !resolvedCategory) {
+        throw new Error('Deposit requires bankAccountId and categoryAccountId');
+      }
+      if (resolvedBank === resolvedCategory) {
+        throw new Error('Deposit bank and line accounts must differ');
+      }
+      const result = await createQuickBooksDepositTransaction({
+        companyId,
+        txnDate: entry.date,
+        amount: Math.abs(entry.amount),
+        bankAccountId: resolvedBank,
+        categoryAccountId: resolvedCategory,
+        memo: proposal.memo ?? entry.description
+      });
+      qbTxnId = result.txnId;
+    } else if (proposal.qbTxnType === 'SalesReceipt') {
+      if (!resolvedBank) {
+        throw new Error('Sales receipt requires deposit bank account');
+      }
+      const customerRefId = await resolvePayeeRefId(companyId, { ...proposal, payeeType: 'customer' }, 'credit');
+      if (!customerRefId) {
+        throw new Error('Sales receipt requires a QuickBooks customer');
+      }
+      const itemRefId =
+        String(proposal.salesItemRefId ?? '').trim() ||
+        (await findDefaultQuickBooksServiceItem(companyId));
+      if (!itemRefId) {
+        throw new Error('Sales receipt requires a QuickBooks service item');
+      }
+      const result = await createQuickBooksSalesReceiptTransaction({
+        companyId,
+        txnDate: entry.date,
+        customerRefId,
+        depositToAccountId: resolvedBank,
+        memo: proposal.memo ?? entry.description,
+        lines: [{ amount: Math.abs(entry.amount), itemRefId }]
+      });
+      qbTxnId = result.txnId;
+    } else if (proposal.qbTxnType === 'Payment') {
+      if (!resolvedBank) {
+        throw new Error('Payment requires deposit bank account');
+      }
+      const customerRefId = await resolvePayeeRefId(companyId, { ...proposal, payeeType: 'customer' }, 'credit');
+      if (!customerRefId) {
+        throw new Error('Payment requires a QuickBooks customer');
+      }
+      const linkedInvoiceTxnId = String(proposal.linkedInvoiceTxnId ?? '').trim();
+      const result = await createQuickBooksPaymentTransaction({
+        companyId,
+        txnDate: entry.date,
+        amount: Math.abs(entry.amount),
+        customerRefId,
+        depositToAccountId: resolvedBank,
+        memo: proposal.memo ?? entry.description,
+        linkedTxns: linkedInvoiceTxnId
+          ? [{ txnId: linkedInvoiceTxnId, txnType: 'Invoice' as const, amount: Math.abs(entry.amount) }]
+          : undefined
+      });
+      qbTxnId = result.txnId;
+    } else if (proposal.qbTxnType === 'Transfer') {
+      if (!resolvedBank || !resolvedTransferTarget) {
+        throw new Error('Transfer requires bankAccountId and transferTargetAccountId');
+      }
+      if (resolvedBank === resolvedTransferTarget) {
+        throw new Error('Transfer from and to accounts must differ');
+      }
+      const result = await createQuickBooksTransferTransaction({
+        companyId,
+        txnDate: entry.date,
+        amount: Math.abs(entry.amount),
+        fromAccountId: resolvedBank,
+        toAccountId: resolvedTransferTarget,
+        memo: proposal.memo ?? entry.description
+      });
+      qbTxnId = result.txnId;
+    } else if (proposal.qbTxnType === 'Check') {
+      if (!resolvedBank || !resolvedCategory) {
+        throw new Error('Check requires bankAccountId and categoryAccountId');
+      }
+      if (resolvedBank === resolvedCategory) {
+        throw new Error('Check bank and category accounts must differ');
+      }
+      const checkNumber = String(proposal.checkNumber ?? '').trim();
+      const shouldMatch = proposal.matchExistingCheck !== false;
+      if (shouldMatch && checkNumber) {
+        const existing = await findMatchingQuickBooksCheckPurchase({
+          companyId,
+          bankAccountId: resolvedBank,
+          checkNumber,
+          amount: Math.abs(entry.amount)
+        });
+        if (existing?.txnId) {
+          qbTxnId = existing.txnId;
+          matchedExisting = true;
+        }
+      }
+      if (!qbTxnId) {
+        const payeeRefId = await resolvePayeeRefId(companyId, proposal, entry.type);
+        const result = await createQuickBooksCheckTransaction({
+          companyId,
+          txnDate: entry.date,
+          amount: Math.abs(entry.amount),
+          bankAccountId: resolvedBank,
+          categoryAccountId: resolvedCategory,
+          payeeRefId,
+          memo: proposal.memo ?? entry.description,
+          docNumber: checkNumber || undefined
+        });
+        qbTxnId = result.txnId;
+      }
+    }
+
+    if (!qbTxnId) {
+      throw new Error('Typed posting did not return txn id');
+    }
+
+    const finalPreview = buildStatementPostingPreviewLines({
+      qbTxnType: proposal.qbTxnType,
+      amount: entry.amount,
+      direction: entry.type,
+      bankAccountLabel: bankLabel,
+      lineAccountLabel: lineLabel,
+      transferToAccountLabel: transferToLabel,
+      payeeName: proposal.payeeName,
+      checkNumber: proposal.checkNumber,
+      matchedExisting
+    });
+
+    await LedgerEntryModel.updateOne(
+      { _id: entry._id, companyId },
+      {
+        $set: {
+          'posting.status': 'posted',
+          'posting.qbTxnId': qbTxnId,
+          'posting.error': null,
+          'posting.postedAt': new Date()
+        },
+        $inc: { 'posting.attempts': 1 }
+      }
+    );
+    await syncStatementTransactionPosting(companyId, entry.statementTransactionId, 'posted', qbTxnId, undefined);
+
+    const registerSummary = finalPreview[0] ?? `Posted to QuickBooks (${proposal.qbTxnType}).`;
+    return {
+      ok: true,
+      qbTxnId,
+      qbTxnType: proposal.qbTxnType,
+      matchedExisting,
+      registerSummary,
+      previewLines: finalPreview
+    };
+  } catch (typedError) {
+    const errorMessage = String((typedError as Error).message);
+    await setPostingFailure(entry._id, companyId, errorMessage);
+    await syncStatementTransactionPosting(
+      companyId,
+      entry.statementTransactionId,
+      'failed',
+      undefined,
+      errorMessage
+    );
+    return { ok: false, error: errorMessage };
+  }
+};
+
+export const postApprovedLedgerEntryByStatementTransactionId = async (
+  companyId: string,
+  statementTransactionId: string
+): Promise<PostLedgerEntryResult> => {
+  const entry = await LedgerEntryModel.findOne({
+    companyId,
+    statementTransactionId,
+    reviewStatus: 'approved'
+  })
+    .select('_id date description amount type statementTransactionId proposal fallbackJournalLines posting')
+    .lean<LedgerEntryForPosting & { posting?: { status?: string; qbTxnId?: string | null } }>();
+
+  if (!entry) {
+    return { ok: false, error: 'Approved ledger entry not found for this statement row' };
+  }
+  if (entry.posting?.status === 'posted' && entry.posting?.qbTxnId) {
+    const qbTxnType = entry.proposal?.qbTxnType ?? 'Deposit';
+    const previewLines = buildStatementPostingPreviewLines({
+      qbTxnType,
+      amount: entry.amount,
+      direction: entry.type,
+      payeeName: entry.proposal?.payeeName,
+      checkNumber: entry.proposal?.checkNumber
+    });
+    return {
+      ok: true,
+      qbTxnId: String(entry.posting.qbTxnId),
+      qbTxnType,
+      registerSummary: 'Already posted to QuickBooks.',
+      previewLines
+    };
+  }
+
+  return postLedgerEntryToQuickBooks(companyId, entry);
+};
+
 const syncStatementTransactionPosting = async (
   companyId: string,
   statementTransactionId: string,
@@ -284,26 +640,6 @@ export const postApprovedLedgerEntriesToQuickBooks = async (
   companyId: string,
   limit = 200
 ) => {
-  type ApprovedEntry = {
-    _id: string;
-    date: string;
-    description: string;
-    amount: number;
-    type: 'debit' | 'credit';
-    statementTransactionId: string;
-    fallbackJournalLines?: Array<{ accountCode: string; debit: number; credit: number; description?: string }>;
-    proposal?: {
-      qbTxnType?: 'Expense' | 'Deposit' | 'Transfer' | 'Check';
-      bankAccountId?: string;
-      categoryAccountId?: string;
-      payeeType?: 'vendor' | 'customer' | 'employee' | 'other';
-      payeeId?: string;
-      payeeName?: string;
-      transferTargetAccountId?: string;
-      memo?: string;
-    };
-  };
-
   const entries = await LedgerEntryModel.find({
     companyId,
     reviewStatus: 'approved',
@@ -317,183 +653,17 @@ export const postApprovedLedgerEntriesToQuickBooks = async (
     .select('_id date description amount type statementTransactionId proposal fallbackJournalLines')
     .sort({ updatedAt: 1, createdAt: 1 })
     .limit(limit)
-    .lean<ApprovedEntry[]>();
+    .lean<LedgerEntryForPosting[]>();
 
   let posted = 0;
   let failed = 0;
 
   for (const entry of entries) {
-    const proposal = entry.proposal;
-    if (!proposal?.qbTxnType) {
-      failed += 1;
-      await setPostingFailure(entry._id, companyId, 'Missing proposal.qbTxnType');
-      await syncStatementTransactionPosting(
-        companyId,
-        entry.statementTransactionId,
-        'failed',
-        undefined,
-        'Missing proposal.qbTxnType'
-      );
-      continue;
-    }
-
-    try {
-      let qbTxnId: string | undefined;
-
-      if (proposal.qbTxnType === 'Expense') {
-        if (!proposal.bankAccountId || !proposal.categoryAccountId) {
-          throw new Error('Expense requires bankAccountId and categoryAccountId');
-        }
-        const result = await createQuickBooksExpenseTransaction({
-          companyId,
-          txnDate: entry.date,
-          amount: Math.abs(entry.amount),
-          bankAccountId: proposal.bankAccountId,
-          categoryAccountId: proposal.categoryAccountId,
-          payeeRefId: proposal.payeeId,
-          memo: proposal.memo ?? entry.description
-        });
-        qbTxnId = result.txnId;
-      } else if (proposal.qbTxnType === 'Deposit') {
-        if (!proposal.bankAccountId || !proposal.categoryAccountId) {
-          throw new Error('Deposit requires bankAccountId and categoryAccountId');
-        }
-        const result = await createQuickBooksDepositTransaction({
-          companyId,
-          txnDate: entry.date,
-          amount: Math.abs(entry.amount),
-          bankAccountId: proposal.bankAccountId,
-          categoryAccountId: proposal.categoryAccountId,
-          memo: proposal.memo ?? entry.description
-        });
-        qbTxnId = result.txnId;
-      } else if (proposal.qbTxnType === 'Transfer') {
-        if (!proposal.bankAccountId || !proposal.transferTargetAccountId) {
-          throw new Error('Transfer requires bankAccountId and transferTargetAccountId');
-        }
-        const result = await createQuickBooksTransferTransaction({
-          companyId,
-          txnDate: entry.date,
-          amount: Math.abs(entry.amount),
-          fromAccountId: proposal.bankAccountId,
-          toAccountId: proposal.transferTargetAccountId,
-          memo: proposal.memo ?? entry.description
-        });
-        qbTxnId = result.txnId;
-      } else if (proposal.qbTxnType === 'Check') {
-        if (!proposal.bankAccountId || !proposal.categoryAccountId) {
-          throw new Error('Check requires bankAccountId and categoryAccountId');
-        }
-        const result = await createQuickBooksCheckTransaction({
-          companyId,
-          txnDate: entry.date,
-          amount: Math.abs(entry.amount),
-          bankAccountId: proposal.bankAccountId,
-          categoryAccountId: proposal.categoryAccountId,
-          payeeRefId: proposal.payeeId,
-          memo: proposal.memo ?? entry.description
-        });
-        qbTxnId = result.txnId;
-      }
-
-      if (!qbTxnId) {
-        throw new Error('Typed posting did not return txn id');
-      }
-
+    const result = await postLedgerEntryToQuickBooks(companyId, entry);
+    if (result.ok) {
       posted += 1;
-      await LedgerEntryModel.updateOne(
-        { _id: entry._id, companyId },
-        {
-          $set: {
-            'posting.status': 'posted',
-            'posting.qbTxnId': qbTxnId,
-            'posting.error': null,
-            'posting.postedAt': new Date()
-          },
-          $inc: {
-            'posting.attempts': 1
-          }
-        }
-      );
-
-      await syncStatementTransactionPosting(
-        companyId,
-        entry.statementTransactionId,
-        'posted',
-        qbTxnId,
-        undefined
-      );
-    } catch (typedError) {
-      const fallbackLines =
-        (entry.fallbackJournalLines && entry.fallbackJournalLines.length > 0
-          ? entry.fallbackJournalLines
-          : makeFallbackLines(entry)) ?? [];
-
-      try {
-        const result = await createQuickBooksJournalEntry({
-          companyId,
-          txnDate: entry.date,
-          privateNote: `${entry.description} (fallback journal)`,
-          lines: fallbackLines
-            .map((line) => {
-              const accountId = String(line.accountCode || '').trim();
-              if (!accountId) return null;
-              if (Number(line.debit || 0) > 0) {
-                return {
-                  accountId,
-                  amount: Math.abs(Number(line.debit)),
-                  postingType: 'Debit' as const,
-                  description: line.description
-                };
-              }
-              if (Number(line.credit || 0) > 0) {
-                return {
-                  accountId,
-                  amount: Math.abs(Number(line.credit)),
-                  postingType: 'Credit' as const,
-                  description: line.description
-                };
-              }
-              return null;
-            })
-            .filter((line): line is NonNullable<typeof line> => Boolean(line))
-        });
-
-        posted += 1;
-        await LedgerEntryModel.updateOne(
-          { _id: entry._id, companyId },
-          {
-            $set: {
-              'posting.status': 'posted',
-              'posting.qbTxnId': result.journalEntryId,
-              'posting.error': `Typed failed, fallback journal posted: ${String((typedError as Error).message)}`,
-              'posting.postedAt': new Date()
-            },
-            $inc: {
-              'posting.attempts': 1
-            }
-          }
-        );
-
-        await syncStatementTransactionPosting(
-          companyId,
-          entry.statementTransactionId,
-          'posted',
-          result.journalEntryId,
-          undefined
-        );
-      } catch (fallbackError) {
-        failed += 1;
-        const errorMessage = `Typed failed: ${String((typedError as Error).message)} | fallback failed: ${String((fallbackError as Error).message)}`;
-        await setPostingFailure(entry._id, companyId, errorMessage);
-        await syncStatementTransactionPosting(
-          companyId,
-          entry.statementTransactionId,
-          'failed',
-          undefined,
-          errorMessage
-        );
-      }
+    } else {
+      failed += 1;
     }
   }
 

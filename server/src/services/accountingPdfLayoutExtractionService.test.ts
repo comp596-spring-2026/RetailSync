@@ -3,11 +3,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  applyLayoutSectionsToParsedTransactions,
   deriveSectionBoundsFromLayout,
   extractChecksClearedFromLayout,
   extractDailyBalancesFromLayout,
   extractStatementPagesLayoutFromPdfBuffer
 } from './accountingPdfLayoutExtractionService';
+import { extractStatementPagesFromPdfBuffer as extractTextPages } from './accountingPdfTextExtractionService';
+import { parseTransactionsFromOcrPages } from '../jobs/accountingTaskRunner';
+import { buildStatementValidationReport } from './statementValidationService';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -68,5 +72,33 @@ describe('accountingPdfLayoutExtractionService', () => {
       expect(row.date).toMatch(/^2025-1[12]-\d{2}$/);
       expect(row.amount).toBeGreaterThan(0);
     }
+  }, 30000);
+
+  it('reconciles parsed transactions with layout section bounds for SouthState truth', async () => {
+    const pdfPath = path.resolve(
+      here,
+      '../../../shared/src/accounting/testStatmentPDF.pdf'
+    );
+    const buffer = await fs.readFile(pdfPath);
+    const layoutPages = await extractStatementPagesLayoutFromPdfBuffer(buffer);
+    const sectionBounds = deriveSectionBoundsFromLayout(layoutPages);
+    const textPages = await extractTextPages(buffer);
+    const parsed = parseTransactionsFromOcrPages(
+      textPages.map((page) => ({
+        ...page,
+        checkRegions: []
+      }))
+    );
+
+    applyLayoutSectionsToParsedTransactions(parsed, layoutPages, sectionBounds);
+
+    const report = buildStatementValidationReport({
+      statementId: 'fixture',
+      rows: parsed as any,
+      profile: 'southstate_fixture'
+    });
+    expect(report.passed).toBe(true);
+    expect(report.actual.otherCreditsCount).toBe(19);
+    expect(report.actual.electronicDebitsCount).toBe(38);
   }, 30000);
 });

@@ -18,6 +18,7 @@ import {
   getQuickBooksAccountRegisterByAccount,
   getQuickBooksHubChartOfAccounts,
   postQuickBooksHubChartOfAccounts,
+  getQuickBooksHubItems,
   getQuickBooksHubEntities,
   getQuickBooksHubOperations,
   getQuickBooksLiveTransactionsByType,
@@ -169,6 +170,12 @@ router.post(
   requireAuth,
   requirePermission('quickbooks', 'post'),
   postQuickBooksHubChartOfAccounts
+);
+router.get(
+  '/hub/items',
+  requireAuth,
+  requirePermission('quickbooks', 'view'),
+  getQuickBooksHubItems
 );
 router.get(
   '/hub/entities',

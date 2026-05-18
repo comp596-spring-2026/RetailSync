@@ -556,11 +556,58 @@ export const listQuickBooksAccounts = async (companyId: string) => {
   return allAccounts;
 };
 
+export type QuickBooksItemRecord = {
+  id: string;
+  name: string;
+  type: string | null;
+  active: boolean;
+};
+
+export const listQuickBooksItems = async (
+  companyId: string,
+  args?: { search?: string; page?: number; pageSize?: number }
+): Promise<{ items: QuickBooksItemRecord[]; total: number }> => {
+  const page = Math.max(1, args?.page ?? 1);
+  const pageSize = Math.min(500, Math.max(1, args?.pageSize ?? 100));
+  const startPosition = (page - 1) * pageSize + 1;
+  const search = toTrimmedString(args?.search);
+  const escaped = search ? escapeQuickBooksQueryValue(search) : '';
+  const query = search
+    ? `select Id, Name, Type, Active from Item where Active = true and Name like '%${escaped}%' startposition ${startPosition} maxresults ${pageSize}`
+    : `select Id, Name, Type, Active from Item where Active = true startposition ${startPosition} maxresults ${pageSize}`;
+
+  const payload = await runQuickBooksReadQuery(companyId, query);
+  const queryResponse =
+    (payload.QueryResponse as Record<string, unknown> | undefined) ?? undefined;
+  const rows = queryResponse?.Item;
+  const rawItems = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+  const items = rawItems
+    .map((row) => {
+      const id = toTrimmedString(row.Id);
+      const name = toTrimmedString(row.Name);
+      if (!id || !name) return null;
+      const type = toTrimmedString(row.Type) || null;
+      if (type && !['Service', 'NonInventory', 'Inventory'].includes(type)) {
+        return null;
+      }
+      return {
+        id,
+        name,
+        type,
+        active: row.Active !== false
+      } satisfies QuickBooksItemRecord;
+    })
+    .filter((row): row is QuickBooksItemRecord => Boolean(row));
+
+  const total = Number(queryResponse?.totalCount ?? items.length);
+  return { items, total: Number.isFinite(total) ? total : items.length };
+};
+
 export const createQuickBooksAccount = async (args: {
   companyId: string;
   name: string;
-  accountType: 'Bank';
-  accountSubType: 'Checking' | 'Savings' | 'CashOnHand';
+  accountType: 'Bank' | 'Expense' | 'Income';
+  accountSubType: string;
   accountNumber?: string;
 }) => {
   const secret = await ensureFreshQuickBooksSecret(args.companyId);
@@ -597,7 +644,10 @@ export const createQuickBooksAccount = async (args: {
       raw && typeof raw.AcctNum === 'string' && raw.AcctNum.trim()
         ? raw.AcctNum.trim()
         : null,
-    accountType: raw && typeof raw.AccountType === 'string' ? raw.AccountType.trim() : 'Bank',
+    accountType:
+      raw && typeof raw.AccountType === 'string'
+        ? (raw.AccountType.trim() as 'Bank' | 'Expense' | 'Income')
+        : args.accountType,
     active: raw ? raw.Active !== false : true
   };
 };
@@ -760,10 +810,15 @@ const createPurchaseTransaction = async (args: {
   memo?: string;
   privateNoteTag?: string;
   paymentType: 'Cash' | 'Check';
+  docNumber?: string;
 }): Promise<QuickBooksTxnCreateResult> => {
   const secret = await ensureFreshQuickBooksSecret(args.companyId);
   if (!secret) {
     throw new Error('quickbooks_not_connected');
+  }
+
+  if (args.bankAccountId === args.categoryAccountId) {
+    throw new Error('quickbooks_bank_and_line_accounts_must_differ');
   }
 
   const payload = (await requestQuickBooksApi({
@@ -774,6 +829,7 @@ const createPurchaseTransaction = async (args: {
     body: {
       TxnDate: args.txnDate,
       PaymentType: args.paymentType,
+      DocNumber: toTrimmedString(args.docNumber) || undefined,
       AccountRef: { value: args.bankAccountId },
       PrivateNote: composePrivateNote(args),
       EntityRef: args.payeeRefId ? { value: args.payeeRefId } : undefined,
@@ -817,7 +873,74 @@ export const createQuickBooksCheckTransaction = (args: {
   payeeRefId?: string;
   memo?: string;
   privateNoteTag?: string;
+  docNumber?: string;
 }) => createPurchaseTransaction({ ...args, paymentType: 'Check' });
+
+export const findMatchingQuickBooksCheckPurchase = async (args: {
+  companyId: string;
+  bankAccountId: string;
+  checkNumber: string;
+  amount?: number;
+}): Promise<{ txnId: string; txnDate?: string } | null> => {
+  const checkNumber = toTrimmedString(args.checkNumber);
+  const bankAccountId = toTrimmedString(args.bankAccountId);
+  if (!checkNumber || !bankAccountId) return null;
+
+  const payload = await runQuickBooksReadQuery(
+    args.companyId,
+    `select * from Purchase where PaymentType = 'Check' and DocNumber = '${escapeQuickBooksQueryValue(checkNumber)}' startposition 1 maxresults 25`
+  );
+  const queryResponse =
+    (payload.QueryResponse as Record<string, unknown> | undefined) ?? undefined;
+  const rows = queryResponse?.Purchase;
+  const purchases = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+
+  const targetAmount =
+    typeof args.amount === 'number' && Number.isFinite(args.amount)
+      ? Math.abs(args.amount)
+      : undefined;
+
+  for (const purchase of purchases) {
+    const accountRef = toRecord(purchase.AccountRef);
+    const accountId = toTrimmedString(accountRef?.value);
+    if (accountId !== bankAccountId) continue;
+
+    if (typeof targetAmount === 'number') {
+      const total = Number(purchase.TotalAmt ?? NaN);
+      const line = Array.isArray(purchase.Line) ? purchase.Line[0] : purchase.Line;
+      const lineAmount = Number(toRecord(line)?.Amount ?? NaN);
+      const candidate = Number.isFinite(total) ? total : lineAmount;
+      if (Number.isFinite(candidate) && Math.abs(candidate - targetAmount) > 0.02) {
+        continue;
+      }
+    }
+
+    const txnId = toTrimmedString(purchase.Id);
+    if (!txnId) continue;
+    return {
+      txnId,
+      txnDate: parseReturnedTxnDate(purchase.TxnDate) ?? undefined
+    };
+  }
+
+  return null;
+};
+
+export const findDefaultQuickBooksServiceItem = async (
+  companyId: string
+): Promise<string | null> => {
+  const payload = await runQuickBooksReadQuery(
+    companyId,
+    "select Id, Name from Item where Active = true and Type in ('Service', 'NonInventory') startposition 1 maxresults 1"
+  );
+  const queryResponse =
+    (payload.QueryResponse as Record<string, unknown> | undefined) ?? undefined;
+  const rows = queryResponse?.Item;
+  const items = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+  const first = items[0];
+  const id = first ? toTrimmedString(first.Id) : '';
+  return id || null;
+};
 
 export const createQuickBooksDepositTransaction = async (args: {
   companyId: string;
@@ -831,6 +954,10 @@ export const createQuickBooksDepositTransaction = async (args: {
   const secret = await ensureFreshQuickBooksSecret(args.companyId);
   if (!secret) {
     throw new Error('quickbooks_not_connected');
+  }
+
+  if (args.bankAccountId === args.categoryAccountId) {
+    throw new Error('quickbooks_bank_and_line_accounts_must_differ');
   }
 
   const payload = (await requestQuickBooksApi({
@@ -874,6 +1001,10 @@ export const createQuickBooksTransferTransaction = async (args: {
   const secret = await ensureFreshQuickBooksSecret(args.companyId);
   if (!secret) {
     throw new Error('quickbooks_not_connected');
+  }
+
+  if (args.fromAccountId === args.toAccountId) {
+    throw new Error('quickbooks_transfer_accounts_must_differ');
   }
 
   const payload = (await requestQuickBooksApi({

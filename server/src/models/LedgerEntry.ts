@@ -14,7 +14,15 @@ const confidenceSchema = new Schema(
 
 const proposalSchema = new Schema(
   {
-    qbTxnType: { type: String, enum: ['Expense', 'Deposit', 'Transfer', 'Check'], required: false },
+    qbTxnType: {
+      type: String,
+      enum: ['Expense', 'Deposit', 'Transfer', 'Check', 'SalesReceipt', 'Payment'],
+      required: false
+    },
+    checkNumber: { type: String, required: false },
+    matchExistingCheck: { type: Boolean, required: false },
+    salesItemRefId: { type: String, required: false },
+    linkedInvoiceTxnId: { type: String, required: false },
     bankAccountId: { type: String, required: false },
     categoryAccountId: { type: String, required: false },
     payeeType: { type: String, enum: ['vendor', 'customer', 'employee', 'other'], required: false },

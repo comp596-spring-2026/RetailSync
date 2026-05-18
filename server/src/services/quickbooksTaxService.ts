@@ -1,5 +1,6 @@
 import {
   createQuickBooksAccount,
+  listQuickBooksItems,
   createQuickBooksCheckTransaction,
   createQuickBooksJournalEntry,
   ensureFreshQuickBooksSecret,
@@ -789,18 +790,46 @@ export const listQuickBooksHubChartOfAccounts = async (args: {
   };
 };
 
+export const listQuickBooksHubItems = async (args: {
+  companyId: string;
+  page: number;
+  pageSize: number;
+  search?: string;
+}) => {
+  const { items, total } = await listQuickBooksItems(args.companyId, {
+    search: args.search,
+    page: args.page,
+    pageSize: args.pageSize
+  });
+  return {
+    ...toPageMeta(args.page, args.pageSize, total),
+    items
+  };
+};
+
 export const createQuickBooksHubChartAccount = async (args: {
   companyId: string;
   name: string;
   accountNumber?: string;
-  detailType: 'Checking' | 'Savings' | 'CashOnHand';
+  accountKind?: 'bank' | 'expense' | 'income';
+  detailType?: 'Checking' | 'Savings' | 'CashOnHand';
 }) => {
+  const accountKind = args.accountKind ?? 'bank';
+  const accountType =
+    accountKind === 'expense' ? 'Expense' : accountKind === 'income' ? 'Income' : 'Bank';
+  const accountSubType =
+    accountKind === 'expense'
+      ? 'OtherBusinessExpenses'
+      : accountKind === 'income'
+        ? 'SalesOfProductIncome'
+        : args.detailType ?? 'Checking';
+
   const created = await createQuickBooksAccount({
     companyId: args.companyId,
     name: args.name,
-    accountType: 'Bank',
-    accountSubType: args.detailType,
-    accountNumber: args.accountNumber
+    accountType,
+    accountSubType,
+    accountNumber: accountKind === 'bank' ? args.accountNumber : undefined
   });
 
   const qbAccountId = created.id;
@@ -834,7 +863,7 @@ export const createQuickBooksHubChartAccount = async (args: {
     qbId: account.qbAccountId ?? null,
     name: account.name,
     type: account.type ?? null,
-    detailType: args.detailType,
+    detailType: accountKind === 'bank' ? args.detailType ?? 'Checking' : null,
     status: account.isSystem ? 'system' : 'active',
     balance: null
   } as const;

@@ -210,7 +210,7 @@ export const extractCheckFieldsFromOcr = (args: {
   const cropLines = normalizeLines(args.cropText);
   const contextLines = normalizeLines(args.pageContext ?? '');
 
-  const ocrCheckNumber = pickCheckNumber(cropLines) ?? pickCheckNumber(contextLines);
+  const ocrCheckNumber = pickCheckNumber(cropLines);
   const ocrDate = pickDate(cropLines) ?? pickDate(contextLines);
   const ocrPayeeName = pickPayee(cropLines, args.pageContext);
   const ocrAmount = pickAmount(cropLines) ?? pickAmount(contextLines);
@@ -234,7 +234,11 @@ export const extractCheckFieldsFromOcr = (args: {
   };
 
   const reasons = [
-    checkNumber ? 'Detected a check number from OCR text' : 'No check number in OCR text',
+    checkNumber
+      ? ocrCheckNumber
+        ? 'Detected a check number from cropped check OCR text'
+        : 'Used seeded check number fallback'
+      : 'No check number in OCR text',
     date ? 'Detected a date from OCR text' : 'No date in OCR text',
     payeeName ? 'Detected payee evidence from OCR text' : 'No payee evidence in OCR text',
     typeof amount === 'number' ? 'Detected a currency amount from OCR text' : 'No amount in OCR text'
@@ -247,6 +251,14 @@ export const runStatementCheckExtraction = async (args: RunStatementCheckExtract
   if (args.persistArtifacts && (!args.bucketName || !args.rootPrefix)) {
     throw new Error('bucketName and rootPrefix are required when persistArtifacts is enabled');
   }
+
+  // eslint-disable-next-line no-console
+  console.info('[check.extract] start', {
+    checkKey: args.checkKey,
+    pageNumber: args.pageNumber,
+    cropBox: args.cropBox,
+    fallbackCheckNumber: args.fallback?.checkNumber ?? null
+  });
 
   const renderedCrop = args.persistArtifacts
     ? await renderAndPersistCheckCrop({
@@ -327,6 +339,15 @@ export const runStatementCheckExtraction = async (args: RunStatementCheckExtract
 
   const ocr = await runOfflineOcr();
 
+  // eslint-disable-next-line no-console
+  console.info('[check.extract] ocr', {
+    checkKey: args.checkKey,
+    pageNumber: args.pageNumber,
+    cropBox: args.cropBox,
+    provider: ocr.provider,
+    ocrTextPreview: ocr.text.slice(0, 240)
+  });
+
   const { extracted: rawExtracted, reasons } = extractCheckFieldsFromOcr({
     cropText: ocr.text,
     pageContext: args.pageContext,
@@ -334,7 +355,7 @@ export const runStatementCheckExtraction = async (args: RunStatementCheckExtract
   });
   const extracted: StatementCheckExtracted = {
     ...rawExtracted,
-    checkNumber: args.fallback?.checkNumber ?? rawExtracted.checkNumber,
+    checkNumber: rawExtracted.checkNumber ?? args.fallback?.checkNumber,
     date: args.fallback?.date ?? rawExtracted.date,
     amount: args.fallback?.amount ?? rawExtracted.amount,
     payeeName: rawExtracted.payeeName ?? args.fallback?.payeeName,
@@ -344,6 +365,16 @@ export const runStatementCheckExtraction = async (args: RunStatementCheckExtract
         ? (ocr.provider === 'pdf_text' ? 'pdf_text' : 'ocr')
         : args.fallback?.source ?? rawExtracted.source
   };
+
+  // eslint-disable-next-line no-console
+  console.info('[check.extract] fields', {
+    checkKey: args.checkKey,
+    pageNumber: args.pageNumber,
+    cropBox: args.cropBox,
+    detectedCheckNumber: extracted.checkNumber ?? null,
+    fallbackCheckNumber: args.fallback?.checkNumber ?? null,
+    reasons
+  });
 
   const structured = {
     schemaVersion: 'v1',

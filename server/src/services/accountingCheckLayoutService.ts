@@ -200,6 +200,139 @@ export const detectCheckImagePages = (
 //   - If no pages are provided, starts at `fallbackStartPage` (default 4 —
 //     the typical first check-image page for SouthState) and increments one
 //     page at a time for overflow.
+export type CheckCropBoxTuple = [number, number, number, number];
+
+export const toCheckCropBox = (bbox: CheckCropBox | CheckCropBoxTuple): CheckCropBox => {
+  if (Array.isArray(bbox)) {
+    return {
+      left: Number(bbox[0]),
+      top: Number(bbox[1]),
+      right: Number(bbox[2]),
+      bottom: Number(bbox[3])
+    };
+  }
+  return bbox;
+};
+
+export const toCheckCropBoxTuple = (bbox: CheckCropBox): CheckCropBoxTuple => [
+  bbox.left,
+  bbox.top,
+  bbox.right,
+  bbox.bottom
+];
+
+/** Wide, flat regions are usually checks-cleared table rows — not check thumbnails. */
+export const isLikelyTableRowCropBox = (bbox: CheckCropBox | CheckCropBoxTuple) => {
+  const box = toCheckCropBox(bbox);
+  const width = box.right - box.left;
+  const height = box.bottom - box.top;
+  if (width <= 0 || height <= 0) return true;
+  const aspect = width / height;
+  if (height < 48) return true;
+  if (aspect > 10 && height < 120) return true;
+  return false;
+};
+
+export const isLikelyChecksClearedTableCrop = (args: {
+  bbox: CheckCropBox | CheckCropBoxTuple;
+  regionText?: string;
+}) => {
+  if (isLikelyTableRowCropBox(args.bbox)) return true;
+  const text = String(args.regionText ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return false;
+  if (/checks\s+cleared/i.test(text)) return true;
+  const bareTableLines = text.match(/\b\d{2,8}\s+\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g) ?? [];
+  const hashCheckLines = text.match(/#\s*0*\d{2,8}\b/g) ?? [];
+  return bareTableLines.length >= 3 && hashCheckLines.length === 0;
+};
+
+export type CheckImageCropPlacement = {
+  pageNumber: number;
+  cropBBox: CheckCropBoxTuple;
+  cropImagePath?: string;
+  source: 'offline_crop' | 'offline_box' | 'grid' | 'ocr_region';
+};
+
+export const resolveCheckImageCropPlacement = (args: {
+  checkNumber?: string;
+  detectedCheckPages: number[];
+  manualSlot?: ManualCheckSlot | null;
+  offlineImage?: {
+    page?: number;
+    imageBox?: { left?: number; top?: number; width?: number; height?: number };
+    reviewCropPath?: string;
+  } | null;
+  parserBBox?: CheckCropBoxTuple;
+  parserPageNumber?: number;
+  parserRegionText?: string;
+}): CheckImageCropPlacement | null => {
+  const manualSlot = args.manualSlot ?? null;
+  const offline = args.offlineImage ?? null;
+
+  if (offline?.reviewCropPath && offline.imageBox) {
+    const box = {
+      left: Number(offline.imageBox.left ?? 0),
+      top: Number(offline.imageBox.top ?? 0),
+      right: Number(offline.imageBox.left ?? 0) + Number(offline.imageBox.width ?? 0),
+      bottom: Number(offline.imageBox.top ?? 0) + Number(offline.imageBox.height ?? 0)
+    };
+    if (!isLikelyChecksClearedTableCrop({ bbox: box })) {
+      return {
+        pageNumber: Number(offline.page ?? args.parserPageNumber ?? manualSlot?.pageNumber ?? 1),
+        cropBBox: toCheckCropBoxTuple(box),
+        cropImagePath: offline.reviewCropPath,
+        source: 'offline_crop'
+      };
+    }
+  }
+
+  if (manualSlot && !isLikelyChecksClearedTableCrop({ bbox: manualSlot.bbox })) {
+    return {
+      pageNumber: manualSlot.pageNumber,
+      cropBBox: toCheckCropBoxTuple(manualSlot.bbox),
+      source: 'grid'
+    };
+  }
+
+  if (offline?.imageBox) {
+    const box = {
+      left: Number(offline.imageBox.left ?? 0),
+      top: Number(offline.imageBox.top ?? 0),
+      right: Number(offline.imageBox.left ?? 0) + Number(offline.imageBox.width ?? 0),
+      bottom: Number(offline.imageBox.top ?? 0) + Number(offline.imageBox.height ?? 0)
+    };
+    if (!isLikelyChecksClearedTableCrop({ bbox: box })) {
+      return {
+        pageNumber: Number(offline.page ?? args.parserPageNumber ?? 1),
+        cropBBox: toCheckCropBoxTuple(box),
+        cropImagePath: offline.reviewCropPath,
+        source: 'offline_box'
+      };
+    }
+  }
+
+  if (args.parserBBox && args.parserPageNumber != null) {
+    const pageNumber = Number(args.parserPageNumber);
+    const onCheckImagePage = args.detectedCheckPages.includes(pageNumber);
+    const parserBox = toCheckCropBox(args.parserBBox);
+    const tableLike = isLikelyChecksClearedTableCrop({
+      bbox: parserBox,
+      regionText: args.parserRegionText
+    });
+    if (onCheckImagePage && !tableLike) {
+      return {
+        pageNumber,
+        cropBBox: args.parserBBox,
+        source: 'ocr_region'
+      };
+    }
+  }
+
+  return null;
+};
+
 export const computeManualCheckSlot = (
   index: number,
   options: {

@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { coerceSharpInputBuffer } from '../../utils/imageInput';
 import type { Box } from './types';
 import { clampBoxToPage, normalizeBox, validateCaptionSpace } from './validateExtraction';
 
@@ -27,7 +28,8 @@ export const expandCheckCropForCaption = (
 
 export const cropPngBuffer = async (buffer: Buffer, box: Box) => {
   const normalized = normalizeBox(box);
-  return sharp(buffer)
+  const sharpInput = coerceSharpInputBuffer('cropPngBuffer.page', buffer);
+  return sharp(sharpInput)
     .extract({
       left: Math.round(normalized.left),
       top: Math.round(normalized.top),

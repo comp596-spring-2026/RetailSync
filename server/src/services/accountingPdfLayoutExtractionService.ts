@@ -336,3 +336,141 @@ export const extractDailyBalancesFromLayout = (
   }
   return [...seen.values()].sort((a, b) => a.date.localeCompare(b.date));
 };
+
+export type LayoutAwareParsedTransaction = {
+  rowType: string;
+  section: string;
+  type: 'debit' | 'credit';
+  amount: number;
+  postDate: string;
+  isPostingCandidate: boolean;
+  checkNumber?: string;
+  sourceLocator: {
+    pageNumber?: number;
+    sourceText?: string;
+  };
+};
+
+const mapLayoutSectionToRowType = (section: string) => {
+  if (section === 'deposits') return 'deposit';
+  if (section === 'electronic_credits') return 'electronic_credit';
+  if (section === 'other_credits') return 'other_credit';
+  if (section === 'electronic_debits') return 'electronic_debit';
+  if (section === 'checks_cleared') return 'check_cleared';
+  if (section === 'daily_balances') return 'daily_balance';
+  return 'noise';
+};
+
+const transactionTypeForLayoutSection = (section: string): 'debit' | 'credit' => {
+  if (section === 'electronic_debits' || section === 'checks_cleared') return 'debit';
+  if (section === 'deposits' || section === 'electronic_credits' || section === 'other_credits') {
+    return 'credit';
+  }
+  return 'debit';
+};
+
+const formatAmountTokens = (amount: number) => {
+  const abs = Math.abs(Number(amount));
+  const plain = abs.toFixed(2);
+  const [whole, fraction] = plain.split('.');
+  const withCommas = `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction}`;
+  return new Set([plain, withCommas, `$${plain}`, `$${withCommas}`]);
+};
+
+const formatDateTokens = (isoDate: string) => {
+  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return new Set([isoDate]);
+  const [, year, month, day] = match;
+  const monthNumber = String(Number(month));
+  const dayNumber = String(Number(day));
+  return new Set([
+    isoDate,
+    `${monthNumber}/${dayNumber}/${year}`,
+    `${month}/${day}/${year.slice(2)}`,
+    `${monthNumber}/${dayNumber}/${year.slice(2)}`
+  ]);
+};
+
+const rowTextIncludesTokens = (text: string, amountTokens: Set<string>, dateTokens: Set<string>) => {
+  const normalized = text.replace(/\s+/g, ' ');
+  const hasAmount = [...amountTokens].some((token) => normalized.includes(token));
+  const hasDate = [...dateTokens].some((token) => normalized.includes(token));
+  return hasAmount && hasDate;
+};
+
+const resolveLayoutSectionForTransaction = (
+  txn: LayoutAwareParsedTransaction,
+  pages: StatementPageLayoutObservation[],
+  bounds: StatementPageSectionBounds[]
+) => {
+  if (!txn.isPostingCandidate) return undefined;
+  if (['beginning_balance', 'ending_balance', 'summary_total'].includes(txn.rowType)) {
+    return undefined;
+  }
+
+  const pageNumber = Number(txn.sourceLocator.pageNumber ?? 0);
+  if (!pageNumber) return undefined;
+
+  const page = pages.find((entry) => entry.pageNumber === pageNumber);
+  if (!page) return undefined;
+
+  const pageBounds = bounds.filter((bound) => bound.pageNumber === pageNumber);
+  if (pageBounds.length === 0) return undefined;
+
+  const amountTokens = formatAmountTokens(txn.amount);
+  const dateTokens = formatDateTokens(txn.postDate);
+  const sourceText = String(txn.sourceLocator.sourceText ?? '').trim();
+
+  let matchY: number | undefined;
+  const itemHits = page.items.filter((item) =>
+    rowTextIncludesTokens(item.text, amountTokens, dateTokens)
+  );
+  if (itemHits.length > 0) {
+    matchY = Math.min(...itemHits.map((item) => item.y));
+  } else if (sourceText && rowTextIncludesTokens(sourceText, amountTokens, dateTokens)) {
+    const rows = groupItemsByRow(page.items);
+    const rowHit = rows.find((row) =>
+      rowTextIncludesTokens(
+        row.map((item) => item.text).join(' '),
+        amountTokens,
+        dateTokens
+      )
+    );
+    if (rowHit?.[0]) {
+      matchY = rowHit[0].y;
+    }
+  }
+
+  if (matchY == null) return undefined;
+  return pageBounds.find((bound) => matchY >= bound.yStart && matchY < bound.yEnd)?.section;
+};
+
+/**
+ * Reconcile OCR/text-parser section labels with coordinate-derived section bounds.
+ * SouthState-style statements often lose "(continued)" headings in pdf-parse output,
+ * which leaves credit rows under the wrong active section until electronic debits.
+ */
+export const applyLayoutSectionsToParsedTransactions = <T extends LayoutAwareParsedTransaction>(
+  transactions: T[],
+  pages: StatementPageLayoutObservation[],
+  sectionBounds: StatementPageSectionBounds[]
+) => {
+  if (sectionBounds.length === 0 || pages.length === 0) return transactions;
+
+  for (const txn of transactions) {
+    const layoutSection = resolveLayoutSectionForTransaction(txn, pages, sectionBounds);
+    if (!layoutSection) continue;
+
+    const nextRowType = mapLayoutSectionToRowType(layoutSection);
+    if (nextRowType === 'noise') continue;
+
+    txn.section = layoutSection;
+    txn.rowType = nextRowType;
+    txn.type = transactionTypeForLayoutSection(layoutSection);
+    if (layoutSection === 'checks_cleared' && txn.checkNumber) {
+      txn.rowType = 'check_cleared';
+    }
+  }
+
+  return transactions;
+};

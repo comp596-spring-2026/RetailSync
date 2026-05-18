@@ -3,13 +3,21 @@ import { tenantPlugin } from './plugins/tenantPlugin';
 
 const proposalSchema = new Schema(
   {
-    qbTxnType: { type: String, enum: ['Expense', 'Deposit', 'Transfer', 'Check'], required: false },
+    qbTxnType: {
+      type: String,
+      enum: ['Expense', 'Deposit', 'Transfer', 'Check', 'SalesReceipt', 'Payment'],
+      required: false
+    },
     bankAccountId: { type: String, required: false },
     categoryAccountId: { type: String, required: false },
     payeeType: { type: String, enum: ['vendor', 'customer', 'employee', 'other'], required: false },
     payeeId: { type: String, required: false },
     payeeName: { type: String, required: false },
     transferTargetAccountId: { type: String, required: false },
+    checkNumber: { type: String, required: false },
+    matchExistingCheck: { type: Boolean, required: false },
+    salesItemRefId: { type: String, required: false },
+    linkedInvoiceTxnId: { type: String, required: false },
     memo: { type: String, default: '' },
     confidence: { type: Number, default: 0 },
     reasons: { type: [String], default: [] },
