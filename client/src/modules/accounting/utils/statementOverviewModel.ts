@@ -1,10 +1,9 @@
 import type { BankStatementDetail, BankStatementStatus, StatementTransaction } from '@retailsync/shared';
-import { formatMaybeDate, formatMoney, formatStatusLabel } from './statementDetailHelpers';
+import { formatMoney, formatStatusLabel } from './statementDetailHelpers';
 import {
   compareSectionKeys,
   sectionDirection,
-  sectionReviewType,
-  sectionWorkflowHint
+  sectionReviewType
 } from './statementSectionWorkflow';
 
 export type ValueSource =
