@@ -7,7 +7,15 @@ type PdfJsShape = {
       numPages: number;
       getPage: (pageNumber: number) => Promise<{
         getViewport: (args: { scale: number }) => { width: number; height: number };
-        render: (args: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => {
+        render: (args: {
+          canvasContext: CanvasRenderingContext2D;
+          viewport: { width: number; height: number };
+          canvasFactory?: {
+            create: (width: number, height: number) => { canvas: any; context: any };
+            reset: (ctx: { canvas: any; context: any }, width: number, height: number) => void;
+            destroy: (ctx: { canvas: any; context: any }) => void;
+          };
+        }) => {
           promise: Promise<void>;
         };
       }>;
