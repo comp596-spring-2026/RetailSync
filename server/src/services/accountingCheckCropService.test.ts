@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCheckCropPath } from './accountingStorageService';
 
@@ -11,17 +10,13 @@ const storageSaves = vi.hoisted(() => ({
   saves: [] as Array<{ objectPath: string; buffer: Buffer }>
 }));
 
-const spawnSyncMock = vi.hoisted(() => vi.fn());
-
-vi.mock('node:child_process', () => ({
-  spawnSync: (...args: unknown[]) => spawnSyncMock(...args)
+const renderPdfPageToBufferMock = vi.hoisted(() => vi.fn());
+vi.mock('../statement-extraction/offline/renderPdfPage', () => ({
+  renderPdfPageToBuffer: (...args: unknown[]) => renderPdfPageToBufferMock(...args)
 }));
 
 vi.mock('../config/env', () => ({
   env: {
-    statementPdfRenderCommand: 'pdftoppm',
-    statementPdfRenderDpi: 144,
-    statementPdfRenderTimeoutMs: 120000,
     statementCheckRegionMarginPx: 24
   }
 }));
@@ -44,17 +39,16 @@ vi.mock('../integrations/google/storage.client', () => ({
 describe('accountingCheckCropService', () => {
   beforeEach(() => {
     storageSaves.saves = [];
-    spawnSyncMock.mockReset();
+    renderPdfPageToBufferMock.mockReset();
   });
 
   it('renders a cropped check region and persists it to the tenant bucket', async () => {
-    spawnSyncMock.mockImplementation((_command: string, args: string[]) => {
-      const outputPrefix = args.at(-1);
-      if (!outputPrefix) {
-        return { status: 1, stderr: 'missing output prefix', stdout: '' };
-      }
-      fs.writeFileSync(`${outputPrefix}-1.png`, pngBuffer);
-      return { status: 0, stderr: '', stdout: '' };
+    renderPdfPageToBufferMock.mockResolvedValue({
+      pageNumber: 1,
+      width: 1,
+      height: 1,
+      scale: 2,
+      buffer: pngBuffer
     });
 
     const { renderAndPersistCheckCrop } = await import('./accountingCheckCropService');
@@ -62,13 +56,13 @@ describe('accountingCheckCropService', () => {
     const result = await renderAndPersistCheckCrop({
       pdfBuffer: Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nendobj\n'),
       pageNumber: 1,
-      cropBox: { left: 20, top: 40, right: 220, bottom: 160 },
+      cropBox: { left: 0, top: 0, right: 1, bottom: 1 },
       bucketName: 'accounting-bucket',
       rootPrefix: 'companies/company-a/statements/2026/03/statement-a',
       checkKey: 'check-001'
     });
 
-    expect(result.crop.buffer.equals(pngBuffer)).toBe(true);
+    expect(result.crop.buffer.byteLength).toBeGreaterThan(0);
     expect(result.crop.pageNumber).toBe(1);
     expect(result.crop.fileName).toBe('crop-1.png');
     expect(result.objectPath).toBe(
@@ -85,7 +79,7 @@ describe('accountingCheckCropService', () => {
   });
 
   it('surfaces explicit crop render failures for retries', async () => {
-    spawnSyncMock.mockReturnValue({ status: 127, stderr: 'pdftoppm not found', stdout: '' });
+    renderPdfPageToBufferMock.mockRejectedValue(new Error('render failed'));
 
     const { renderCheckCropFromPdf } = await import('./accountingCheckCropService');
 
@@ -93,12 +87,12 @@ describe('accountingCheckCropService', () => {
       renderCheckCropFromPdf({
         pdfBuffer: Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nendobj\n'),
         pageNumber: 1,
-        cropBox: { left: 20, top: 40, right: 220, bottom: 160 }
+        cropBox: { left: 0, top: 0, right: 1, bottom: 1 }
       })
     ).rejects.toMatchObject({
       name: 'AccountingCheckCropError',
       code: 'CHECK_CROP_RENDER_FAILED',
-      retryable: false
+      retryable: true
     });
   });
 });

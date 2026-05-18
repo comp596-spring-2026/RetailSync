@@ -20,6 +20,7 @@ import {
   getUploadUrl,
   listStatementMonths,
   listStatements,
+  playgroundOfflineExtraction,
   reprocessStatement,
   resolveTransferSuggestion,
   updateStatementEntryReview,
@@ -42,6 +43,12 @@ router.post(
   requirePermission('bankStatements', 'create'),
   upload.single('file'),
   detectStatementMonth
+);
+router.post(
+  '/playground/offline-extraction',
+  requirePermission('bankStatements', 'view'),
+  upload.single('file'),
+  playgroundOfflineExtraction
 );
 router.get('/statements', requirePermission('bankStatements', 'view'), listStatements);
 router.get('/statement-months', requirePermission('bankStatements', 'view'), listStatementMonths);

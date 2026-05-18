@@ -946,7 +946,14 @@ export const StatementDetailPage = () => {
       if (key.startsWith('check-')) return 'Checks';
       if (key === 'pdf') return 'Source';
       if (key === 'ocrText' || key === 'ocrJson' || key === 'normalized') return 'Extraction';
-      if (key === 'transactions' || key === 'checksCleared' || key === 'sections' || key === 'extractedChecks') {
+      if (
+        key === 'transactions' ||
+        key === 'checksCleared' ||
+        key === 'sections' ||
+        key === 'extractedChecks' ||
+        key === 'structuredStatement' ||
+        key === 'offlineExtraction'
+      ) {
         return 'Structured Tables';
       }
       if (key === 'classificationOutput' || key === 'suggestionsOutput' || key === 'processingSummary') {
@@ -1027,7 +1034,6 @@ export const StatementDetailPage = () => {
     if (!currentArtifact) return;
 
     if (currentArtifact.kind === 'blob') {
-      if (currentArtifact.key.startsWith('check-')) return;
       void loadBlobArtifact(currentArtifact.path);
       return;
     }
@@ -1060,7 +1066,7 @@ export const StatementDetailPage = () => {
     }
 
     if (currentArtifact.kind === 'blob') {
-      const objectUrl = currentArtifact.key.startsWith('check-') ? '/test_check.png' : artifactBlobUrls[currentArtifact.path];
+      const objectUrl = artifactBlobUrls[currentArtifact.path];
       if (!objectUrl) {
         return <Alert severity="info">{currentArtifact.emptyMessage}</Alert>;
       }

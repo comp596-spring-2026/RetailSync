@@ -1,16 +1,21 @@
 # RetailSync Execution Status
 
-Last updated: 2026-05-14
+Last updated: 2026-05-17
 
 This file tracks the current implementation state of the live product surfaces, backend workflows, and validation posture.
 
+Quick read:
+- the active product story is full-platform, but the strongest integrated demo path is the accounting statements workflow with downstream QuickBooks context
+- the current visible workspaces are Dashboard, POS, Accounting, QuickBooks, Settings, and Access
+- overall product direction is stable, while release confidence remains `PARTIAL`
+
 Primary companion docs:
-- [docs/architecture/workflows-and-usage.md](/Users/trupal/Projects/RetailSync/docs/architecture/workflows-and-usage.md)
-- [docs/architecture/statement-pdf-processing-workflow.md](/Users/trupal/Projects/RetailSync/docs/architecture/statement-pdf-processing-workflow.md)
-- [docs/frontend/routing-and-permission-gates.md](/Users/trupal/Projects/RetailSync/docs/frontend/routing-and-permission-gates.md)
-- [docs/backend/api-reference.md](/Users/trupal/Projects/RetailSync/docs/backend/api-reference.md)
-- [docs/testing/module-test-matrix.md](/Users/trupal/Projects/RetailSync/docs/testing/module-test-matrix.md)
-- [docs/wireframes](/Users/trupal/Projects/RetailSync/docs/wireframes)
+- [architecture/workflows-and-usage.md](architecture/workflows-and-usage.md)
+- [architecture/statement-pdf-processing-workflow.md](architecture/statement-pdf-processing-workflow.md)
+- [frontend/routing-and-permission-gates.md](frontend/routing-and-permission-gates.md)
+- [backend/api-reference.md](backend/api-reference.md)
+- [testing/module-test-matrix.md](testing/module-test-matrix.md)
+- [wireframes](wireframes)
 
 Status legend:
 - `DONE`: implemented and active in the product
@@ -33,11 +38,16 @@ RetailSync is currently centered on:
 
 Inventory has been removed from the active product and is no longer part of the supported user flow.
 
+Recommended grading read:
+1. Start in `README.md` for the project story and architecture visuals.
+2. Use this file to confirm which product surfaces are implemented versus partial/hidden.
+3. Review the statement workflow docs if you want the strongest end-to-end implementation example.
+
 ---
 
 ## Current Scenario Snapshot
 
-As of 2026-05-14, the current live accounting scenario is:
+As of 2026-05-17, the current live accounting scenario is:
 - accounting is statements-first in the visible product shell
 - statement detail is the active month-close and suggestion review workspace
 - ledger and QuickBooks posting remain downstream operational workspaces

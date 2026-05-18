@@ -1,6 +1,18 @@
 # RetailSync Workflows and Usage
 
-Last updated: 2026-05-14
+Last updated: 2026-05-17
+
+This document is the operational companion to the top-level README. It describes the active user-facing flows and keeps the strongest final-demo path easy to follow.
+
+## Recommended Review Order
+
+If you are reviewing the project quickly, use this order:
+
+1. Auth and onboarding
+2. Dashboard workspace structure
+3. Accounting statements workflow
+4. QuickBooks workspace
+5. POS and Access as supporting modules
 
 ## Monorepo Structure
 
@@ -59,6 +71,9 @@ Visible top-level workspaces:
 - Settings
 - Access
 
+Supporting visual reference:
+- [App shell wireframe](../wireframes/app-shell.md)
+
 ## POS Flow
 
 1. User imports POS data from file or configured Google Sheets source.
@@ -75,7 +90,11 @@ Visible top-level workspaces:
 6. User opens statement detail to monitor status and retry/reprocess work when needed.
 
 Detailed PDF-processing reference:
-- [docs/architecture/statement-pdf-processing-workflow.md](/Users/trupal/Projects/RetailSync/docs/architecture/statement-pdf-processing-workflow.md)
+- [Statement PDF processing workflow](statement-pdf-processing-workflow.md)
+
+Strongest demo emphasis:
+- this is the most integrated path in the project today
+- it connects auth, tenant scoping, storage, background processing, artifact review, and downstream accounting operations
 
 ## QuickBooks Flow
 
@@ -95,6 +114,9 @@ Core QuickBooks user flows:
 - deposit/check/expense/transfer CRUD
 - account register drill-ins
 
+Supporting visual reference:
+- [QuickBooks workspace wireframe](../wireframes/quickbooks-module.md)
+
 ## Access Flow
 
 Access is a dedicated hub for:
@@ -108,3 +130,12 @@ Access is a dedicated hub for:
 - Inventory is not part of the current live product.
 - Procurement is not considered a release-ready primary workflow.
 - QuickBooks is no longer modeled as an accounting tab set.
+
+## Recommended Final Demo Flow
+
+1. Log in with a company-scoped account.
+2. Show the dashboard shell and role-aware navigation.
+3. Briefly establish the platform surface: POS, Accounting, QuickBooks, Settings, and Access.
+4. Enter Accounting and show statement upload, status tracking, artifacts, and review.
+5. Transition into QuickBooks to show downstream operational context.
+6. Use POS or Access as brief proof that the broader platform is integrated around the same company and permission model.

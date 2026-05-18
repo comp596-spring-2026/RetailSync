@@ -33,6 +33,7 @@ import {
   buildCheckCropPath,
   buildCheckOcrPath,
   buildCheckStructuredPath,
+  buildStatementJsonPath,
   buildStatementChecksClearedTablePath,
   buildStatementClassificationOutputPath,
   buildStatementExtractedChecksPath,
@@ -52,6 +53,7 @@ import {
 } from '../services/accountingStorageService';
 import { renderAndPersistStatementPages } from '../services/accountingPdfRenderService';
 import { runStatementCheckExtraction } from '../services/accountingCheckExtractionService';
+import { extractOfflineStatement } from '../statement-extraction/offline';
 import { buildMatchingProposal } from '../services/matchingEngine';
 import { buildStatementEvidenceRows, buildStatementValidationReport } from '../services/statementValidationService';
 import {
@@ -267,6 +269,15 @@ const saveText = async (bucketName: string, objectPath: string, text: string) =>
   const file = storage.bucket(bucketName).file(objectPath);
   await file.save(text, {
     contentType: 'text/plain'
+  });
+};
+
+const saveBuffer = async (bucketName: string, objectPath: string, buffer: Buffer, contentType: string) => {
+  const file = storage.bucket(bucketName).file(objectPath);
+  await file.save(buffer, {
+    contentType,
+    resumable: false,
+    validation: false
   });
 };
 
@@ -1464,12 +1475,28 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       let pdfLayoutSectionBounds: StatementPageSectionBounds[] = [];
       let pdfLayoutChecks: ExtractedCheckRow[] = [];
       let pdfLayoutDailyBalances: ExtractedDailyBalance[] = [];
+      let offlineExtraction: Awaited<ReturnType<typeof extractOfflineStatement>> | null = null;
+      const offlineExtractionPath = buildStatementJsonPath(rootPrefix, 'tables/offline-extraction.v1.json');
       try {
         const pdfBuffer = await downloadFileBuffer(bucketName, pdfPath);
         pdfLayoutPages = await extractStatementPagesLayoutFromPdfBuffer(pdfBuffer);
         pdfLayoutSectionBounds = deriveSectionBoundsFromLayout(pdfLayoutPages);
         pdfLayoutChecks = extractChecksClearedFromLayout(pdfLayoutPages, pdfLayoutSectionBounds);
         pdfLayoutDailyBalances = extractDailyBalancesFromLayout(pdfLayoutPages, pdfLayoutSectionBounds);
+        offlineExtraction = await extractOfflineStatement({
+          pdfBuffer,
+          layoutChecks: pdfLayoutChecks,
+          persistCrop: async ({ checkNumber, imageBuffer, reviewBuffer }) => {
+            const checkKey = `caption-${String(checkNumber).padStart(4, '0')}`;
+            const imageCropPath = buildCheckCropPath(rootPrefix, checkKey, 'tight.png');
+            const reviewCropPath = buildCheckCropPath(rootPrefix, checkKey, 'front.png');
+            await Promise.all([
+              saveBuffer(bucketName, imageCropPath, imageBuffer, 'image/png'),
+              saveBuffer(bucketName, reviewCropPath, reviewBuffer, 'image/png')
+            ]);
+            return { imageCropPath, reviewCropPath };
+          }
+        });
       } catch (error) {
         console.warn('[accountingTaskRunner] pdf layout extraction failed', {
           statementId: payload.statementId,
@@ -1546,7 +1573,14 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
             checksCleared: pdfLayoutChecks,
             dailyBalances: pdfLayoutDailyBalances
           }
-        })
+        }),
+        offlineExtraction
+          ? saveJson(bucketName, offlineExtractionPath, {
+              schemaVersion: 'v1',
+              statementId: payload.statementId,
+              extraction: offlineExtraction
+            })
+          : Promise.resolve()
       ]);
 
       await Promise.all([
@@ -1692,6 +1726,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         suggestionsOutputPath,
         processingSummaryPath,
         structuredStatementPath,
+        offlineExtractionPath: offlineExtraction ? offlineExtractionPath : statement.artifacts?.offlineExtractionPath ?? undefined,
         evidencePath,
         validationReportPath,
         geminiPath: normalizedPath,
@@ -1918,6 +1953,42 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         }
       });
 
+      type OfflineCheckImageArtifact = {
+        page?: number;
+        checkNumber?: string;
+        amount?: number;
+        imageBox?: { left?: number; top?: number; width?: number; height?: number };
+        reviewCropPath?: string;
+        alignment?: { status?: string; matchedBy?: string };
+      };
+      let offlineCheckImages: OfflineCheckImageArtifact[] = [];
+      const offlineExtractionPath = String(statement.artifacts?.offlineExtractionPath ?? '');
+      if (offlineExtractionPath) {
+        try {
+          const rawJson = await downloadFileBuffer(bucketName, offlineExtractionPath);
+          const parsedJson = JSON.parse(rawJson.toString('utf-8')) as {
+            extraction?: { checkImages?: OfflineCheckImageArtifact[] };
+          };
+          if (Array.isArray(parsedJson?.extraction?.checkImages)) {
+            offlineCheckImages = parsedJson.extraction.checkImages;
+          }
+        } catch (loadError) {
+          console.warn('[checks.spawn] failed to load offline extraction artifact', {
+            statementId: payload.statementId,
+            offlineExtractionPath,
+            error: loadError instanceof Error ? loadError.message : String(loadError)
+          });
+        }
+      }
+      const offlineImageByCheckNumber = new Map<string, OfflineCheckImageArtifact[]>();
+      for (const image of offlineCheckImages) {
+        const key = String(image.checkNumber ?? '').trim();
+        if (!key) continue;
+        const bucket = offlineImageByCheckNumber.get(key) ?? [];
+        bucket.push(image);
+        offlineImageByCheckNumber.set(key, bucket);
+      }
+
       const checks = [] as Array<{ id: string; frontPath: string }>;
       const queuedAt = nowIso();
       // Running counter for candidates that don't have a parser bbox and
@@ -1929,7 +2000,6 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       for (let index = 0; index < candidates.length; index += 1) {
         const candidate = candidates[index];
         const checkId = new Types.ObjectId().toString();
-        const frontPath = buildCheckCropPath(rootPrefix, checkId, 'front.png');
         // Prefer bbox already on the cleared-checks row; fall back to the
         // matched StatementTransaction's sourceLocator bbox if we have one.
         const rowBBox = candidate.bbox;
@@ -1943,6 +2013,12 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         const namedSlot = parserBBox
           ? null
           : (checkNumberKey ? manualSlotByCheckNumber.get(checkNumberKey) : null) ?? null;
+        const offlineMatch = checkNumberKey
+          ? (offlineImageByCheckNumber.get(checkNumberKey) ?? []).find(
+              (image) => image.amount == null || Math.abs(Number(image.amount) - Number(candidate.amount ?? 0)) < 0.01
+            ) ?? null
+          : null;
+        const frontPath = String(offlineMatch?.reviewCropPath ?? buildCheckCropPath(rootPrefix, checkId, 'front.png'));
 
         // Final, bulletproof fallback: if neither the parser nor the named-
         // slot lookup produced a bbox, compute one deterministically from the
@@ -1963,12 +2039,22 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
 
         const manualSlot = namedSlot ?? computedSlot;
         const cropBBox = parserBBox
+          ?? (offlineMatch?.imageBox
+            ? [
+                Number(offlineMatch.imageBox.left ?? 0),
+                Number(offlineMatch.imageBox.top ?? 0),
+                Number(offlineMatch.imageBox.left ?? 0) + Number(offlineMatch.imageBox.width ?? 0),
+                Number(offlineMatch.imageBox.top ?? 0) + Number(offlineMatch.imageBox.height ?? 0)
+              ]
+            : undefined)
           ?? (manualSlot ? [manualSlot.bbox.left, manualSlot.bbox.top, manualSlot.bbox.right, manualSlot.bbox.bottom] : undefined);
         const pageNumber =
           candidate.pageNumber != null
             ? Number(candidate.pageNumber)
             : candidate.sourceLocator?.pageNumber != null
               ? Number(candidate.sourceLocator.pageNumber)
+              : offlineMatch?.page != null
+                ? Number(offlineMatch.page)
               : manualSlot?.pageNumber;
 
         if (!cropBBox) {
@@ -1984,6 +2070,13 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         const matchReasons = candidate.statementTransactionId
           ? ['Seeded from cleared-checks table', 'Matched to statement transaction by (checkNumber, amount, postDate)']
           : ['Seeded from cleared-checks table'];
+        if (offlineMatch?.alignment?.status) {
+          matchReasons.push(
+            `Offline thumbnail match ${String(offlineMatch.alignment.status).toLowerCase()} via ${String(
+              offlineMatch.alignment.matchedBy ?? 'caption'
+            )}`
+          );
+        }
 
         const created = await StatementCheckModel.create({
           _id: checkId,
@@ -1993,10 +2086,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
           artifacts: {
             pageNumber,
             cropBBox,
-            // cropImagePath is intentionally not set here — we only publish it
-            // once check.process has rendered and persisted the actual PNG to
-            // GCS. Setting a path to a file that doesn't exist yet causes the
-            // client to 404 when opening the crop.
+            cropImagePath: offlineMatch?.reviewCropPath ?? undefined,
             stageTimestamps: {
               queuedAt
             }
@@ -2280,6 +2370,17 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         cropBox,
         checkKey: check._id.toString(),
         pageContext: [statementTxn?.merchant, statementTxn?.description].filter(Boolean).join(' '),
+        fallback: {
+          checkNumber: check.extracted?.checkNumber ?? statementTxn?.checkNumber ?? undefined,
+          date: check.extracted?.date ?? statementTxn?.postDate ?? undefined,
+          amount: check.extracted?.amount ?? statementTxn?.amount ?? undefined,
+          memo: check.extracted?.memo ?? statementTxn?.description ?? undefined,
+          payeeName: check.extracted?.payeeName ?? statementTxn?.merchant ?? statementTxn?.description ?? undefined,
+          source:
+            check.extracted?.source && check.extracted.source !== 'gemini'
+              ? check.extracted.source
+              : 'deterministic'
+        },
         internalPdfPageText,
         bucketName,
         rootPrefix,

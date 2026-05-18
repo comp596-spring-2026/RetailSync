@@ -98,6 +98,11 @@ vi.mock('../services/matchingEngine', () => ({
   buildMatchingProposal: (...args: unknown[]) => buildMatchingProposalMock(...args)
 }));
 
+const extractOfflineStatementMock = vi.fn();
+vi.mock('../statement-extraction/offline', () => ({
+  extractOfflineStatement: (...args: unknown[]) => extractOfflineStatementMock(...args)
+}));
+
 vi.mock('../services/quickbooksSyncService', () => ({
   markQuickBooksSyncFailure: vi.fn(),
   postApprovedLedgerEntriesToQuickBooks: vi.fn(),
@@ -399,6 +404,25 @@ describe('accountingTaskRunner', () => {
         checkRegions: []
       }
     ]);
+
+    extractOfflineStatementMock.mockReset();
+    extractOfflineStatementMock.mockResolvedValue({
+      transactions: [],
+      checks: [],
+      checkImages: [],
+      validation: {
+        sectionCounts: {},
+        sectionTotals: {},
+        checkCount: 0,
+        checkTotal: 0,
+        warnings: []
+      },
+      debug: {
+        lines: [],
+        captions: [],
+        renderedPages: []
+      }
+    });
 
     runStatementCheckExtractionMock.mockReset();
     runStatementCheckExtractionMock.mockImplementation(async (args: any) => {

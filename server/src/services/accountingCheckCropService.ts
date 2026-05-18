@@ -1,10 +1,8 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import os from 'node:os';
-import { spawnSync } from 'node:child_process';
+import sharp from 'sharp';
 import { env } from '../config/env';
 import { getStorageClient } from '../integrations/google/storage.client';
 import { buildCheckCropPath } from './accountingStorageService';
+import { renderPdfPageToBuffer } from '../statement-extraction/offline/renderPdfPage';
 
 export class AccountingCheckCropError extends Error {
   code: string;
@@ -40,9 +38,6 @@ export type RenderCheckCropArgs = {
   pdfBuffer: Buffer;
   pageNumber: number;
   cropBox: CheckCropBox;
-  renderCommand?: string;
-  dpi?: number;
-  timeoutMs?: number;
   marginPx?: number;
 };
 
@@ -79,124 +74,38 @@ const normalizeBox = (box: CheckCropBox, marginPx: number) => {
   };
 };
 
-const makeTempDir = async () => fs.mkdtemp(path.join(os.tmpdir(), 'retailsync-check-crop-'));
-
-const cleanupTempDir = async (dir: string) => {
-  await fs.rm(dir, { recursive: true, force: true });
-};
-
-const writeTempPdf = async (dir: string, pdfBuffer: Buffer) => {
-  const pdfPath = path.join(dir, 'input.pdf');
-  await fs.writeFile(pdfPath, pdfBuffer);
-  return pdfPath;
-};
-
-const runPdfToPng = (args: {
-  pdfPath: string;
-  outputPrefix: string;
-  renderCommand: string;
-  dpi: number;
-  timeoutMs: number;
-  pageNumber: number;
-  crop: { left: number; top: number; width: number; height: number };
-}) => {
-  const response = spawnSync(
-    args.renderCommand,
-    [
-      '-png',
-      '-r',
-      String(args.dpi),
-      '-f',
-      String(args.pageNumber),
-      '-l',
-      String(args.pageNumber),
-      '-x',
-      String(args.crop.left),
-      '-y',
-      String(args.crop.top),
-      '-W',
-      String(args.crop.width),
-      '-H',
-      String(args.crop.height),
-      args.pdfPath,
-      args.outputPrefix
-    ],
-    {
-      encoding: 'utf8',
-      timeout: args.timeoutMs,
-      maxBuffer: 10 * 1024 * 1024
-    }
-  );
-
-  if (response.error) {
-    throw new AccountingCheckCropError('CHECK_CROP_RENDER_FAILED', `Failed to execute ${args.renderCommand}`, {
-      retryable: true,
-      cause: response.error
-    });
-  }
-
-  if (response.status !== 0) {
-    throw new AccountingCheckCropError(
-      'CHECK_CROP_RENDER_FAILED',
-      `${args.renderCommand} exited with status ${response.status ?? 'unknown'}: ${String(response.stderr ?? '').trim()}`,
-      { retryable: response.status === 1 || response.status == null }
-    );
-  }
-};
-
-const readRenderedCrop = async (dir: string, prefix: string) => {
-  const entries = await fs.readdir(dir);
-  const cropFile = entries.find((entry) => entry.startsWith(prefix) && entry.endsWith('.png'));
-  if (!cropFile) {
-    throw new AccountingCheckCropError('CHECK_CROP_NO_OUTPUT', 'PDF crop renderer produced no output', {
-      retryable: true
-    });
-  }
-  const buffer = await fs.readFile(path.join(dir, cropFile));
-  return { fileName: cropFile, buffer };
-};
-
 export const renderCheckCropFromPdf = async (args: RenderCheckCropArgs): Promise<RenderedCheckCrop> => {
-  const renderCommand = args.renderCommand ?? env.statementPdfRenderCommand;
-  const dpi = args.dpi ?? env.statementPdfRenderDpi;
-  const timeoutMs = args.timeoutMs ?? env.statementPdfRenderTimeoutMs;
-  const marginPx = args.marginPx ?? env.statementCheckRegionMarginPx;
+  const scale = 2; // Default scale since dpi is removed
+  const marginPx = args.marginPx ?? env.statementCheckRegionMarginPx ?? 0;
 
-  if (!renderCommand || !renderCommand.trim()) {
-    throw new AccountingCheckCropError('CHECK_CROP_NOT_CONFIGURED', 'Check crop render command is not configured');
-  }
-  if (!Number.isFinite(dpi) || dpi <= 0) {
-    throw new AccountingCheckCropError('CHECK_CROP_NOT_CONFIGURED', 'Check crop DPI must be a positive number');
-  }
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new AccountingCheckCropError('CHECK_CROP_NOT_CONFIGURED', 'Check crop timeout must be a positive number');
-  }
-
-  const tempDir = await makeTempDir();
   try {
-    const pdfPath = await writeTempPdf(tempDir, args.pdfBuffer);
-    const outputPrefix = path.join(tempDir, 'crop');
+    const page = await renderPdfPageToBuffer(
+      args.pdfBuffer,
+      clamp(Math.floor(args.pageNumber), 1, Number.MAX_SAFE_INTEGER),
+      scale
+    );
     const crop = normalizeBox(args.cropBox, marginPx);
+    const buffer = await sharp(page.buffer)
+      .extract({
+        left: clamp(Math.floor(crop.left), 0, page.width - 1),
+        top: clamp(Math.floor(crop.top), 0, page.height - 1),
+        width: clamp(Math.floor(crop.width), 1, page.width),
+        height: clamp(Math.floor(crop.height), 1, page.height)
+      })
+      .png()
+      .toBuffer();
 
-    runPdfToPng({
-      pdfPath,
-      outputPrefix,
-      renderCommand,
-      dpi,
-      timeoutMs,
-      pageNumber: clamp(Math.floor(args.pageNumber), 1, Number.MAX_SAFE_INTEGER),
-      crop
-    });
-
-    const rendered = await readRenderedCrop(tempDir, 'crop-');
     return {
       pageNumber: args.pageNumber,
       cropBox: args.cropBox,
-      fileName: rendered.fileName,
-      buffer: rendered.buffer
+      fileName: `crop-${args.pageNumber}.png`,
+      buffer
     };
-  } finally {
-    await cleanupTempDir(tempDir);
+  } catch (error) {
+    throw new AccountingCheckCropError('CHECK_CROP_RENDER_FAILED', 'Failed to render cropped check region', {
+      retryable: true,
+      cause: error
+    });
   }
 };
 

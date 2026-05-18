@@ -1,8 +1,6 @@
-import fs from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildPageImagePath } from './accountingStorageService';
 import {
-  AccountingPdfRenderError,
   persistRenderedStatementPages,
   renderAndPersistStatementPages,
   renderStatementPdfPages
@@ -21,10 +19,12 @@ const storageSaves = vi.hoisted(() => ({
   saves: [] as Array<{ objectPath: string; buffer: Buffer; options: Record<string, unknown> | undefined }>
 }));
 
-const spawnSyncMock = vi.hoisted(() => vi.fn());
+const getPdfPageCountMock = vi.hoisted(() => vi.fn());
+const renderPdfPageToBufferMock = vi.hoisted(() => vi.fn());
 
-vi.mock('node:child_process', () => ({
-  spawnSync: (...args: unknown[]) => spawnSyncMock(...args)
+vi.mock('../statement-extraction/offline/renderPdfPage', () => ({
+  getPdfPageCount: (...args: unknown[]) => getPdfPageCountMock(...args),
+  renderPdfPageToBuffer: (...args: unknown[]) => renderPdfPageToBufferMock(...args)
 }));
 
 vi.mock('../integrations/google/storage.client', () => ({
@@ -46,19 +46,15 @@ vi.mock('../integrations/google/storage.client', () => ({
 describe('accountingPdfRenderService', () => {
   beforeEach(() => {
     storageSaves.saves = [];
-    spawnSyncMock.mockReset();
+    getPdfPageCountMock.mockReset();
+    renderPdfPageToBufferMock.mockReset();
   });
 
   it('renders all pdf pages and persists them into tenant bucket paths', async () => {
-    spawnSyncMock.mockImplementation((_command: string, args: string[]) => {
-      const outputPrefix = args.at(-1);
-      if (!outputPrefix) {
-        return { status: 1, stderr: 'missing output prefix' };
-      }
-      fs.writeFileSync(`${outputPrefix}-1.png`, pngBuffer1);
-      fs.writeFileSync(`${outputPrefix}-2.png`, pngBuffer2);
-      return { status: 0, stderr: '', stdout: '' };
-    });
+    getPdfPageCountMock.mockResolvedValue(2);
+    renderPdfPageToBufferMock
+      .mockResolvedValueOnce({ pageNumber: 1, width: 1, height: 1, scale: 2, buffer: pngBuffer1 })
+      .mockResolvedValueOnce({ pageNumber: 2, width: 1, height: 1, scale: 2, buffer: pngBuffer2 });
 
     const result = await renderAndPersistStatementPages({
       bucketName: 'accounting-bucket',
@@ -80,14 +76,8 @@ describe('accountingPdfRenderService', () => {
   });
 
   it('is safe to re-run page persistence to the same bucket paths', async () => {
-    spawnSyncMock.mockImplementation((_command: string, args: string[]) => {
-      const outputPrefix = args.at(-1);
-      if (!outputPrefix) {
-        return { status: 1, stderr: 'missing output prefix' };
-      }
-      fs.writeFileSync(`${outputPrefix}-1.png`, pngBuffer1);
-      return { status: 0, stderr: '', stdout: '' };
-    });
+    getPdfPageCountMock.mockResolvedValue(1);
+    renderPdfPageToBufferMock.mockResolvedValue({ pageNumber: 1, width: 1, height: 1, scale: 2, buffer: pngBuffer1 });
 
     const rendered = await renderStatementPdfPages({
       pdfBuffer: Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nendobj\n')
@@ -110,7 +100,7 @@ describe('accountingPdfRenderService', () => {
   });
 
   it('surfaces explicit render failures for retryable task handling', async () => {
-    spawnSyncMock.mockReturnValue({ status: 127, stderr: 'pdftoppm not found', stdout: '' });
+    getPdfPageCountMock.mockResolvedValue(0);
 
     await expect(
       renderStatementPdfPages({
@@ -118,7 +108,7 @@ describe('accountingPdfRenderService', () => {
       })
     ).rejects.toMatchObject({
       name: 'AccountingPdfRenderError',
-      code: 'PDF_RENDER_COMMAND_FAILED'
-    } as Partial<AccountingPdfRenderError>);
+      code: 'PDF_RENDER_NO_OUTPUT'
+    });
   });
 });

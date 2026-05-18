@@ -1,6 +1,6 @@
 # Accounting Documentation
 
-Last updated: 2026-05-14
+Last updated: 2026-05-17
 
 ## Current Product Model
 
@@ -31,6 +31,6 @@ Some related backend endpoints still exist for operational compatibility, but th
 ## Related Docs
 
 - statements and lifecycle docs in this folder
-- PDF pipeline deep dive in [docs/architecture/statement-pdf-processing-workflow.md](/Users/trupal/Projects/RetailSync/docs/architecture/statement-pdf-processing-workflow.md)
-- QuickBooks UX and routing docs under [docs/wireframes/quickbooks-module.md](/Users/trupal/Projects/RetailSync/docs/wireframes/quickbooks-module.md)
-- product status in [docs/status.md](/Users/trupal/Projects/RetailSync/docs/status.md)
+- PDF pipeline deep dive in [../architecture/statement-pdf-processing-workflow.md](../architecture/statement-pdf-processing-workflow.md)
+- QuickBooks UX and routing docs under [../wireframes/quickbooks-module.md](../wireframes/quickbooks-module.md)
+- product status in [../status.md](../status.md)

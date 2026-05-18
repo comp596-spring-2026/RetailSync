@@ -147,6 +147,7 @@ export const statementArtifactsSchema = z.object({
   suggestionsOutputPath: z.string().trim().optional(),
   processingSummaryPath: z.string().trim().optional(),
   structuredStatementPath: z.string().trim().optional(),
+  offlineExtractionPath: z.string().trim().optional(),
   evidencePath: z.string().trim().optional(),
   validationReportPath: z.string().trim().optional(),
   geminiPath: z.string().trim().optional(),

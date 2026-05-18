@@ -38,6 +38,18 @@ import {
   buildStatementRootPrefix
 } from '../services/accountingStorageService';
 import { detectStatementMonthFromPdf } from '../services/accountingPdfAnalysisService';
+import {
+  deriveSectionBoundsFromLayout,
+  extractChecksClearedFromLayout,
+  extractStatementPagesLayoutFromPdfBuffer
+} from '../services/accountingPdfLayoutExtractionService';
+import { runStatementCheckExtraction } from '../services/accountingCheckExtractionService';
+import { buildCheckRowsFromLayout } from '../statement-extraction/offline';
+import { extractChecks } from '../statement-extraction/offline/extractChecks';
+import { extractPdfTextItemsFromBuffer, groupItemsIntoLines } from '../statement-extraction/offline/extractText';
+import { parseStatementLines } from '../statement-extraction/offline/parseStatement';
+import { getPdfPageCount, scalePdfBoxToImageBox } from '../statement-extraction/offline/renderPdfPage';
+import type { Box, CheckCaption, CheckRow, DetectedCheckImage, StatementTransaction } from '../statement-extraction/offline/types';
 import { evaluateStatementRules, listStatementRules } from '../services/statementRuleService';
 import { fail, ok } from '../utils/apiResponse';
 
@@ -51,6 +63,131 @@ const parseMaskedAccountHint = (value: string): string | undefined => {
 };
 
 const sanitizeFileName = (name: string) => name.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
+
+const bufferToDataUrl = (buffer: Buffer, mimeType = 'image/png') =>
+  `data:${mimeType};base64,${buffer.toString('base64')}`;
+
+const roundMoney = (value: number) => Number(Number(value ?? 0).toFixed(2));
+
+const sumTransactionAmounts = (rows: Array<{ amount?: number }>) =>
+  roundMoney(rows.reduce((sum, row) => sum + Number(row.amount ?? 0), 0));
+
+const formatSectionLabel = (value: string) =>
+  value
+    .split('_')
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ');
+
+type PlaygroundExtractionPageBox = {
+  kind: 'image' | 'review' | 'caption';
+  label: string;
+  box: Box;
+  status?: string;
+};
+
+type PlaygroundExtractionPage = {
+  page: number;
+  width: number;
+  height: number;
+  scale: number;
+  imageDataUrl: string;
+  boxes: PlaygroundExtractionPageBox[];
+};
+
+type PlaygroundExtractionImage = DetectedCheckImage & {
+  imageDataUrl: string;
+  reviewImageDataUrl: string;
+};
+
+type PlaygroundExtractionTotalsAnalysis = {
+  checksTableCount: number;
+  detectedCheckImageCount: number;
+  matchedCheckImageCount: number;
+  unmatchedCheckRows: string[];
+  unmatchedCheckImages: string[];
+  checksTableTotal: number;
+  matchedCheckImageTotal: number;
+  countsMatch: boolean;
+  totalsMatch: boolean;
+};
+
+type PlaygroundCheckProcessResult = {
+  checkNumber?: string;
+  amount?: number;
+  page: number;
+  cropBox: Box;
+  status: 'ready' | 'needs_review';
+  ocrProvider: 'tesseract' | 'pdf_text';
+  extractionSource: 'ocr' | 'deterministic' | 'legacy' | 'pdf_text';
+  extracted: {
+    checkNumber?: string;
+    date?: string;
+    payeeName?: string;
+    amount?: number;
+    memo?: string;
+  };
+  confidence: {
+    imageQuality: number;
+    ocrConfidence: number;
+    fieldConfidence: number;
+    crossValidation: number;
+    overall: number;
+  };
+  reasons: string[];
+  implementation: {
+    cropRendered: boolean;
+    ocrProduced: boolean;
+    structuredFieldsPresent: boolean;
+    mirrorsCheckProcess: boolean;
+  };
+};
+
+type PlaygroundExtractionResponse = {
+  fileName: string;
+  pageCount: number;
+  warnings: string[];
+  summary: {
+    transactionCount: number;
+    sectionCount: number;
+    checkRowCount: number;
+    detectedCheckImageCount: number;
+    matchedCheckImageCount: number;
+    unmatchedCheckRowCount: number;
+    unmatchedCheckImageCount: number;
+    transactionTotal: number;
+    checksTableTotal: number;
+    matchedCheckImageTotal: number;
+    countsMatch: boolean;
+    totalsMatch: boolean;
+    processedCheckCount: number;
+    readyCheckCount: number;
+    needsReviewCheckCount: number;
+    averageCheckConfidence: number;
+  };
+  checkProcessSummary: {
+    processedCheckCount: number;
+    readyCheckCount: number;
+    needsReviewCheckCount: number;
+    averageConfidence: number;
+    ocrProviders: {
+      pdfText: number;
+      tesseract: number;
+    };
+    mirrorsImplementation: boolean;
+  };
+  sectionSummary: Array<{
+    section: string;
+    count: number;
+    total: number;
+  }>;
+  totalsAnalysis: PlaygroundExtractionTotalsAnalysis;
+  transactions: StatementTransaction[];
+  checks: CheckRow[];
+  captions: CheckCaption[];
+  checkImages: PlaygroundExtractionImage[];
+  checkProcessResults: PlaygroundCheckProcessResult[];
+  pages: PlaygroundExtractionPage[];
+};
 
 type UploadUrlFailure = {
   reason:
@@ -529,6 +666,7 @@ const buildStatementArtifacts = (statement: any) => {
     suggestionsOutputPath: artifacts.suggestionsOutputPath ?? undefined,
     processingSummaryPath: artifacts.processingSummaryPath ?? undefined,
     structuredStatementPath: artifacts.structuredStatementPath ?? undefined,
+    offlineExtractionPath: artifacts.offlineExtractionPath ?? undefined,
     evidencePath: artifacts.evidencePath ?? undefined,
     validationReportPath: artifacts.validationReportPath ?? undefined,
     geminiPath: artifacts.geminiPath ?? undefined,
@@ -1188,6 +1326,279 @@ export const detectStatementMonth = async (req: Request, res: Response) => {
     // eslint-disable-next-line no-console
     console.error('[accounting.detect-statement-month] failed', error);
     return fail(res, 'Failed to inspect statement PDF', 500);
+  }
+};
+
+export const playgroundOfflineExtraction = async (req: Request, res: Response) => {
+  if (!req.file) return fail(res, 'PDF file is required', 400);
+
+  const mime = req.file.mimetype?.toLowerCase() ?? '';
+  const originalName = req.file.originalname?.toLowerCase() ?? '';
+  const looksLikePdf = mime === 'application/pdf' || originalName.endsWith('.pdf');
+
+  if (!looksLikePdf) {
+    return fail(res, 'PDF file is required', 400);
+  }
+
+  const pdfBuffer = req.file.buffer;
+  const cropDataUrls = new Map<string, string>();
+  const reviewDataUrls = new Map<string, string>();
+  let cropCounter = 0;
+
+  try {
+    const [pageCount, textItems, layoutPages] = await Promise.all([
+      getPdfPageCount(pdfBuffer),
+      extractPdfTextItemsFromBuffer(pdfBuffer),
+      extractStatementPagesLayoutFromPdfBuffer(pdfBuffer).catch(() => [])
+    ]);
+    const lines = groupItemsIntoLines(textItems);
+    const layoutSectionBounds = deriveSectionBoundsFromLayout(layoutPages);
+    const layoutChecks = extractChecksClearedFromLayout(layoutPages, layoutSectionBounds);
+    const checkRows = buildCheckRowsFromLayout(layoutChecks);
+    const parsed = parseStatementLines({
+      lines,
+      checkRows
+    });
+
+    const extractedChecks = await extractChecks({
+      pdfBuffer,
+      lines,
+      checkRows,
+      persistCrop: async ({ checkNumber, imageBuffer, reviewBuffer }) => {
+        cropCounter += 1;
+        const cropKey = `memory://playground/${String(cropCounter).padStart(4, '0')}-${checkNumber}/tight.png`;
+        const reviewKey = `memory://playground/${String(cropCounter).padStart(4, '0')}-${checkNumber}/review.png`;
+        cropDataUrls.set(cropKey, bufferToDataUrl(imageBuffer));
+        reviewDataUrls.set(reviewKey, bufferToDataUrl(reviewBuffer));
+        return {
+          imageCropPath: cropKey,
+          reviewCropPath: reviewKey
+        };
+      }
+    });
+
+    const warnings = [...parsed.validation.warnings];
+    if (extractedChecks.checkImages.length !== checkRows.length) {
+      warnings.push(
+        `Detected ${extractedChecks.checkImages.length} check image crop(s) for ${checkRows.length} checks-cleared row(s).`
+      );
+    }
+
+    const captions = extractedChecks.checkImages
+      .map((image) => image.caption)
+      .filter((caption): caption is CheckCaption => Boolean(caption));
+
+    const checkImages: PlaygroundExtractionImage[] = extractedChecks.checkImages.map((image) => ({
+      ...image,
+      imageDataUrl: cropDataUrls.get(image.imageCropPath) ?? '',
+      reviewImageDataUrl: reviewDataUrls.get(image.reviewCropPath) ?? ''
+    }));
+
+    const matchedCheckNumbers = new Set(
+      checkImages
+        .map((image) => image.checkNumber)
+        .filter((value): value is string => Boolean(value))
+    );
+
+    const unmatchedCheckRows = checkRows
+      .filter((row) => !matchedCheckNumbers.has(row.checkNumber))
+      .map((row) => row.checkNumber);
+
+    const unmatchedCheckImages = checkImages
+      .filter((image) => !image.checkNumber)
+      .map((image, index) => `${image.page}-${index + 1}`);
+
+    const matchedImages = checkImages.filter((image) => image.checkNumber && typeof image.amount === 'number');
+    const matchedCheckImageTotal = sumTransactionAmounts(matchedImages);
+    const checksTableTotal = roundMoney(parsed.validation.checkTotal);
+    const totalsAnalysis: PlaygroundExtractionTotalsAnalysis = {
+      checksTableCount: checkRows.length,
+      detectedCheckImageCount: checkImages.length,
+      matchedCheckImageCount: matchedImages.length,
+      unmatchedCheckRows,
+      unmatchedCheckImages,
+      checksTableTotal,
+      matchedCheckImageTotal,
+      countsMatch: checkRows.length === checkImages.length,
+      totalsMatch: Math.abs(checksTableTotal - matchedCheckImageTotal) < 0.01
+    };
+
+    const checkRowByNumber = new Map(
+      checkRows
+        .filter((row) => row.checkNumber)
+        .map((row) => [String(row.checkNumber).trim(), row] as const)
+    );
+    const checkProcessResults: PlaygroundCheckProcessResult[] = await Promise.all(
+      checkImages.map(async (image, index) => {
+        const fallbackRow = image.checkNumber ? checkRowByNumber.get(String(image.checkNumber).trim()) : undefined;
+        const cropBox = {
+          left: image.imageBox.left,
+          top: image.imageBox.top,
+          right: image.imageBox.left + image.imageBox.width,
+          bottom: image.imageBox.top + image.imageBox.height
+        };
+        const extraction = await runStatementCheckExtraction({
+          pdfBuffer,
+          pageNumber: image.page,
+          cropBox,
+          checkKey: `playground-check-${String(index + 1).padStart(3, '0')}`,
+          pageContext: [fallbackRow?.rowText, image.caption?.text].filter(Boolean).join(' | '),
+          fallback: {
+            checkNumber: image.checkNumber ?? fallbackRow?.checkNumber ?? undefined,
+            date: fallbackRow?.date ?? undefined,
+            amount: image.amount ?? fallbackRow?.amount ?? undefined,
+            memo: fallbackRow?.rowText ?? undefined,
+            payeeName: undefined,
+            source: 'deterministic'
+          },
+          persistArtifacts: false
+        });
+
+        const structuredFieldCount = [
+          extraction.extracted.checkNumber,
+          extraction.extracted.date,
+          extraction.extracted.payeeName,
+          typeof extraction.extracted.amount === 'number' ? extraction.extracted.amount : undefined,
+          extraction.extracted.memo
+        ].filter((value) => value != null && String(value).trim() !== '').length;
+        const overallConfidence = Number(extraction.confidence.overall ?? 0);
+
+        return {
+          checkNumber: image.checkNumber ?? fallbackRow?.checkNumber ?? undefined,
+          amount: image.amount ?? fallbackRow?.amount ?? undefined,
+          page: image.page,
+          cropBox: image.imageBox,
+          status: overallConfidence >= 0.75 ? 'ready' : 'needs_review',
+          ocrProvider: extraction.ocr.provider,
+          extractionSource: extraction.extracted.source,
+          extracted: {
+            checkNumber: extraction.extracted.checkNumber ?? undefined,
+            date: extraction.extracted.date ?? undefined,
+            payeeName: extraction.extracted.payeeName ?? undefined,
+            amount: extraction.extracted.amount ?? undefined,
+            memo: extraction.extracted.memo ?? undefined
+          },
+          confidence: extraction.confidence,
+          reasons: extraction.reasons,
+          implementation: {
+            cropRendered: extraction.crop.buffer.length > 0,
+            ocrProduced: extraction.ocr.text.trim().length > 0,
+            structuredFieldsPresent: structuredFieldCount >= 3,
+            mirrorsCheckProcess: true
+          }
+        };
+      })
+    );
+    const readyCheckCount = checkProcessResults.filter((result) => result.status === 'ready').length;
+    const needsReviewCheckCount = checkProcessResults.length - readyCheckCount;
+    const averageCheckConfidence = roundMoney(
+      checkProcessResults.reduce((sum, result) => sum + Number(result.confidence.overall ?? 0), 0) /
+        Math.max(checkProcessResults.length, 1)
+    );
+    const checkProcessSummary = {
+      processedCheckCount: checkProcessResults.length,
+      readyCheckCount,
+      needsReviewCheckCount,
+      averageConfidence: averageCheckConfidence,
+      ocrProviders: {
+        pdfText: checkProcessResults.filter((result) => result.ocrProvider === 'pdf_text').length,
+        tesseract: checkProcessResults.filter((result) => result.ocrProvider === 'tesseract').length
+      },
+      mirrorsImplementation: checkProcessResults.every((result) => result.implementation.mirrorsCheckProcess)
+    };
+
+    const sectionSummary = Object.entries(parsed.validation.sectionCounts)
+      .map(([section, count]) => ({
+        section,
+        count: Number(count ?? 0),
+        total: roundMoney(parsed.validation.sectionTotals[section] ?? 0)
+      }))
+      .sort((left, right) => left.section.localeCompare(right.section));
+
+    const pages: PlaygroundExtractionPage[] = extractedChecks.renderedPages.map((page) => {
+      const pageImages = checkImages.filter((image) => image.page === page.pageNumber);
+      const boxes: PlaygroundExtractionPageBox[] = pageImages.flatMap((image) => {
+        const captionBox =
+          image.caption != null ? scalePdfBoxToImageBox(image.caption.bbox, page.scale) : undefined;
+
+        return [
+          {
+            kind: 'image' as const,
+            label: image.checkNumber ? `#${image.checkNumber}` : 'Image',
+            box: image.imageBox,
+            status: image.alignment.status
+          },
+          {
+            kind: 'review' as const,
+            label: image.checkNumber ? `Review #${image.checkNumber}` : 'Review',
+            box: image.reviewBox,
+            status: image.alignment.status
+          },
+          ...(captionBox
+            ? [
+                {
+                  kind: 'caption' as const,
+                  label: image.caption?.text ?? 'Caption',
+                  box: captionBox,
+                  status: image.alignment.status
+                }
+              ]
+            : [])
+        ];
+      });
+
+      return {
+        page: page.pageNumber,
+        width: page.width,
+        height: page.height,
+        scale: page.scale,
+        imageDataUrl: bufferToDataUrl(page.buffer),
+        boxes
+      };
+    });
+
+    const payload: PlaygroundExtractionResponse = {
+      fileName: sanitizeFileName(req.file.originalname || 'statement.pdf'),
+      pageCount,
+      warnings,
+      summary: {
+        transactionCount: parsed.transactions.length,
+        sectionCount: sectionSummary.length,
+        checkRowCount: checkRows.length,
+        detectedCheckImageCount: checkImages.length,
+        matchedCheckImageCount: totalsAnalysis.matchedCheckImageCount,
+        unmatchedCheckRowCount: totalsAnalysis.unmatchedCheckRows.length,
+        unmatchedCheckImageCount: totalsAnalysis.unmatchedCheckImages.length,
+        transactionTotal: sumTransactionAmounts(parsed.transactions),
+        checksTableTotal: totalsAnalysis.checksTableTotal,
+        matchedCheckImageTotal: totalsAnalysis.matchedCheckImageTotal,
+        countsMatch: totalsAnalysis.countsMatch,
+        totalsMatch: totalsAnalysis.totalsMatch,
+        processedCheckCount: checkProcessSummary.processedCheckCount,
+        readyCheckCount: checkProcessSummary.readyCheckCount,
+        needsReviewCheckCount: checkProcessSummary.needsReviewCheckCount,
+        averageCheckConfidence: checkProcessSummary.averageConfidence
+      },
+      checkProcessSummary,
+      sectionSummary: sectionSummary.map((row) => ({
+        section: formatSectionLabel(row.section),
+        count: row.count,
+        total: row.total
+      })),
+      totalsAnalysis,
+      transactions: parsed.transactions,
+      checks: parsed.checks,
+      captions,
+      checkImages,
+      checkProcessResults,
+      pages
+    };
+
+    return ok(res, payload);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.playground.offline-extraction] failed', error);
+    return fail(res, 'Failed to run offline extraction playground test', 500);
   }
 };
 

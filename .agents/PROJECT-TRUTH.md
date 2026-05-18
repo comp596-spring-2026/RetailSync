@@ -98,5 +98,5 @@ Do not write agent docs that invent different current slices without justificati
 
 - `README.md`
 - `docs/status.md`
-- `docs/testing/2026-04-19-full-module-audit.md`
+- `docs/testing/testing-strategy.md`
 - `docs/wireframes/**`

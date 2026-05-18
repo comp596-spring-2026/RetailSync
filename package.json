@@ -18,7 +18,11 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
-      "mongodb-memory-server"
+      "mongodb-memory-server",
+      "canvas"
     ]
+  },
+  "dependencies": {
+    "canvas": "^3.2.3"
   }
 }

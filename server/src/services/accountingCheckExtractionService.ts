@@ -4,13 +4,13 @@ import {
   buildCheckOcrPath,
   buildCheckStructuredPath
 } from './accountingStorageService';
-import type { OcrPageObservation } from '../integrations/google/visionOcr.client';
 import {
   renderAndPersistCheckCrop,
   renderCheckCropFromPdf,
   type CheckCropBox,
   type RenderedCheckCrop
 } from './accountingCheckCropService';
+import { env } from '../config/env';
 
 export type StatementCheckExtracted = {
   checkNumber?: string;
@@ -31,7 +31,7 @@ export type StatementCheckConfidence = {
 
 export type StatementCheckExtractionResult = {
   crop: RenderedCheckCrop;
-  ocr: OcrPageObservation;
+  ocr: StatementCheckOcrObservation;
   extracted: StatementCheckExtracted;
   confidence: StatementCheckConfidence;
   reasons: string[];
@@ -43,19 +43,26 @@ export type StatementCheckExtractionResult = {
   };
 };
 
+export type StatementCheckOcrObservation = {
+  provider: 'tesseract' | 'pdf_text';
+  text: string;
+  blocks: [];
+  paragraphs: [];
+  words: [];
+  raw: Record<string, unknown>;
+};
+
 export type RunStatementCheckExtractionArgs = {
   pdfBuffer: Buffer;
   pageNumber: number;
   cropBox: CheckCropBox;
   checkKey: string;
   pageContext?: string;
+  fallback?: Partial<StatementCheckExtracted>;
   /** When set, check field parsing uses this statement PDF page text instead of any cloud OCR. */
   internalPdfPageText?: string;
   bucketName?: string;
   rootPrefix?: string;
-  cropRenderCommand?: string;
-  cropRenderDpi?: number;
-  cropRenderTimeoutMs?: number;
   persistArtifacts?: boolean;
 };
 
@@ -248,50 +255,95 @@ export const runStatementCheckExtraction = async (args: RunStatementCheckExtract
         cropBox: args.cropBox,
         checkKey: args.checkKey,
         bucketName: args.bucketName as string,
-        rootPrefix: args.rootPrefix as string,
-        renderCommand: args.cropRenderCommand,
-        dpi: args.cropRenderDpi,
-        timeoutMs: args.cropRenderTimeoutMs
+        rootPrefix: args.rootPrefix as string
       })
     : {
         crop: await renderCheckCropFromPdf({
           pdfBuffer: args.pdfBuffer,
           pageNumber: args.pageNumber,
-          cropBox: args.cropBox,
-          renderCommand: args.cropRenderCommand,
-          dpi: args.cropRenderDpi,
-          timeoutMs: args.cropRenderTimeoutMs
+          cropBox: args.cropBox
         }),
         objectPath: undefined,
         cropImagePath: undefined
       };
 
-  const cropTextInput =
-    String(args.internalPdfPageText ?? '').trim().length > 0
-      ? String(args.internalPdfPageText).trim()
-      : String(args.pageContext ?? '').trim();
+  const runOfflineOcr = async (): Promise<StatementCheckOcrObservation> => {
+    const contextText =
+      String(args.pageContext ?? '').trim().length > 0
+        ? String(args.pageContext).trim()
+        : String(args.internalPdfPageText ?? '').trim();
+    const needsImageOcr = env.useTesseractFallback && (!args.fallback?.payeeName || !args.fallback?.memo);
 
-  const ocr: OcrPageObservation = {
-    provider: 'vision',
-    text: cropTextInput,
-    blocks: [],
-    paragraphs: [],
-    words: [],
-    raw: { source: 'statement_pdf_text', pageNumber: args.pageNumber }
+    if (!needsImageOcr) {
+      return {
+        provider: 'pdf_text',
+        text: contextText,
+        blocks: [],
+        paragraphs: [],
+        words: [],
+        raw: { source: 'statement_pdf_text', pageNumber: args.pageNumber }
+      };
+    }
+
+    try {
+      const tesseract = await import('tesseract.js');
+      const createWorker = (tesseract as unknown as { createWorker?: (...args: unknown[]) => Promise<any> | any }).createWorker;
+      if (typeof createWorker !== 'function') {
+        throw new Error('tesseract.js createWorker is unavailable');
+      }
+
+      const worker = await Promise.resolve(createWorker('eng'));
+      const result = await worker.recognize(renderedCrop.crop.buffer);
+      await worker.terminate?.();
+      const text = String(result?.data?.text ?? '').trim();
+
+      return {
+        provider: 'tesseract',
+        text: text || contextText,
+        blocks: [],
+        paragraphs: [],
+        words: [],
+        raw: {
+          source: 'tesseract',
+          pageNumber: args.pageNumber,
+          confidence: result?.data?.confidence ?? undefined
+        }
+      };
+    } catch (error) {
+      return {
+        provider: 'pdf_text',
+        text: contextText,
+        blocks: [],
+        paragraphs: [],
+        words: [],
+        raw: {
+          source: 'tesseract_error',
+          pageNumber: args.pageNumber,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
   };
 
-  const { extracted: rawExtracted, reasons } = extractCheckFieldsFromOcr({
-    cropText: cropTextInput,
-    pageContext: args.pageContext
-  });
+  const ocr = await runOfflineOcr();
 
-  const usedStatementPdfText = String(args.internalPdfPageText ?? '').trim().length > 0;
-  const extracted =
-    usedStatementPdfText && rawExtracted.source === 'ocr'
-      ? { ...rawExtracted, source: 'pdf_text' as const }
-      : rawExtracted.source === 'ocr' && !usedStatementPdfText
-        ? { ...rawExtracted, source: 'deterministic' as const }
-        : rawExtracted;
+  const { extracted: rawExtracted, reasons } = extractCheckFieldsFromOcr({
+    cropText: ocr.text,
+    pageContext: args.pageContext,
+    fallback: args.fallback
+  });
+  const extracted: StatementCheckExtracted = {
+    ...rawExtracted,
+    checkNumber: args.fallback?.checkNumber ?? rawExtracted.checkNumber,
+    date: args.fallback?.date ?? rawExtracted.date,
+    amount: args.fallback?.amount ?? rawExtracted.amount,
+    payeeName: rawExtracted.payeeName ?? args.fallback?.payeeName,
+    memo: rawExtracted.memo ?? args.fallback?.memo,
+    source:
+      rawExtracted.payeeName || rawExtracted.memo
+        ? (ocr.provider === 'pdf_text' ? 'pdf_text' : 'ocr')
+        : args.fallback?.source ?? rawExtracted.source
+  };
 
   const structured = {
     schemaVersion: 'v1',
@@ -305,9 +357,7 @@ export const runStatementCheckExtraction = async (args: RunStatementCheckExtract
   };
 
   const artifacts = {
-    cropImagePath:
-      renderedCrop.cropImagePath ??
-      (args.bucketName && args.rootPrefix ? buildCheckCropPath(args.rootPrefix, args.checkKey, 'front.png') : undefined),
+    cropImagePath: renderedCrop.cropImagePath,
     ocrTextPath: args.bucketName && args.rootPrefix ? buildCheckOcrPath(args.rootPrefix, args.checkKey, 'ocr.txt') : undefined,
     ocrJsonPath: args.bucketName && args.rootPrefix ? buildCheckOcrPath(args.rootPrefix, args.checkKey, 'ocr.json') : undefined,
     structuredPath: args.bucketName && args.rootPrefix ? buildCheckStructuredPath(args.rootPrefix, args.checkKey) : undefined

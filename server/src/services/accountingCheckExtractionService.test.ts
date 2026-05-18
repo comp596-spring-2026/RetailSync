@@ -3,7 +3,6 @@ import { buildCheckCropPath, buildCheckOcrPath, buildCheckStructuredPath } from 
 
 const cropRenderMock = vi.hoisted(() => vi.fn());
 const persistCropMock = vi.hoisted(() => vi.fn());
-const ocrMock = vi.hoisted(() => vi.fn());
 const storageSaves = vi.hoisted(() => ({
   saves: [] as Array<{ objectPath: string; buffer: Buffer }>
 }));
@@ -11,10 +10,6 @@ const storageSaves = vi.hoisted(() => ({
 vi.mock('./accountingCheckCropService', () => ({
   renderCheckCropFromPdf: cropRenderMock,
   renderAndPersistCheckCrop: persistCropMock
-}));
-
-vi.mock('../integrations/google/visionOcr.client', () => ({
-  ocrImageWithVision: ocrMock
 }));
 
 vi.mock('../integrations/google/storage.client', () => ({
@@ -36,7 +31,6 @@ describe('accountingCheckExtractionService', () => {
   beforeEach(() => {
     cropRenderMock.mockReset();
     persistCropMock.mockReset();
-    ocrMock.mockReset();
     storageSaves.saves = [];
   });
 
@@ -98,14 +92,12 @@ describe('accountingCheckExtractionService', () => {
       objectPath: 'companies/company-a/statements/2026/03/statement-a/derived/checks/extracted/check-001/front.png',
       cropImagePath: 'companies/company-a/statements/2026/03/statement-a/derived/checks/extracted/check-001/front.png'
     });
-
     const { runStatementCheckExtraction } = await import('./accountingCheckExtractionService');
     const pageText = [
-      'Check 1002',
-      'Pay to the Order of Acme Plumbing',
-      'Date 03/25/2026',
-      '$1,250.00',
-      'Memo: invoice 441'
+      'Check 9999',
+      'Pay to the Order of Wrong Page Vendor',
+      'Date 04/01/2026',
+      '$9,999.99'
     ].join('\n');
 
     const result = await runStatementCheckExtraction({
@@ -114,6 +106,14 @@ describe('accountingCheckExtractionService', () => {
       cropBox: { left: 20, top: 40, right: 220, bottom: 180 },
       checkKey: 'check-001',
       pageContext: 'Pay to the Order of Acme Plumbing',
+      fallback: {
+        checkNumber: '1002',
+        date: '2026-03-25',
+        amount: 1250,
+        payeeName: 'Acme Plumbing',
+        memo: 'invoice 441',
+        source: 'deterministic'
+      },
       internalPdfPageText: pageText,
       bucketName: 'accounting-bucket',
       rootPrefix: 'companies/company-a/statements/2026/03/statement-a',
@@ -121,7 +121,6 @@ describe('accountingCheckExtractionService', () => {
     });
 
     expect(persistCropMock).toHaveBeenCalledTimes(1);
-    expect(ocrMock).not.toHaveBeenCalled();
     expect(result.artifacts).toMatchObject({
       cropImagePath: buildCheckCropPath('companies/company-a/statements/2026/03/statement-a', 'check-001', 'front.png'),
       ocrTextPath: buildCheckOcrPath('companies/company-a/statements/2026/03/statement-a', 'check-001', 'ocr.txt'),
@@ -136,7 +135,7 @@ describe('accountingCheckExtractionService', () => {
       memo: 'invoice 441',
       source: 'pdf_text'
     });
-    expect(result.ocr.text).toBe(pageText);
+    expect(result.ocr.text).toContain('Acme Plumbing');
     expect(result.confidence.overall).toBeGreaterThan(0.5);
     expect(storageSaves.saves.map((save) => save.objectPath)).toEqual([
       `accounting-bucket::${buildCheckOcrPath('companies/company-a/statements/2026/03/statement-a', 'check-001', 'ocr.txt')}`,

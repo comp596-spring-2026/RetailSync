@@ -1,5 +1,7 @@
 # Testing Strategy
 
+Last updated: 2026-05-17
+
 ## Coverage Model
 
 - Unit tests for reducers, hooks, utils, and API wrappers
@@ -21,9 +23,9 @@
 
 Detailed matrix:
 
-- [Module Test Matrix](/Users/trupal/Projects/RetailSync/docs/testing/module-test-matrix.md)
-- [Module E2E Cases](/Users/trupal/Projects/RetailSync/docs/testing/module-e2e-cases.md)
-- [Accounting Test Plan](/Users/trupal/Projects/RetailSync/docs/accounting/test-plan.md)
+- [Module Test Matrix](module-test-matrix.md)
+- [Module E2E Cases](module-e2e-cases.md)
+- [Accounting Test Plan](../accounting/test-plan.md)
 
 ## Server Coverage
 
