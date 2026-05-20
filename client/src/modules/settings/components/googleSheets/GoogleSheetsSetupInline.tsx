@@ -43,6 +43,7 @@ import {
   toMappingByTarget,
 } from './matchingWizard/mappingLogic';
 import type { GoogleSheetsSettings } from './GoogleSheetsIntegrationCard';
+import { computeMappingHash } from '../../state/selectors/googleSheetsSelectors';
 import { SourceSwitch, type SourceType } from './SourceSwitch';
 import {
   getActiveSource,
@@ -716,6 +717,7 @@ export const GoogleSheetsSetupInline = ({
       });
       setSelectedSheet({ id: spreadsheetId, name: resolvedSheetName });
       setActiveStep(1);
+      await onSaved();
     } catch (err: unknown) {
       setSharedVerified(false);
       track('sheets_shared_verify_failed', { ...eventContext, spreadsheetId });
@@ -1085,6 +1087,13 @@ export const GoogleSheetsSetupInline = ({
         track('sheets_stage_change_succeeded', eventContext);
 
         track('sheets_commit_change_sent', eventContext);
+        const mappingHash = computeMappingHash(
+          normalizedMapping,
+          selectedSheetId,
+          selectedTab,
+          headerRow,
+        );
+        const mappingConfirmedAt = new Date().toISOString();
         const commitResponse = await settingsApi.commitGoogleSheetsChange({
           connectorKey: 'pos_daily',
           sourceType: stagedSource,
@@ -1098,6 +1107,8 @@ export const GoogleSheetsSetupInline = ({
           headerRow,
           mapping: normalizedMapping,
           transformations: transformsPayload,
+          mappingHash,
+          mappingConfirmedAt,
           activate: true,
         });
         track('sheets_commit_change_succeeded', eventContext);

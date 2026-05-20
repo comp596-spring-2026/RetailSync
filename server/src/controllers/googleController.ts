@@ -145,7 +145,6 @@ const extractOauthCallbackReason = (error: unknown): string => {
 export const googleSheetsCallback = async (req: Request, res: Response) => {
   const code = typeof req.query.code === "string" ? req.query.code : "";
   const state = typeof req.query.state === "string" ? req.query.state : "";
-  console.log(state);
   if (!code || !state) {
     return redirectWithStatus(res, "error", "missing_oauth_callback_params");
   }
@@ -229,9 +228,14 @@ export const googleSheetsCallback = async (req: Request, res: Response) => {
     );
     ensureGoogleSheetsShape(settings);
     settings.ownerUserId = parsedState.userId as any;
-    (settings.googleSheets as any).oauth.enabled = true;
-    (settings.googleSheets as any).oauth.connectionStatus = "connected";
-    (settings.googleSheets as any).updatedAt = new Date();
+    const googleSheets = settings.googleSheets as Record<string, unknown>;
+    const oauth = (googleSheets.oauth ?? {}) as Record<string, unknown>;
+    oauth.enabled = true;
+    oauth.connectionStatus = "connected";
+    googleSheets.oauth = oauth;
+    googleSheets.connected = true;
+    googleSheets.connectedEmail = connectedEmail;
+    googleSheets.updatedAt = new Date();
     await settings.save();
 
     return redirectWithStatus(res, "connected");
