@@ -1,9 +1,9 @@
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import GoogleIcon from '@mui/icons-material/Google';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import InsightsIcon from '@mui/icons-material/Insights';
 import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import SettingsIcon from '@mui/icons-material/Settings';
 import TableRowsIcon from '@mui/icons-material/TableRows';
 import {
@@ -32,8 +32,8 @@ import { fetchSettings, selectGoogleSheetsSettings, selectSettings } from '../..
 import { hasPermission } from '../../../utils/permissions';
 import type { PosView } from '../state';
 import { POSAnalyticsPage } from './POSAnalyticsPage';
-import { POSAssistantPage } from './POSAssistantPage';
 import { POSDailySummaryPage } from './POSDailySummaryPage';
+import { POSSaleTaxPage } from './POSSaleTaxPage';
 import type { PosPrimaryAction } from './types';
 
 type LastImportSource = 'file' | 'google_sheets' | null;
@@ -244,18 +244,18 @@ export const POSWorkspacePage = () => {
             ? 'POS Table View'
             : state.view === 'analytics'
               ? 'POS Analytics View'
-              : 'POS AI View'
+              : 'POS Sale Tax View'
         }
         subtitle={
           state.view === 'table'
-            ? 'Review daily POS records, totals, and mapped source data.'
+            ? 'Review daily POS records, sales tax, and net totals.'
             : state.view === 'analytics'
               ? 'Analyze sales trends, distribution, and performance insights.'
-              : 'Ask questions, compare patterns, and explore backend POS signals with guided insight cards.'
+              : 'Review Georgia and Troup County monthly sales tax using the imported POS records.'
         }
         icon={
-          state.view === 'ai' ? (
-            <AutoAwesomeIcon />
+          state.view === 'saleTax' ? (
+            <ReceiptLongIcon />
           ) : state.view === 'analytics' ? (
             <InsightsIcon />
           ) : (
@@ -275,55 +275,55 @@ export const POSWorkspacePage = () => {
           void actions.fetchOverview();
         }}
         refreshPlacement="inline"
+        hideDateControls={state.view === 'saleTax'}
+        leadingActions={
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={state.view}
+            onChange={(_event, next: PosView | null) => {
+              if (!next) return;
+              actions.setView(next);
+            }}
+            aria-label="POS view switch"
+          >
+            <ToggleButton value="table" aria-label="Table view">
+              <TableRowsIcon fontSize="small" sx={{ mr: 0.75 }} />
+              Table
+            </ToggleButton>
+            <ToggleButton value="analytics" aria-label="Analytics view">
+              <InsightsIcon fontSize="small" sx={{ mr: 0.75 }} />
+              Analytics
+            </ToggleButton>
+            <ToggleButton value="saleTax" aria-label="Sale tax view">
+              <ReceiptLongIcon fontSize="small" sx={{ mr: 0.75 }} />
+              Sale Tax
+            </ToggleButton>
+          </ToggleButtonGroup>
+        }
         actions={
-          <Stack direction="row" spacing={1} alignItems="center">
-            <ToggleButtonGroup
-              size="small"
-              exclusive
-              value={state.view}
-              onChange={(_event, next: PosView | null) => {
-                if (!next) return;
-                actions.setView(next);
-              }}
-              aria-label="POS view switch"
-            >
-              <ToggleButton value="table" aria-label="Table view">
-                <TableRowsIcon fontSize="small" sx={{ mr: 0.75 }} />
-                Table
-              </ToggleButton>
-              <ToggleButton value="analytics" aria-label="Analytics view">
-                <InsightsIcon fontSize="small" sx={{ mr: 0.75 }} />
-                Analytics
-              </ToggleButton>
-              <ToggleButton value="ai" aria-label="AI view">
-                <AutoAwesomeIcon fontSize="small" sx={{ mr: 0.75 }} />
-                AI
-              </ToggleButton>
-            </ToggleButtonGroup>
-
-            <PermissionGate module="pos" action="actions:import" mode="disable">
-              <Tooltip title={primaryAction.tooltip}>
-                <span>
-                  <Button
-                    variant="contained"
-                    size="small"
-                    color={syncConfigured ? 'success' : 'primary'}
-                    startIcon={primaryAction.loading ? <CircularProgress size={14} /> : primaryAction.icon}
-                    onClick={primaryAction.onClick}
-                    aria-label={primaryAction.label}
-                    disabled={
-                      !canImport ||
-                      state.loading.daily ||
-                      state.loading.overview ||
-                      primaryAction.loading
-                    }
-                  >
-                    {primaryAction.label}
-                  </Button>
-                </span>
-              </Tooltip>
-            </PermissionGate>
-          </Stack>
+          <PermissionGate module="pos" action="actions:import" mode="disable">
+            <Tooltip title={primaryAction.tooltip}>
+              <span>
+                <Button
+                  variant="contained"
+                  size="small"
+                  color={syncConfigured ? 'success' : 'primary'}
+                  startIcon={primaryAction.loading ? <CircularProgress size={14} /> : primaryAction.icon}
+                  onClick={primaryAction.onClick}
+                  aria-label={primaryAction.label}
+                  disabled={
+                    !canImport ||
+                    state.loading.daily ||
+                    state.loading.overview ||
+                    primaryAction.loading
+                  }
+                >
+                  {primaryAction.label}
+                </Button>
+              </span>
+            </Tooltip>
+          </PermissionGate>
         }
       />
 
@@ -344,16 +344,11 @@ export const POSWorkspacePage = () => {
           netIncome={netIncome}
           cashDiff={cashDiff}
         />
-      ) : state.view === 'ai' ? (
-        <POSAssistantPage
+      ) : state.view === 'saleTax' ? (
+        <POSSaleTaxPage
           loading={state.loading.overview || state.loading.daily}
-          records={state.records}
-          totals={state.totals}
-          kpis={state.kpis}
-          chartsData={state.chartsData}
-          alerts={state.alerts}
-          dateRange={state.dateRange}
           primaryAction={primaryAction}
+          dataVersion={`${state.lastSyncAt ?? ''}:${settings?.lastImportAt ?? ''}`}
         />
       ) : (
         <POSDailySummaryPage

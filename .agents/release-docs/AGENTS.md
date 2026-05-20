@@ -47,6 +47,7 @@ This specialist makes sure the repository says what the product actually is.
 - active routes in `client/src/app/App.tsx`
 - visible nav in `client/src/app/layout/DashboardLayout.tsx`
 - current docs under `docs/wireframes`
+- POS sales tax spec under `docs/pos/sales-tax-review-workflow.md`
 - current testing summary under `docs/testing/testing-strategy.md`
 
 ## Anti-Patterns

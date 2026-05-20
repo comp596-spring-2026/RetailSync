@@ -21,7 +21,7 @@ export const modulePresentation: Record<
   },
   pos: {
     label: 'POS',
-    surfaces: ['POS analytics', 'POS table', 'POS AI']
+    surfaces: ['POS analytics', 'POS table', 'POS sale tax']
   },
   invoices: {
     label: 'Procurement / Invoices (Hidden)',

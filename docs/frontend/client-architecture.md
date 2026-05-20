@@ -44,6 +44,7 @@ Public:
 Protected:
 - dashboard shell
 - POS
+  - Table, Analytics, Sale Tax views (`POSSaleTaxPage` for Georgia monthly review)
 - statements
 - QuickBooks workspace
 - settings

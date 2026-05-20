@@ -1,6 +1,6 @@
 # RetailSync Execution Status
 
-Last updated: 2026-05-17
+Last updated: 2026-05-20
 
 This file tracks the current implementation state of the live product surfaces, backend workflows, and validation posture.
 
@@ -11,6 +11,7 @@ Quick read:
 
 Primary companion docs:
 - [architecture/workflows-and-usage.md](architecture/workflows-and-usage.md)
+- [pos/sales-tax-review-workflow.md](pos/sales-tax-review-workflow.md)
 - [architecture/statement-pdf-processing-workflow.md](architecture/statement-pdf-processing-workflow.md)
 - [frontend/routing-and-permission-gates.md](frontend/routing-and-permission-gates.md)
 - [backend/api-reference.md](backend/api-reference.md)
@@ -65,7 +66,7 @@ Operational nuance worth calling out:
 | Phase | Scope | Status | Notes |
 |---|---|---|---|
 | Phase 0 | Foundation, auth, onboarding, shell, RBAC | `DONE` | Current auth/onboarding model is live |
-| Phase 1 | POS imports and reporting | `DONE` | Daily and monthly POS flows are active |
+| Phase 1 | POS imports, reporting, Georgia sales tax review | `DONE` | Daily/monthly POS flows and Sale Tax view are active |
 | Phase 2 | Email auth hardening, reset, verify, invites, SMTP | `DONE` | Password flows and invite-based access are active |
 | Phase 3 | Statements workflow and QuickBooks operational workspace | `DONE` | Statements are the visible accounting surface; QuickBooks is a separate workspace |
 | Phase 4 | Procurement, invoice OCR, reconciliation expansion | `PLANNED` | Not active as a production-ready module yet |
@@ -117,13 +118,22 @@ Hidden or redirected legacy entry points:
 | onboarding/company | Create company, join company, onboarding status, QuickBooks onboarding | Active onboarding pages | `DONE` | `PARTIAL` | `DONE` |
 | access/users | User listing, role assignment, invite lifecycle | Access hub + users | `DONE` | `PARTIAL` | `DONE` |
 | rolesSettings | Role CRUD + permission matrix | Access hub + roles | `DONE` | `PARTIAL` | `DONE` |
-| pos | Import, daily tables, analytics, AI view | Active POS workspace | `DONE` | `PARTIAL` | `DONE` |
+| pos | Import, daily tables, analytics, Sale Tax review | Active POS workspace (Table / Analytics / Sale Tax) | `DONE` | `PARTIAL` | `DONE` |
 | reports | Summary/report endpoints | Reports surface still reachable through product flows and exports | `DONE` | `PARTIAL` | `DONE` |
 | accounting/statements | Statement upload, status, detail, retries, processing | Active accounting workspace | `DONE` | `PARTIAL` | `DONE` |
 | quickbooks | Hub, accounts, contacts, sales, money, operations, reports, tax | Active standalone workspace | `DONE` | `PARTIAL` | `DONE` |
 | settings | Google Sheets + QuickBooks integration management | Active settings workspace | `DONE` | `PARTIAL` | `DONE` |
 | procurement | Placeholder/partial routing only | Hidden from active nav | `PARTIAL` | `TODO` | `HIDDEN` |
 | inventory | Removed from active application | Removed from active application | n/a | legacy tests removed | `HIDDEN` |
+
+### POS Georgia sales tax review
+
+- **View:** POS toolbar → **Sale Tax** (`POSSaleTaxPage`)
+- **Data:** client-side aggregation over existing `GET /api/pos/daily` rows; no sales-tax-specific API
+- **Scope:** Troup County, GA — state 4%, county 3%, Georgia vendor compensation brackets
+- **UI:** year grid + five-section breakdown modal (Monthly POS Data, Tax Calculation, Vendor Compensation, Payable Sales Tax, Daily POS Records)
+- **Docs:** [pos/sales-tax-review-workflow.md](pos/sales-tax-review-workflow.md)
+- **Tests:** `client/src/modules/pos/utils/saleTaxReview.test.ts`, `client/src/modules/pos/tests/POSSaleTaxPage.test.tsx`
 
 ---
 
@@ -190,7 +200,7 @@ Environment/config readiness required for production:
 ### Current automated coverage areas
 - client auth page tests
 - client QuickBooks page tests
-- client POS/procurement/access/settings slice and page tests
+- client POS/procurement/access/settings slice and page tests, including Georgia sales tax review (`saleTaxReview.test.ts`, `POSSaleTaxPage.test.tsx`)
 - server auth controller and Google auth tests
 - server email/invite flow tests
 - server QuickBooks CRUD service tests

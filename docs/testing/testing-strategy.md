@@ -12,7 +12,7 @@ Last updated: 2026-05-17
 ## Module Coverage (Client)
 
 - Auth: login/onboarding pages + auth API + auth sync flow tests
-- POS: slice thunks, mapping wizard, chart rendering tests
+- POS: slice thunks, mapping wizard, chart rendering tests, Georgia sales tax review (`saleTaxReview.test.ts`, `POSSaleTaxPage.test.tsx`)
 - Users: company slice tests
 - RBAC: role state tests
 - Settings: settings slice + debug helper tests

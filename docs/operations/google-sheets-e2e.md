@@ -140,7 +140,9 @@ Required targets:
 Optional:
 
 - `cashExpenses`
-- `notes`
+- `notes` (optional manual tax adjustments may be parsed from notes for **Total Tax Collected**)
+
+Downstream **Sale Tax** view aggregates these fields client-side. See [pos/sales-tax-review-workflow.md](../pos/sales-tax-review-workflow.md).
 
 ## 8) Reset behavior
 

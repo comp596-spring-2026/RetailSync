@@ -56,9 +56,10 @@ Use this file when an agent needs the current product reality quickly.
 
 - current visible product shape:
   - workspace
-  - daily summary
+  - daily summary (table view)
   - analytics
-  - assistant
+  - sale tax (Georgia / Troup County monthly review)
+- sales tax review is client-computed from daily POS rows; see `docs/pos/sales-tax-review-workflow.md`
 
 ### Settings
 
@@ -98,5 +99,6 @@ Do not write agent docs that invent different current slices without justificati
 
 - `README.md`
 - `docs/status.md`
+- `docs/pos/sales-tax-review-workflow.md` when POS tax UI or formulas change
 - `docs/testing/testing-strategy.md`
 - `docs/wireframes/**`

@@ -34,7 +34,11 @@ The POS import expects these **target fields**. Your sheet can use the headers b
 | `creditCard`  | `Credit Card`           | number          |
 | `lotteryPayout` | `Lottery Payout Cash`  | number          |
 | `cashExpenses`| `Cash Expenses`         | number          |
-| `notes`       | `Description` or `Notes`| text (optional) |
+| `notes`       | `Description` or `Notes`| text (optional); may include `manual adjustment $X` for sales tax notes parsing |
+
+## Sales tax review
+
+After import, open **POS → Sale Tax** to review monthly Georgia / Troup County totals. The review uses `highTax`, `lowTax`, `saleTax`, `gas`, and `lottery` from these rows. Full workflow: [pos/sales-tax-review-workflow.md](pos/sales-tax-review-workflow.md).
 
 ## 3. Sample header row (copy into row 1)
 

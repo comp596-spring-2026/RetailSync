@@ -14,7 +14,8 @@ Own the operational flow from POS data ingestion to mapped import:
 
 This specialist covers:
 
-- POS workspace
+- POS workspace (Table, Analytics, Sale Tax)
+- Georgia / Troup County monthly sales tax review (`POSSaleTaxPage`, `saleTaxReview.ts`)
 - Google Sheets setup in Settings
 - shared vs OAuth source switching
 - mapping wizard quality
@@ -50,6 +51,16 @@ This specialist covers:
 - mapping validation shows useful diagnostics
 - import commit is idempotent or clearly protected against duplicate execution
 - Google connection state is visible in Settings
+- sales tax review aggregates daily rows correctly: state 4%, county 3%, vendor compensation brackets, payable tax
+- sales tax modal shows Monthly POS Data, combined Tax Calculation, Vendor Compensation, Payable Sales Tax, and Daily POS Records — no separate collected-vs-calculated comparison section
+
+## Sales tax documentation
+
+When changing POS daily fields, tax formulas, or the Sale Tax UI, update:
+
+- `docs/pos/sales-tax-review-workflow.md`
+- `docs/wireframes/pos-module.md`
+- `docs/status.md` if product surface changes
 
 ## Must-Test Cases
 
@@ -59,6 +70,7 @@ This specialist covers:
 - mapping save and commit flow
 - POS CSV import validation
 - duplicate import protection
+- monthly sales tax grouping, vendor compensation brackets, and modal section layout (`saleTaxReview.test.ts`, `POSSaleTaxPage.test.tsx`)
 
 ## Anti-Patterns
 

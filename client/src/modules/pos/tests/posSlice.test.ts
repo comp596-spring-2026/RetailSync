@@ -32,19 +32,21 @@ describe('posSlice', () => {
   it('updates view and iconOnly reducers', () => {
     const initial = posReducer(undefined, { type: '@@INIT' }) as PosState;
     const afterView = posReducer(initial, setView('analytics')) as PosState;
-    const afterAiView = posReducer(afterView, setView('ai')) as PosState;
+    const afterSaleTaxView = posReducer(afterView, setView('saleTax')) as PosState;
     const afterIconOnly = posReducer(afterView, setIconOnly(true)) as PosState;
 
     expect(afterView.view).toBe('analytics');
-    expect(afterAiView.view).toBe('ai');
+    expect(afterSaleTaxView.view).toBe('saleTax');
     expect(afterIconOnly.iconOnly).toBe(true);
   });
 
-  it('normalizes the legacy dashboard view alias to analytics', () => {
+  it('normalizes legacy dashboard and ai view aliases', () => {
     const initial = posReducer(undefined, { type: '@@INIT' }) as PosState;
-    const restored = posReducer(initial, restoreState({ view: 'dashboard' as never })) as PosState;
+    const dashboardRestored = posReducer(initial, restoreState({ view: 'dashboard' as never })) as PosState;
+    const aiRestored = posReducer(initial, restoreState({ view: 'ai' as never })) as PosState;
 
-    expect(restored.view).toBe('analytics');
+    expect(dashboardRestored.view).toBe('analytics');
+    expect(aiRestored.view).toBe('saleTax');
   });
 
   it('defaults date range to a 30-day window', () => {
@@ -225,6 +227,7 @@ describe('posSlice', () => {
 
     expect(state.kpis.totalSales).toBe(100);
     expect(state.alerts).toHaveLength(1);
+    expect(state.rangeRows).toHaveLength(1);
     expect(state.chartsData.totalSales).toHaveLength(1);
     expect(state.chartsData.streams[0]?.cash).toBe(20);
     expect(state.chartsData.streams[0]?.x).toBe('2026-02-27T00:00:00.000Z');

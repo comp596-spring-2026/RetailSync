@@ -47,7 +47,7 @@ The current active product surface is intentionally focused on `Dashboard`, `POS
 
 ### Dashboard Workspaces
 - `Dashboard`: company and account context
-- `POS`: import, table, analytics, AI view
+- `POS`: import, table, analytics, Georgia sales tax review (Troup County)
 - `Accounting`: statements list and statement detail
 - `QuickBooks`: hub, accounts, contacts, sales, money, operations, reports, tax
 - `Settings`: Google Sheets and QuickBooks integration management
@@ -103,6 +103,8 @@ flowchart TD
 - System overview and runtime model: [docs/architecture/system-overview.md](docs/architecture/system-overview.md)
 - Statement pipeline deep dive: [docs/architecture/statement-pdf-processing-workflow.md](docs/architecture/statement-pdf-processing-workflow.md)
 - App shell wireframe: [docs/wireframes/app-shell.md](docs/wireframes/app-shell.md)
+- POS workspace wireframe: [docs/wireframes/pos-module.md](docs/wireframes/pos-module.md)
+- POS sales tax workflow: [docs/pos/sales-tax-review-workflow.md](docs/pos/sales-tax-review-workflow.md)
 - Accounting workspace wireframe: [docs/wireframes/accounting-module.md](docs/wireframes/accounting-module.md)
 - QuickBooks workspace wireframe: [docs/wireframes/quickbooks-module.md](docs/wireframes/quickbooks-module.md)
 
@@ -127,6 +129,7 @@ flowchart TD
 
 - System overview: [docs/architecture/system-overview.md](docs/architecture/system-overview.md)
 - Workflow reference: [docs/architecture/workflows-and-usage.md](docs/architecture/workflows-and-usage.md)
+- POS sales tax review: [docs/pos/sales-tax-review-workflow.md](docs/pos/sales-tax-review-workflow.md)
 - Statement pipeline: [docs/architecture/statement-pdf-processing-workflow.md](docs/architecture/statement-pdf-processing-workflow.md)
 - Testing strategy: [docs/testing/testing-strategy.md](docs/testing/testing-strategy.md)
 - Execution status: [docs/status.md](docs/status.md)

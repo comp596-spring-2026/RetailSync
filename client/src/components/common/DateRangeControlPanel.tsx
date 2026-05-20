@@ -112,8 +112,10 @@ type DateRangeControlPanelProps = {
   loading?: boolean;
   onRefresh: () => void;
   refreshPlacement?: 'inline' | 'right';
+  leadingActions?: React.ReactNode;
   actions?: React.ReactNode;
   stats?: React.ReactNode;
+  hideDateControls?: boolean;
 };
 
 export const DateRangeControlPanel = ({
@@ -125,8 +127,10 @@ export const DateRangeControlPanel = ({
   loading = false,
   onRefresh,
   refreshPlacement = 'right',
+  leadingActions,
   actions,
-  stats
+  stats,
+  hideDateControls = false
 }: DateRangeControlPanelProps) => {
   const anchorRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -170,24 +174,28 @@ export const DateRangeControlPanel = ({
     <Paper sx={{ p: 2 }}>
       <Stack spacing={1.5}>
         <Stack direction="row" alignItems="center" flexWrap="wrap" sx={{ gap: 1.5 }}>
-          <Box ref={anchorRef}>
-            <Chip
-              icon={<DateRangeIcon />}
-              label={`${displayFrom}  →  ${displayTo}`}
-              onClick={() => setOpen((o) => !o)}
-              variant={open ? 'filled' : 'outlined'}
-              color={dateError ? 'error' : open ? 'primary' : 'default'}
-              sx={{
-                fontSize: 14,
-                height: 36,
-                cursor: 'pointer',
-                '& .MuiChip-label': { px: 1.5 }
-              }}
-            />
-          </Box>
+          {leadingActions}
+
+          {!hideDateControls && (
+            <Box ref={anchorRef}>
+              <Chip
+                icon={<DateRangeIcon />}
+                label={`${displayFrom}  →  ${displayTo}`}
+                onClick={() => setOpen((o) => !o)}
+                variant={open ? 'filled' : 'outlined'}
+                color={dateError ? 'error' : open ? 'primary' : 'default'}
+                sx={{
+                  fontSize: 14,
+                  height: 36,
+                  cursor: 'pointer',
+                  '& .MuiChip-label': { px: 1.5 }
+                }}
+              />
+            </Box>
+          )}
 
           <Popper
-            open={open}
+            open={!hideDateControls && open}
             anchorEl={anchorRef.current}
             placement="bottom-start"
             sx={{ zIndex: 1300 }}
@@ -208,7 +216,7 @@ export const DateRangeControlPanel = ({
             </ClickAwayListener>
           </Popper>
 
-          {refreshPlacement === 'inline' && (
+          {refreshPlacement === 'inline' && !hideDateControls && (
             <Button
               variant="outlined"
               size="small"
@@ -222,8 +230,8 @@ export const DateRangeControlPanel = ({
 
           <Box sx={{ flex: 1 }} />
 
-          <Stack direction="row" spacing={1} alignItems="center">
-            {refreshPlacement === 'right' && (
+            <Stack direction="row" spacing={1} alignItems="center">
+            {refreshPlacement === 'right' && !hideDateControls && (
               <Button
                 variant="outlined"
                 size="small"
