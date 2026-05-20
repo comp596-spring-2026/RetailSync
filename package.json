@@ -13,7 +13,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "ci": "pnpm install --frozen-lockfile && pnpm -r build && pnpm -r test && pnpm lint && pnpm typecheck",
-    "diagram:architecture": "bash scripts/generate-retailsync-architecture.sh"
+    "diagram:architecture": "bash scripts/generate-retailsync-architecture.sh",
+    "db:reset": "pnpm --filter @retailsync/server db:reset"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

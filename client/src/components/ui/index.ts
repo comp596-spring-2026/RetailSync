@@ -6,3 +6,5 @@ export type { LoadingEmptyStateWrapperProps } from './LoadingEmptyStateWrapper';
 export { NoAccess } from './NoAccess';
 export { PageHeader } from './PageHeader';
 export { WonderLoader } from './WonderLoader';
+export { RetailSurfaceCard, RetailSurfaceCardBody, retailSurfaceSx } from './RetailSurfaceCard';
+export { WorkspaceShortcutCard } from './WorkspaceShortcutCard';

@@ -329,6 +329,14 @@ export class AccountingApi {
     }>('/accounting/playground/offline-extraction', formData);
   }
 
+  assignStatementBankAccount(statementId: string, payload: { bankAccountId: string }) {
+    return api.patch<{
+      data: {
+        statement: BankStatementListItem;
+      };
+    }>(`/accounting/statements/${statementId}/bank-account`, payload);
+  }
+
   createStatement(payload: CreateBankStatementInput) {
     return api.post<{
       data: {

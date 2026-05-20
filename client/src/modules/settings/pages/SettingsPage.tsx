@@ -26,8 +26,13 @@ import AutorenewIcon from "@mui/icons-material/Autorenew";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AxiosError } from "axios";
-import { NoAccess, PageHeader } from "../../../components";
-import { GoogleSheetsIntegrationCard, QuickBooksIntegrationCard } from "../components";
+import { PageHeader } from "../../../components";
+import {
+  GoogleSheetsIntegrationCard,
+  QuickBooksIntegrationCard,
+  SettingsRestrictedNotice,
+} from "../components";
+import { NoAccess } from "../../../components";
 import {
   getDebugOutcome,
 } from "../components/googleSheets/debugOutcomeGuide";
@@ -35,6 +40,8 @@ import { settingsApi } from '../api';
 import { useAppDispatch, useAppSelector } from "../../../app/store/hooks";
 import { showSnackbar } from "../../../app/store/uiSlice";
 import { hasPermission } from "../../../utils/permissions";
+import { canManageSettings, canShowSettings } from "../../../utils/productPermissions";
+import { canManageQuickBooksConnection } from "../../../utils/quickbooksPermissions";
 import { getAppErrorMessage } from "../../../constants/errorCodes";
 import { useSettingsPageViewModel } from "../hooks";
 import {
@@ -77,9 +84,10 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
   const location = useLocation();
   const navigate = useNavigate();
   const permissions = useAppSelector((state) => state.auth.permissions);
-  const canView = hasPermission(permissions, "rolesSettings", "view");
-  const canEdit = hasPermission(permissions, "rolesSettings", "edit");
+  const canViewSettings = canShowSettings(permissions);
+  const canEditIntegrations = canManageSettings(permissions);
   const canViewQuickbooks = hasPermission(permissions, "quickbooks", "view");
+  const canConnectQuickbooks = canManageQuickBooksConnection(permissions);
   const canSyncQuickbooks = hasPermission(permissions, "quickbooks", "actions:sync");
 
   const [integrationsExpanded, setIntegrationsExpanded] = useState(true);
@@ -112,7 +120,8 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
     onRefreshQuickbooksStatus,
     refreshSettings,
   } = useSettingsPageViewModel({
-    canEdit,
+    canEdit: canEditIntegrations,
+    canConnectQuickbooks,
     canViewQuickbooks,
     canSyncQuickbooks,
   });
@@ -239,9 +248,6 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
     }
   }, [location.search, dispatch, navigate]);
 
-  if (!canView) {
-    return <NoAccess />;
-  }
   const quickbooks = settings?.quickbooks ?? null;
 
   const appendStepLog = (index: number, message: string, status?: DebugStep["status"]) => {
@@ -389,20 +395,26 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
     }
   };
 
+  if (!canViewSettings) {
+    return <NoAccess />;
+  }
+
   return (
     <Stack spacing={2.5}>
       {showHeader ? (
         <PageHeader
           title="Settings"
-          subtitle="Manage Google Sheets and QuickBooks integration configuration"
+          subtitle="Integration configuration and workspace connections"
           icon={<SettingsSuggestIcon />}
         />
       ) : null}
 
+      {!canEditIntegrations ? <SettingsRestrictedNotice /> : null}
+
       {error && <Alert severity="error">{error}</Alert>}
       {loading && <Alert severity="info">Loading settings...</Alert>}
 
-      {settings && (
+      {settings ? (
         <Accordion
           expanded={integrationsExpanded}
           onChange={(_e, expanded) => setIntegrationsExpanded(expanded)}
@@ -426,7 +438,7 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
                 settings={settings.googleSheets}
                 syncOverview={googleSheetsSyncOverview}
                 syncProgress={googleSheetsSyncProgress}
-                canEdit={canEdit}
+                canEdit={canEditIntegrations}
                 isBusy={isBusy}
                 oauthStatus={oauthStatus}
                 onCheckOAuthStatus={onCheckOAuthStatus}
@@ -450,14 +462,14 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
                 onSyncNow={onSyncNow}
                 onSaveSyncSchedule={onSaveSyncSchedule}
                 onDeleteSource={onDeleteSheetSource}
-                onDebug={(mode) => { void runDebug(mode); }}
+                onDebug={canEditIntegrations ? (mode) => { void runDebug(mode); } : undefined}
                 initialExpandConfigureSection={expandGoogleConfigureSection}
                 onConsumedExpandConfigure={() => setExpandGoogleConfigureSection(false)}
               />
               <QuickBooksIntegrationCard
                 settings={quickbooks}
                 oauthStatus={quickbooksOauthStatus}
-                canManageConnection={canEdit}
+                canManageConnection={canConnectQuickbooks}
                 canSync={canSyncQuickbooks}
                 canRefreshStatus={canViewQuickbooks}
                 canViewHealth={canViewQuickbooks}
@@ -480,6 +492,8 @@ export const SettingsPage = ({ showHeader = true }: SettingsPageProps) => {
             </Stack>
           </AccordionDetails>
         </Accordion>
+      ) : (
+        <Alert severity="info">Integration settings will appear here once your workspace finishes loading.</Alert>
       )}
 
       <Dialog

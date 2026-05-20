@@ -1,4 +1,10 @@
-import { ModuleKey, PermissionSet, PermissionsMap, moduleKeys } from '@retailsync/shared';
+import {
+  ModuleKey,
+  PermissionSet,
+  PermissionsMap,
+  moduleKeys,
+  sanitizeModulePermissionSet
+} from '@retailsync/shared';
 import { adminPermissions, memberPermissions, viewerPermissions } from '../utils/defaultPermissions';
 
 type PartialPermissionSet = Partial<PermissionSet> | null | undefined;
@@ -84,6 +90,18 @@ export const normalizeRolePermissions = (
   permissions: unknown,
   options: NormalizeRolePermissionsOptions = {}
 ): PermissionsMap => {
+  const template = getSystemRoleTemplate(options.roleName, options.isSystem);
+  if (template) {
+    const normalized = {} as PermissionsMap;
+    for (const moduleKey of moduleKeys) {
+      normalized[moduleKey] = sanitizeModulePermissionSet(
+        moduleKey,
+        clonePermissionSet(template[moduleKey])
+      );
+    }
+    return normalized;
+  }
+
   const source =
     permissions && typeof permissions === 'object'
       ? (permissions as Record<string, PartialPermissionSet>)
@@ -92,18 +110,12 @@ export const normalizeRolePermissions = (
     options.basePermissions && typeof options.basePermissions === 'object'
       ? (options.basePermissions as Record<string, PartialPermissionSet>)
       : {};
-  const template = getSystemRoleTemplate(options.roleName, options.isSystem);
   const normalized = {} as PermissionsMap;
 
   for (const moduleKey of moduleKeys) {
-    const fallback = template?.[moduleKey]
-      ? clonePermissionSet(template[moduleKey])
-      : emptyPermissionSet();
-    normalized[moduleKey] = normalizePermissionSet(
-      source[moduleKey],
-      fallback,
-      base[moduleKey]
-    );
+    const fallback = emptyPermissionSet();
+    const merged = normalizePermissionSet(source[moduleKey], fallback, base[moduleKey]);
+    normalized[moduleKey] = sanitizeModulePermissionSet(moduleKey, merged);
   }
 
   return normalized;
@@ -125,9 +137,7 @@ export const getRolePermissionsNormalizationResult = (
   };
 };
 
-export const findMissingPermissionModules = (
-  permissions: unknown
-): ModuleKey[] => {
+export const findMissingPermissionModules = (permissions: unknown): ModuleKey[] => {
   const source =
     permissions && typeof permissions === 'object'
       ? (permissions as Record<string, unknown>)

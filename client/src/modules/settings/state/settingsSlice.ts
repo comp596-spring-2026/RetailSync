@@ -1,4 +1,4 @@
-import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createAsyncThunk, createSelector, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { settingsApi } from '../api';
 import type { AppDispatch, RootState } from '../../../app/store';
 import { showSnackbar } from '../../../app/store/uiSlice';
@@ -767,16 +767,18 @@ export const { setOAuthStatus, setSettingsError, setGoogleSheetsSyncProgress, cl
 
 const settingsState = (state: RootState) => (state as unknown as { settings?: SettingsState }).settings;
 
-export const selectSettings = (state: RootState): IntegrationSettings | null => {
-  const canonical = settingsState(state)?.settings;
-  if (!canonical) return null;
-  return {
-    googleSheets: normalizeGoogleSheetsSettings(canonical.googleSheets),
-    quickbooks: canonical.quickbooks,
-    lastImportSource: canonical.lastImportSource ?? null,
-    lastImportAt: canonical.lastImportAt ?? null,
-  };
-};
+export const selectSettings = createSelector(
+  [(state: RootState) => settingsState(state)?.settings ?? null],
+  (canonical): IntegrationSettings | null => {
+    if (!canonical) return null;
+    return {
+      googleSheets: normalizeGoogleSheetsSettings(canonical.googleSheets),
+      quickbooks: canonical.quickbooks,
+      lastImportSource: canonical.lastImportSource ?? null,
+      lastImportAt: canonical.lastImportAt ?? null,
+    };
+  }
+);
 export const selectSettingsLoading = (state: RootState) => settingsState(state)?.loading ?? false;
 export const selectSettingsError = (state: RootState) => settingsState(state)?.error ?? null;
 export const selectOAuthStatus = (state: RootState) => settingsState(state)?.oauthStatus ?? null;

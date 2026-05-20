@@ -33,6 +33,9 @@ export {
   LoadingEmptyStateWrapper,
   NoAccess,
   PageHeader,
-  WonderLoader
+  WonderLoader,
+  RetailSurfaceCard,
+  RetailSurfaceCardBody,
+  WorkspaceShortcutCard
 } from './ui';
 export type { LoadingEmptyStateWrapperProps } from './ui';

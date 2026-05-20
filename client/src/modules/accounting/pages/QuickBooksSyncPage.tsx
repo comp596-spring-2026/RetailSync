@@ -17,6 +17,7 @@ import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import { getAppErrorMessage } from '../../../constants/errorCodes';
 import { hasPermission } from '../../../utils/permissions';
+import { canQuickBooksConnect } from '../../../utils/quickbooksPermissions';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { QuickBooksIntegrationCard } from '../../settings/components';
 import { accountingApi } from '../api';
@@ -29,7 +30,7 @@ export const QuickBooksHomePage = () => {
   const navigate = useNavigate();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const canConnect = hasPermission(permissions, 'quickbooks', 'actions:connect');
+  const canConnect = canQuickBooksConnect(permissions);
   const canSync = hasPermission(permissions, 'quickbooks', 'actions:sync');
 
   const {

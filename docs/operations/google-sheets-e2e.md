@@ -17,6 +17,32 @@ Google Sheets settings are canonical under `GET /api/settings`:
 
 For POS import/sync, active connector key is `pos_daily` unless explicitly overridden.
 
+### Settings payload (`GET /api/settings`)
+
+`getSettingsPayload` serializes the **canonical** connector model (same shape as `GET /api/settings/google-sheets` management view) and adds legacy compatibility fields for older client paths:
+
+| Field | Source |
+|---|---|
+| `oauth`, `shared`, `activeIntegration` | Mongo canonical config via `getGoogleSheetsSettingsView` |
+| `connected` | `oauth.connectionStatus === "connected"` (or legacy `googleSheets.connected`) |
+| `connectedEmail` | Google OAuth secret (`IntegrationSecret`), not only legacy doc field |
+| `syncSchedule`, `sharedSheets`, `sources`, `sharedConfig` | Legacy doc fields when still present |
+
+**Do not** return legacy-only settings (sources/sharedSheets without `oauth`/`shared`) from `GET /api/settings` — the client treats missing `oauth` as disconnected and drops saved connector mapping after refresh.
+
+### Shared verify → canonical mirror
+
+`POST /api/settings/google-sheets/shared/verify` (and shared configure) still update legacy `sharedSheets` for compatibility, and also call `applySharedSheetAccessToCanonical` so `shared.profiles[].connectors[]` receives `spreadsheetId`, `sheetName`, and `headerRow`. Without this mirror, the integration card and POS sync see empty canonical connectors after a successful verify.
+
+### Mapping confirmation hash
+
+Wizard commit (`POST /api/settings/google-sheets/commit-change`) must send:
+
+- `mappingHash` — client `computeMappingHash(mapping, spreadsheetId, sheetName, headerRow)` in `googleSheetsSelectors.ts`
+- `mappingConfirmedAt` — ISO timestamp at save time
+
+Readiness `ready` vs `needs_review` compares stored hash to a recomputed hash from the active connector.
+
 ## 2) UI ownership rules
 
 - Google Sheets setup is owned by **Settings -> Google Sheets**.
@@ -65,7 +91,7 @@ Shared:
 Preview/match:
 
 - `POST /api/pos/import/sheets/preview`
-- `POST /api/pos/import/sheets/match`
+- `POST /api/pos/import/sheets/match` — body accepts `transformations` or alias `transforms`; pass `columns` from preview headers when validating derived fields
 
 ### Step 3: Persist connector config
 
@@ -172,10 +198,14 @@ Modes:
 
 1. Configure Shared connector and save mapping.
 2. Confirm `GET /api/settings` shows:
+   - `oauth` and `shared` objects (canonical shape)
    - `activeIntegration = "shared"`
    - `shared.activeProfileId`
    - `shared.activeConnectorKey = "pos_daily"`
    - matching connector with `spreadsheetId/sheetName/mapping`.
-3. Run POS `Sync Now` and verify import succeeds.
-4. Open POS Import modal -> choose Google Sheets -> confirm it routes to Settings (no duplicate mapping flow).
-5. Re-run `Sync Now` and verify upsert continuity (same dates update, no duplicates).
+3. **OAuth:** connect via Settings, return from callback, refresh page — `oauth.connectionStatus` stays `connected` and wizard can resume.
+4. **Shared verify:** verify spreadsheet access, refresh — integration card shows configured sheet (canonical profile connector populated).
+5. **Mapping:** save mapping in wizard — connector has `mappingHash` + `mappingConfirmedAt`; card readiness is `ready` (not stuck on `invalid` / “No saved mapping”).
+6. Run POS `Sync Now` and verify import succeeds.
+7. Open POS Import modal -> choose Google Sheets -> confirm it routes to Settings (no duplicate mapping flow).
+8. Re-run `Sync Now` and verify upsert continuity (same dates update, no duplicates).

@@ -214,7 +214,10 @@ describe('UploadStatementDialog', () => {
       }),
     );
     expect(axiosPutMock).toHaveBeenCalledTimes(1);
-    expect(onUploaded).toHaveBeenCalledTimes(1);
+    expect(onUploaded).toHaveBeenCalledWith({
+      statementId: 'statement-a',
+      statementMonth: '2025-12'
+    });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

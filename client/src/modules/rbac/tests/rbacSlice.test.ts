@@ -23,8 +23,6 @@ describe('rbacSlice', () => {
           ...basePermissions,
           dashboard: { view: true, create: false, edit: false, delete: false, actions: [] },
           pos: { view: true, create: true, edit: true, delete: false, actions: ['import'] },
-          invoices: { view: true, create: true, edit: false, delete: false, actions: [] },
-          suppliers: { view: true, create: false, edit: false, delete: false, actions: [] },
           users: { view: true, create: false, edit: false, delete: false, actions: ['invite'] },
           rolesSettings: { view: true, create: false, edit: false, delete: false, actions: [] }
         }

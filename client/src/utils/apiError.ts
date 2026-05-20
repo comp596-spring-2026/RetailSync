@@ -39,5 +39,16 @@ export const extractApiErrorMessage = (error: unknown, fallback = 'Something wen
 
   const code = extractApiErrorCode(error);
   if (!code) return fallback;
-  return APP_ERROR_MESSAGES[code] ?? code;
+  const mappedFromCode = APP_ERROR_MESSAGES[code];
+  if (mappedFromCode) return mappedFromCode;
+
+  if (error instanceof AxiosError) {
+    const payload = error.response?.data as ErrorPayload | undefined;
+    const reason = payload?.details?.reason ?? payload?.message ?? payload?.data?.message;
+    if (typeof reason === 'string' && reason.trim().toLowerCase() === code) {
+      return reason.trim();
+    }
+  }
+
+  return code;
 };

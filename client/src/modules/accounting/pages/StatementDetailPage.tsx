@@ -53,14 +53,12 @@ import type {
   QuickBooksHubChartAccount,
   QuickBooksHubItem,
   StatementCheck,
-  StatementRule,
   StatementTransaction,
   StatementReviewStatus,
   StatementSuggestionItem,
   StatementSuggestionsResponse,
   StatementProposalPatch
 } from '@retailsync/shared';
-import { buildStatementPostingPreviewLines } from '@retailsync/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
@@ -70,6 +68,10 @@ import { formatDate } from '../../../utils/date';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { hasPermission } from '../../../utils/permissions';
 import { accountingApi } from '../api';
+import {
+  readDefaultStatementBankAccountId,
+  writeDefaultStatementBankAccountId
+} from '../constants/statementBankAccount';
 import { useMonthCloseWorkspaceState } from '../hooks/useMonthCloseWorkspaceState';
 import { useStatementLiveStream } from '../hooks/useStatementLiveStream';
 import { useStatementProcessingStatus } from '../hooks/useStatementProcessingStatus';
@@ -92,26 +94,12 @@ import {
   mapWorkflowToProposedType,
   suggestCategoryPreset,
   suggestWorkflowType,
-  workflowTypeDescription,
   type WorkflowTxnType
 } from '../utils/statementCategoryPresets';
 
 const shouldLogStatementProgress = import.meta.env.DEV;
 
 const chartAccountRefValue = (account: QuickBooksHubChartAccount) => account.qbId?.trim() || account.id;
-
-const accountLabelForRef = (
-  ref: string,
-  bankAccounts: QuickBooksHubChartAccount[],
-  lineAccounts: QuickBooksHubChartAccount[]
-) => {
-  const trimmed = ref.trim();
-  if (!trimmed) return '';
-  const match =
-    bankAccounts.find((a) => chartAccountRefValue(a) === trimmed || a.id === trimmed) ??
-    lineAccounts.find((a) => chartAccountRefValue(a) === trimmed || a.id === trimmed);
-  return match?.name ?? trimmed;
-};
 
 const REVIEW_SECTION_PAGE_SIZE = 20;
 
@@ -162,6 +150,10 @@ export const StatementDetailPage = () => {
   const canDelete = hasPermission(permissions, 'bankStatements', 'delete');
 
   const [statement, setStatement] = useState<BankStatementDetail | null>(null);
+  const effectiveBankAccountId = useMemo(
+    () => (statement?.bankAccountId?.trim() || readDefaultStatementBankAccountId()).trim(),
+    [statement?.bankAccountId]
+  );
   const [checks, setChecks] = useState<StatementCheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -170,7 +162,6 @@ export const StatementDetailPage = () => {
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<StatementSuggestionsResponse | null>(null);
   const [entries, setEntries] = useState<StatementTransaction[]>([]);
-  const [rules, setRules] = useState<StatementRule[]>([]);
   const [liveMetrics, setLiveMetrics] = useState<{
     entryCount: number;
     debitCount: number;
@@ -384,20 +375,19 @@ export const StatementDetailPage = () => {
     setLoading(true);
     setError(null);
     try {
-      const [statementResponse, checksResponse, suggestionsResponse, entriesResponse, statusResponse, rulesResponse] = await Promise.all([
+      const [statementResponse, checksResponse, suggestionsResponse, entriesResponse, statusResponse] =
+        await Promise.all([
         accountingApi.getStatement(statementId),
         accountingApi.listStatementChecks(statementId),
         accountingApi.getStatementSuggestions(statementId),
         accountingApi.listStatementEntries(statementId),
-        accountingApi.getStatementStatus(statementId),
-        accountingApi.listStatementRules(statementId)
+        accountingApi.getStatementStatus(statementId)
       ]);
       setStatement(statementResponse.data.data);
       setChecks(checksResponse.data.data.checks);
       setSuggestions(suggestionsResponse.data.data);
       setEntries(entriesResponse.data.data.entries);
       setLiveMetrics(statusResponse.data.data.liveMetrics);
-      setRules(rulesResponse.data.data.rules);
     } catch (apiError) {
       setError(extractApiErrorMessage(apiError, 'Failed to load statement'));
     } finally {
@@ -409,12 +399,11 @@ export const StatementDetailPage = () => {
     if (!statementId) return;
 
     try {
-      const [statusResponse, checksResponse, suggestionsResponse, entriesResponse, rulesResponse] = await Promise.all([
+      const [statusResponse, checksResponse, suggestionsResponse, entriesResponse] = await Promise.all([
         accountingApi.getStatementStatus(statementId),
         accountingApi.listStatementChecks(statementId),
         accountingApi.getStatementSuggestions(statementId),
-        accountingApi.listStatementEntries(statementId),
-        accountingApi.listStatementRules(statementId)
+        accountingApi.listStatementEntries(statementId)
       ]);
 
       setStatement((current) =>
@@ -433,7 +422,6 @@ export const StatementDetailPage = () => {
       setSuggestions(suggestionsResponse.data.data);
       setEntries(entriesResponse.data.data.entries);
       setLiveMetrics(statusResponse.data.data.liveMetrics);
-      setRules(rulesResponse.data.data.rules);
       logProgressSnapshot('refresh', {
         status: statusResponse.data.data.status,
         progress: statusResponse.data.data.progress,
@@ -451,6 +439,34 @@ export const StatementDetailPage = () => {
     if (!canView) return;
     void load();
   }, [canView, statementId]);
+
+  useEffect(() => {
+    if (!statementId || !canEdit) return;
+    const stored = statement?.bankAccountId?.trim();
+    const preferred = readDefaultStatementBankAccountId().trim();
+    if (stored) {
+      writeDefaultStatementBankAccountId(stored);
+      return;
+    }
+    if (!preferred) return;
+
+    let cancelled = false;
+    void accountingApi
+      .assignStatementBankAccount(statementId, { bankAccountId: preferred })
+      .then((response) => {
+        if (cancelled) return;
+        const assigned = response.data.data.statement.bankAccountId?.trim() ?? preferred;
+        setStatement((current) => (current ? { ...current, bankAccountId: assigned } : current));
+        writeDefaultStatementBankAccountId(assigned);
+      })
+      .catch(() => {
+        // UI still falls back to preferred via effectiveBankAccountId.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canEdit, statement?.bankAccountId, statementId]);
 
   useStatementProcessingStatus({
     status: statement?.status,
@@ -564,7 +580,9 @@ export const StatementDetailPage = () => {
       await accountingApi.deleteStatement(statementId);
       dispatch(showSnackbar({ message: 'Statement deleted', severity: 'success' }));
       setDeleteDialogOpen(false);
-      navigate('/dashboard/accounting/statements');
+      navigate('/dashboard/accounting/statements', {
+        state: { refreshStatementsAt: Date.now() }
+      });
     } catch (apiError) {
       dispatch(
         showSnackbar({
@@ -601,8 +619,8 @@ export const StatementDetailPage = () => {
     const errors: string[] = [];
     const qb = mapWorkflowToProposedType(workflowType);
     const lineRef = workflowForm.lineAccountRef.trim();
-    const bankPaidFrom = (workflowForm.transferFromAccount || statement.bankAccountId || '').trim();
-    const depositTo = (workflowForm.depositToAccount || statement.bankAccountId || '').trim();
+    const bankPaidFrom = (workflowForm.transferFromAccount || effectiveBankAccountId || '').trim();
+    const depositTo = (workflowForm.depositToAccount || effectiveBankAccountId || '').trim();
 
     if (['JournalEntry', 'Bill', 'BillPayment'].includes(workflowType)) {
       errors.push(
@@ -648,40 +666,7 @@ export const StatementDetailPage = () => {
     }
 
     return errors;
-  }, [editModalOpen, editItem, statement, workflowType, workflowForm]);
-
-  const postingPreviewLines = useMemo(() => {
-    if (!editItem || !statement) return [];
-    const qb = mapWorkflowToProposedType(workflowType);
-    if (!qb) return [];
-    const bankRef =
-      workflowType === 'Deposit' || workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment'
-        ? workflowForm.depositToAccount || statement.bankAccountId || ''
-        : workflowForm.transferFromAccount || statement.bankAccountId || '';
-    const lineRef = workflowForm.lineAccountRef.trim();
-    const transferTo = workflowForm.transferToAccount.trim();
-    return buildStatementPostingPreviewLines({
-      qbTxnType: qb,
-      amount: Number(editItem.amount ?? 0),
-      direction: editItem.direction,
-      bankAccountLabel: accountLabelForRef(bankRef, bankAccounts, lineAccounts),
-      lineAccountLabel: accountLabelForRef(lineRef, bankAccounts, lineAccounts),
-      transferToAccountLabel: accountLabelForRef(transferTo, bankAccounts, lineAccounts),
-      payeeName:
-        workflowType === 'SalesReceipt' || workflowType === 'Deposit' || workflowType === 'CustomerPayment'
-          ? workflowForm.customer
-          : workflowForm.vendor,
-      checkNumber: workflowForm.checkNumber,
-      matchedExisting: workflowType === 'Check' && workflowForm.matchExistingCheck
-    });
-  }, [
-    editItem,
-    statement,
-    workflowType,
-    workflowForm,
-    bankAccounts,
-    lineAccounts
-  ]);
+  }, [editModalOpen, editItem, effectiveBankAccountId, statement, workflowType, workflowForm]);
 
   const primaryApproveLabel = useMemo(() => {
     switch (workflowType) {
@@ -729,8 +714,8 @@ export const StatementDetailPage = () => {
       };
     }
 
-    const bankForDeposit = (workflowForm.depositToAccount || statement.bankAccountId || '').trim() || undefined;
-    const bankForOutflow = (workflowForm.transferFromAccount || statement.bankAccountId || '').trim() || undefined;
+    const bankForDeposit = (workflowForm.depositToAccount || effectiveBankAccountId || '').trim() || undefined;
+    const bankForOutflow = (workflowForm.transferFromAccount || effectiveBankAccountId || '').trim() || undefined;
     const bankAccountId =
       qbTxnType === 'Deposit' || qbTxnType === 'SalesReceipt' || qbTxnType === 'Payment'
         ? bankForDeposit
@@ -909,7 +894,7 @@ export const StatementDetailPage = () => {
   const loadBankAccounts = useCallback(async () => {
     try {
       const response = await accountingApi.getQuickbooksHubChartOfAccounts({
-        type: 'Bank',
+        type: 'asset',
         status: 'active',
         page: 1,
         pageSize: 100,
@@ -1001,6 +986,18 @@ export const StatementDetailPage = () => {
       await loadBankAccounts();
       const newAccountId = chartAccountRefValue(created);
       if (newAccountId) {
+        writeDefaultStatementBankAccountId(newAccountId);
+        if (statementId) {
+          try {
+            const assignResponse = await accountingApi.assignStatementBankAccount(statementId, {
+              bankAccountId: newAccountId
+            });
+            const assigned = assignResponse.data.data.statement.bankAccountId?.trim() ?? newAccountId;
+            setStatement((current) => (current ? { ...current, bankAccountId: assigned } : current));
+          } catch {
+            // Form still uses the new QuickBooks account id.
+          }
+        }
         setWorkflowForm((form) => {
           if (createBankAccountTarget === 'transferFrom' || createBankAccountTarget === 'check') {
             return { ...form, transferFromAccount: newAccountId };
@@ -1031,7 +1028,8 @@ export const StatementDetailPage = () => {
     createBankAccountForm,
     createBankAccountTarget,
     dispatch,
-    loadBankAccounts
+    loadBankAccounts,
+    statementId
   ]);
 
   const openCreateLineAccountDialog = useCallback((kind: 'expense' | 'income') => {
@@ -1176,7 +1174,7 @@ export const StatementDetailPage = () => {
       direction: item.direction,
       description: item.description ?? ''
     });
-    const defaultBankAccountId = statement?.bankAccountId ?? '';
+    const defaultBankAccountId = effectiveBankAccountId;
     // For Transfer rows, the upload account is one side of the move and the
     // counterparty (e.g. xxx3588 hint) is the other side. Direction tells us
     // which side the upload account is on:
@@ -1221,7 +1219,7 @@ export const StatementDetailPage = () => {
 
   useEffect(() => {
     if (!editModalOpen) return;
-    const defaultBankAccountId = statement?.bankAccountId ?? '';
+    const defaultBankAccountId = effectiveBankAccountId;
     if (!defaultBankAccountId) return;
     if (workflowType === 'Check' || workflowType === 'Expense' || workflowType === 'Bill' || workflowType === 'BillPayment') {
       setWorkflowForm((form) => (form.transferFromAccount ? form : { ...form, transferFromAccount: defaultBankAccountId }));
@@ -1240,7 +1238,7 @@ export const StatementDetailPage = () => {
     if (workflowType === 'Deposit' || workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment') {
       setWorkflowForm((form) => (form.depositToAccount ? form : { ...form, depositToAccount: defaultBankAccountId }));
     }
-  }, [editModalOpen, workflowType, statement?.bankAccountId, editItem]);
+  }, [editModalOpen, editItem, effectiveBankAccountId, workflowType]);
 
   useEffect(() => {
     if (!editModalOpen || !editItem || lineAccountsLoading || lineAccounts.length === 0 || lineAccountPrefilledRef.current) return;
@@ -1263,10 +1261,23 @@ export const StatementDetailPage = () => {
           categoryLabel: preset.label,
           lineAccountRef: chartAccountRefValue(fuzzy)
         }));
+        lineAccountPrefilledRef.current = true;
+        return;
+      }
+    }
+    if (workflowType === 'Deposit' || workflowType === 'SalesReceipt') {
+      const revenueAccount =
+        lineAccounts.find((account) => account.type === 'revenue') ??
+        lineAccounts.find((account) => String(account.type ?? '').toLowerCase().includes('income'));
+      if (revenueAccount) {
+        setWorkflowForm((form) => ({
+          ...form,
+          lineAccountRef: chartAccountRefValue(revenueAccount)
+        }));
       }
     }
     lineAccountPrefilledRef.current = true;
-  }, [editModalOpen, editItem, lineAccounts, lineAccountsLoading]);
+  }, [editModalOpen, editItem, lineAccounts, lineAccountsLoading, workflowType]);
 
   const closeEditModal = () => {
     setEditModalOpen(false);
@@ -1275,7 +1286,7 @@ export const StatementDetailPage = () => {
     setApproveMenuOpen(false);
   };
 
-  const saveEditModal = async (action: 'save' | 'save_next' | 'save_rule' | 'mark_non_posting') => {
+  const saveEditModal = async (action: 'save' | 'save_next' | 'mark_non_posting') => {
     if (!editItem || !statement) return;
     if (action !== 'mark_non_posting' && postingBlockingErrors.length > 0) {
       dispatch(
@@ -1303,17 +1314,14 @@ export const StatementDetailPage = () => {
       checkNumber: workflowType === 'Check' ? workflowForm.checkNumber || editItem.checkNumber : editItem.checkNumber,
       bankAccountId:
         workflowType === 'Deposit' || workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment'
-          ? workflowForm.depositToAccount || statement.bankAccountId || editItem.bankAccountId
-          : workflowForm.transferFromAccount || statement.bankAccountId || editItem.bankAccountId
+          ? workflowForm.depositToAccount || effectiveBankAccountId || editItem.bankAccountId
+          : workflowForm.transferFromAccount || effectiveBankAccountId || editItem.bankAccountId
     };
 
     if (action === 'mark_non_posting') {
       await updateSuggestionReviewStatus(mergedSuggestion, 'excluded', undefined, false);
     } else {
       await updateSuggestionReviewStatus(mergedSuggestion, 'approved', proposalPatch, true);
-    }
-    if (action === 'save_rule' && editItem.source === 'transaction') {
-      await createRuleFromEntry(editItem.id, 'soft');
     }
     if (action === 'save_next' || saveAndNext) {
       const currentId = editItem.id;
@@ -1339,27 +1347,6 @@ export const StatementDetailPage = () => {
       dispatch(
         showSnackbar({
           message: extractApiErrorMessage(apiError, 'Month cannot be completed yet'),
-          severity: 'error'
-        })
-      );
-    } finally {
-      setMutating(false);
-    }
-  };
-
-  const createRuleFromEntry = async (entryId: string, hardness: 'soft' | 'hard') => {
-    if (!statementId || mutating) return;
-    setMutating(true);
-    try {
-      await accountingApi.createStatementRuleFromTransaction(statementId, entryId, hardness);
-      dispatch(showSnackbar({ message: `${hardness === 'hard' ? 'Hard' : 'Soft'} rule created`, severity: 'success' }));
-      const rulesResponse = await accountingApi.listStatementRules(statementId);
-      setRules(rulesResponse.data.data.rules);
-      await refreshProcessingPanel();
-    } catch (apiError) {
-      dispatch(
-        showSnackbar({
-          message: extractApiErrorMessage(apiError, 'Failed to create rule'),
           severity: 'error'
         })
       );
@@ -2352,9 +2339,6 @@ export const StatementDetailPage = () => {
               <Stack spacing={2}>
                 {postingBlockingErrors.length > 0 ? (
                   <Alert severity="warning">
-                    <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-                      Fix these before approving (QuickBooks posting)
-                    </Typography>
                     <Stack component="ul" sx={{ m: 0, pl: 2 }}>
                       {postingBlockingErrors.map((msg) => (
                         <Typography key={msg} component="li" variant="body2">
@@ -2450,7 +2434,7 @@ export const StatementDetailPage = () => {
                   <Grid size={{ xs: 12 }}>
                     <Paper variant="outlined" sx={{ p: 1.5 }}>
                       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-                        <Typography variant="overline" color="text.secondary">QuickBooks workflow type</Typography>
+                        <Typography variant="subtitle2">Type</Typography>
                         {(() => {
                           const suggestedType = suggestWorkflowType({
                             direction: editItem.direction,
@@ -2467,7 +2451,7 @@ export const StatementDetailPage = () => {
                               size="small"
                               color="primary"
                               variant="outlined"
-                              label={`Suggested: ${suggestedType}`}
+                              label={`Use ${suggestedType}`}
                               onClick={() => setWorkflowType(suggestedType)}
                             />
                           );
@@ -2498,49 +2482,11 @@ export const StatementDetailPage = () => {
                           />
                         ))}
                       </Stack>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                        {workflowTypeDescription(workflowType)}
-                      </Typography>
                     </Paper>
                   </Grid>
 
-                  {postingPreviewLines.length > 0 ? (
-                    <Grid size={{ xs: 12 }}>
-                      <Paper variant="outlined" sx={{ p: 1.5, bgcolor: 'action.hover' }}>
-                        <Typography variant="overline" color="text.secondary">
-                          Where this posts in QuickBooks
-                        </Typography>
-                        <Stack spacing={0.35} sx={{ mt: 0.75 }}>
-                          {postingPreviewLines.map((line) => (
-                            <Typography key={line} variant="body2">
-                              {line}
-                            </Typography>
-                          ))}
-                        </Stack>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                          Approving creates exactly one QuickBooks transaction and updates the bank register.
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  ) : null}
-
                   <Grid size={{ xs: 12 }}>
                     <Paper variant="outlined" sx={{ p: 1.5 }}>
-                      <Typography variant="overline" color="text.secondary">
-                        {workflowType === 'SalesReceipt'
-                          ? 'Sales receipt fields'
-                          : workflowType === 'CustomerPayment'
-                            ? 'Customer payment fields'
-                            : workflowType === 'Deposit'
-                              ? 'Deposit fields'
-                              : workflowType === 'Transfer'
-                              ? 'Transfer fields'
-                              : workflowType === 'JournalEntry'
-                                ? 'Journal entry fields'
-                                : workflowType === 'Bill' || workflowType === 'BillPayment'
-                                  ? 'Bill fields'
-                                  : 'Expense / Check fields'}
-                      </Typography>
 
                       {(workflowType === 'Expense' || workflowType === 'Check' || workflowType === 'Bill' || workflowType === 'BillPayment') ? (
                         <Grid container spacing={1.25} sx={{ mt: 0.25 }}>
@@ -2705,8 +2651,8 @@ export const StatementDetailPage = () => {
                               fullWidth
                               InputLabelProps={{ shrink: true }}
                               helperText={
-                                statement?.bankAccountId &&
-                                workflowForm.transferFromAccount === statement.bankAccountId
+                                effectiveBankAccountId &&
+                                workflowForm.transferFromAccount === effectiveBankAccountId
                                   ? 'Defaulted to the bank chart account selected at upload.'
                                   : undefined
                               }
@@ -3217,8 +3163,8 @@ export const StatementDetailPage = () => {
                               fullWidth
                               InputLabelProps={{ shrink: true }}
                               helperText={
-                                statement?.bankAccountId &&
-                                workflowForm.transferFromAccount === statement.bankAccountId
+                                effectiveBankAccountId &&
+                                workflowForm.transferFromAccount === effectiveBankAccountId
                                   ? 'Defaulted to the bank chart account selected at upload.'
                                   : 'Choose the bank account that money is leaving.'
                               }
@@ -3375,49 +3321,6 @@ export const StatementDetailPage = () => {
                     </Paper>
                   </Grid>
 
-                  <Grid size={{ xs: 12 }}>
-                    <Paper variant="outlined" sx={{ p: 1.5 }}>
-                      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
-                        <Typography variant="overline" color="text.secondary">Rules &amp; reasons</Typography>
-                        {editItem.source === 'transaction' ? (
-                          <Button
-                            size="small"
-                            variant="text"
-                            onClick={() => void createRuleFromEntry(editItem.id, 'soft')}
-                            disabled={mutating}
-                          >
-                            Create rule from this
-                          </Button>
-                        ) : null}
-                      </Stack>
-                      {editItem.matchedRuleNames && editItem.matchedRuleNames.length > 0 ? (
-                        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-                          {editItem.matchedRuleNames.map((name) => (
-                            <Chip
-                              key={name}
-                              size="small"
-                              label={name}
-                              color={editItem.ruleHardness === 'hard' ? 'primary' : 'default'}
-                              variant="outlined"
-                            />
-                          ))}
-                        </Stack>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-                          No rules matched this row.
-                        </Typography>
-                      )}
-                      {editItem.reasons && editItem.reasons.length > 0 ? (
-                        <Stack spacing={0.25}>
-                          {editItem.reasons.map((reason, idx) => (
-                            <Typography key={`${reason}-${idx}`} variant="caption" color="text.secondary">
-                              · {reason}
-                            </Typography>
-                          ))}
-                        </Stack>
-                      ) : null}
-                    </Paper>
-                  </Grid>
                 </Grid>
               </Stack>
             ) : null}

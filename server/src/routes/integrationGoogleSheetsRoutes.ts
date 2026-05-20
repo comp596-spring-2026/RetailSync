@@ -14,25 +14,25 @@ const router = Router();
 router.get(
   '/oauth-status',
   requireAuth,
-  requirePermission('rolesSettings', 'view'),
+  requirePermission('settings', 'view'),
   getGoogleSheetsOAuthStatus
 );
 router.get(
   '/start-url',
   requireAuth,
-  requirePermission('rolesSettings', 'view'),
+  requirePermission('settings', 'view'),
   getGoogleSheetsConnectUrl
 );
 router.get(
   '/files',
   requireAuth,
-  requirePermission('rolesSettings', 'view'),
+  requirePermission('settings', 'view'),
   listOAuthSpreadsheets
 );
 router.get(
   '/start',
   requireAuth,
-  requirePermission('rolesSettings', 'view'),
+  requirePermission('settings', 'view'),
   startGoogleSheetsConnect
 );
 router.get('/callback', googleSheetsCallback);

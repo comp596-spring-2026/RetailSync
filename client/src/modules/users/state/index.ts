@@ -9,15 +9,16 @@ export {
 export {
   default as usersReducer,
   assignRoleThunk,
-  clearInviteCode,
   createInviteThunk,
+  deleteInviteThunk,
+  deleteUserThunk,
   fetchUsersPageData,
-  selectInviteCode,
   selectInvites,
   selectUsers,
   selectUsersError,
   selectUsersLoading,
-  selectUsersMutating
+  selectUsersMutating,
+  updateUserThunk
 } from './usersSlice';
 export type { InviteItem, UserItem } from './usersSlice';
 export { default } from './companySlice';

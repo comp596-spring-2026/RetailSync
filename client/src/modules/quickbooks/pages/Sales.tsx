@@ -1,10 +1,11 @@
 import PaidOutlinedIcon from '@mui/icons-material/PaidOutlined';
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
-import { Paper, Stack, Typography } from '@mui/material';
+import { Alert, Stack } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { NoAccess, PageHeader } from '../../../components';
 import { useAppSelector } from '../../../app/store/hooks';
 import { hasPermission } from '../../../utils/permissions';
+import { canQuickBooksWrite } from '../../../utils/quickbooksPermissions';
 import { QuickBooksCard } from '../components/QuickBooksCard';
 import { QuickBooksTabs, RequireQuickBooksConnection } from '../components';
 import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
@@ -13,7 +14,7 @@ export const SalesPage = () => {
   const navigate = useNavigate();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
+  const canWrite = canQuickBooksWrite(permissions);
   const { loading, isConnected, error, warning } = useQuickBooksWorkspace(canView);
 
   if (!canView) {
@@ -34,13 +35,12 @@ export const SalesPage = () => {
         error={error}
         warning={warning}
       >
-        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2.5 }}>
-          <Typography variant="body2" color="text.secondary">
-            {canPost
-              ? 'Open invoices or payments to browse records, create new ones, edit live QuickBooks data, and review posting details.'
-              : 'Open invoices or payments to browse records and review QuickBooks detail. Create and edit actions require QuickBooks post access.'}
-          </Typography>
-        </Paper>
+        {!canWrite ? (
+          <Alert severity="info">
+            You can browse invoices and payments. To create or edit them, enable QuickBooks Create/Edit/Delete or Full
+            write access (Post) under Access → Roles.
+          </Alert>
+        ) : null}
         <Stack
           sx={{
             display: 'grid',

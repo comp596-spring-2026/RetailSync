@@ -122,3 +122,14 @@ Legacy endpoints/fields still exist for compatibility in parts of the codebase:
 - `POST /api/integrations/sheets/save-mapping`
 
 New work should target connector-first endpoints and canonical settings.
+
+### Settings read path (important)
+
+| Endpoint | Serializer | Use |
+|---|---|---|
+| `GET /api/settings` | `getSettingsPayload` → `getGoogleSheetsSettingsView` + legacy fields | Primary client bootstrap (Settings, POS sync) |
+| Dedicated management routes | `getGoogleSheetsSettingsView` | Stage/commit/activate responses |
+
+Both must expose `googleSheets.oauth` / `googleSheets.shared` with connector `mapping`, `mappingHash`, and `mappingConfirmedAt`. Legacy-only `toSafeSettings` on the main settings GET caused OAuth and mapping to disappear after refresh.
+
+Shared verify/configure writes legacy `sharedSheets` **and** mirrors access into `shared.profiles[].connectors` via `applySharedSheetAccessToCanonical` (`server/src/integrations/google/settings.ts`).

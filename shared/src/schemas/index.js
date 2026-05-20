@@ -71,6 +71,10 @@ export const inviteCreateSchema = z.object({
 export const assignRoleSchema = z.object({
     roleId: z.string().trim().min(1),
 });
+export const updateUserSchema = z.object({
+    firstName: z.string().trim().min(1).max(100),
+    lastName: z.string().trim().min(1).max(100),
+});
 export const posDailySummarySchema = z.object({
     date: z
         .string()

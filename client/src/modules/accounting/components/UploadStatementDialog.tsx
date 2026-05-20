@@ -29,11 +29,17 @@ import { extractApiErrorMessage } from '../../../utils/apiError';
 import { accountingApi } from '../api';
 import { formatStatementMonthShort } from '../utils/statementDisplay';
 
+export type UploadStatementResult = {
+  statementId: string;
+  statementMonth: string;
+};
+
 type UploadStatementDialogProps = {
   open: boolean;
   onClose: () => void;
-  onUploaded: () => Promise<void>;
+  onUploaded: (result: UploadStatementResult) => Promise<void>;
   onSaveError?: (message: string) => void;
+  defaultBankAccountId?: string;
 };
 
 type PreparedUpload = {
@@ -162,7 +168,13 @@ const getProcessingSummary = (status: BankStatementStatus | null) => {
 const isProcessingStatusActive = (status: BankStatementStatus | null) =>
   status === 'uploaded' || status === 'extracting' || status === 'structuring' || status === 'checks_queued';
 
-export const UploadStatementDialog = ({ open, onClose, onUploaded, onSaveError }: UploadStatementDialogProps) => {
+export const UploadStatementDialog = ({
+  open,
+  onClose,
+  onUploaded,
+  onSaveError,
+  defaultBankAccountId = ''
+}: UploadStatementDialogProps) => {
   const [statementMonth, setStatementMonth] = useState(currentMonth());
   const [statementMonthTouched, setStatementMonthTouched] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -234,12 +246,12 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded, onSaveError }
     setPreparedUpload(null);
     setActiveStatementId(null);
     setExistingMonthConflict(null);
-    setBankAccountId('');
+    setBankAccountId(defaultBankAccountId);
     setBankAccountsError(null);
     statementMonthTouchedRef.current = false;
     detectionRequestIdRef.current += 1;
     processingRequestIdRef.current += 1;
-  }, [open]);
+  }, [defaultBankAccountId, open]);
 
   useEffect(() => {
     statementMonthTouchedRef.current = statementMonthTouched;
@@ -253,7 +265,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded, onSaveError }
       setBankAccountsError(null);
       try {
         const response = await accountingApi.getQuickbooksHubChartOfAccounts({
-          type: 'Bank',
+          type: 'asset',
           status: 'active',
           page: 1,
           pageSize: 100,
@@ -264,7 +276,8 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded, onSaveError }
         setBankAccounts(items);
         setBankAccountId((current) => {
           if (current) return current;
-          return items.length === 1 ? items[0].id : '';
+          if (defaultBankAccountId) return defaultBankAccountId;
+          return items.length === 1 ? String(items[0].qbId ?? items[0].id) : '';
         });
       } catch (error) {
         if (cancelled) return;
@@ -284,7 +297,7 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded, onSaveError }
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [defaultBankAccountId, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -507,8 +520,9 @@ export const UploadStatementDialog = ({ open, onClose, onUploaded, onSaveError }
         setActiveStatementId(created.data.data.statement.id);
         setPreparedUpload(null);
       }
-      void onUploaded().catch(() => {
-        // Background list refresh failures should not bubble up.
+      await onUploaded({
+        statementId: created.data.data.statement.id,
+        statementMonth: payload.statementMonth
       });
     } catch (error) {
       const message = extractApiErrorMessage(

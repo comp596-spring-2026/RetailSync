@@ -41,7 +41,15 @@ import {
   postQuickBooksWriteTransaction
 } from '../controllers/quickbooksTaxController';
 import { requireAuth } from '../middleware/requireAuth';
+import { requireAnyPermission } from '../middleware/requireAnyPermission';
 import { requirePermission } from '../middleware/requirePermission';
+import { requireQuickBooksMutation } from '../middleware/requireQuickBooksMutation';
+import { requireQuickBooksDisconnect } from '../middleware/requireQuickBooksDisconnect';
+
+const requireQuickBooksConnect = requireAnyPermission([
+  { moduleKey: 'quickbooks', action: 'connect' },
+  { moduleKey: 'quickbooks', action: 'edit' }
+]);
 
 const router = Router();
 
@@ -60,19 +68,19 @@ router.get(
 router.put(
   '/settings',
   requireAuth,
-  requirePermission('quickbooks', 'connect'),
+  requireQuickBooksConnect,
   updateQuickBooksSettings
 );
 router.get(
   '/start-url',
   requireAuth,
-  requirePermission('quickbooks', 'connect'),
+  requireQuickBooksConnect,
   getQuickBooksConnectUrl
 );
 router.get(
   '/start',
   requireAuth,
-  requirePermission('quickbooks', 'connect'),
+  requireQuickBooksConnect,
   startQuickBooksConnect
 );
 router.post(
@@ -114,19 +122,19 @@ router.get(
 router.post(
   '/money/:txnType',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('create'),
   postQuickBooksMoneyTransaction
 );
 router.patch(
   '/money/:txnType/:qbTxnId',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('edit'),
   patchQuickBooksMoneyTransaction
 );
 router.delete(
   '/money/:txnType/:qbTxnId',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('delete'),
   deleteQuickBooksMoneyTransactionById
 );
 router.get(
@@ -144,19 +152,19 @@ router.get(
 router.post(
   '/write/:txnType',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('create'),
   postQuickBooksWriteTransaction
 );
 router.patch(
   '/write/:txnType/:qbTxnId',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('edit'),
   patchQuickBooksWriteTransaction
 );
 router.delete(
   '/write/:txnType/:qbTxnId',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('delete'),
   deleteQuickBooksWriteTransactionById
 );
 router.get(
@@ -168,7 +176,7 @@ router.get(
 router.post(
   '/hub/chart-of-accounts',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('create'),
   postQuickBooksHubChartOfAccounts
 );
 router.get(
@@ -192,19 +200,19 @@ router.get(
 router.post(
   '/contacts/:entityType',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('create'),
   postQuickBooksContact
 );
 router.patch(
   '/contacts/:entityType/:qbId',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('edit'),
   patchQuickBooksContact
 );
 router.delete(
   '/contacts/:entityType/:qbId',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('delete'),
   deleteQuickBooksContactById
 );
 router.get(
@@ -246,22 +254,17 @@ router.get(
 router.post(
   '/tax/recover-payment',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('create'),
   postQuickBooksRecoverPayment
 );
 router.post(
   '/tax/journal-adjustment',
   requireAuth,
-  requirePermission('quickbooks', 'post'),
+  requireQuickBooksMutation('create'),
   postQuickBooksJournalAdjustment
 );
 
-router.post(
-  '/disconnect',
-  requireAuth,
-  requirePermission('quickbooks', 'connect'),
-  disconnectQuickBooks
-);
+router.post('/disconnect', requireAuth, requireQuickBooksDisconnect, disconnectQuickBooks);
 router.get('/callback', quickBooksCallback);
 
 export default router;

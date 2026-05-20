@@ -152,9 +152,29 @@ Tax/live reads:
   - `/integrations/sheets/*`
   - `/settings/google-sheets/*`
 
+### Google Sheets — key routes
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/integrations/google/sheets/oauth-status` | Token health + `connectedEmail` |
+| `GET` | `/integrations/google/sheets/start-url` | OAuth authorize URL |
+| `GET` | `/integrations/google/sheets/callback` | Sets `oauth.connectionStatus`, stores tokens |
+| `GET` | `/integrations/google/sheets/files` | OAuth spreadsheet picker |
+| `GET` | `/integrations/sheets/shared-files` | Service-account shared drive list |
+| `POST` | `/integrations/sheets/tabs` | Tab list (`authMode`: `oauth` \| `service_account`) |
+| `POST` | `/settings/google-sheets/shared/verify` | Shared access check; mirrors into canonical profile |
+| `POST` | `/settings/google-sheets/stage-change` | Draft connector patch |
+| `POST` | `/settings/google-sheets/commit-change` | Persist connector + optional `mappingHash` / `mappingConfirmedAt` |
+| `POST` | `/settings/google-sheets/activate` | Set active integration/source/profile |
+| `POST` | `/pos/import/sheets/preview` | Header/sample preview |
+| `POST` | `/pos/import/sheets/match` | Mapping compatibility; body: `mapping`, `columns`, `transformations` or `transforms` |
+| `POST` | `/pos/import/sheets/commit` | Import rows using active or explicit connector |
+
+Connector-first response shape: see [operations/google-sheets-e2e.md](../operations/google-sheets-e2e.md).
+
 ## Settings
 
-- `GET /settings`
+- `GET /settings` — company settings including **canonical** `googleSheets.oauth` / `googleSheets.shared` (not legacy-only), plus `connected`, `connectedEmail`, `syncSchedule`, and legacy `sharedSheets` when present
 - QuickBooks and Google Sheets settings endpoints under `/settings/*`
 
 ## Cron / Tasks

@@ -29,7 +29,7 @@ import {
 import { usePos } from '../hooks/usePos';
 import { ImportPOSDataModal } from '../components/ImportPOSDataModal';
 import { fetchSettings, selectGoogleSheetsSettings, selectSettings } from '../../settings/state';
-import { hasPermission } from '../../../utils/permissions';
+import { canImportPos, canShowPos, canUsePosTab } from '../../../utils/productPermissions';
 import type { PosView } from '../state';
 import { POSAnalyticsPage } from './POSAnalyticsPage';
 import { POSDailySummaryPage } from './POSDailySummaryPage';
@@ -129,9 +129,20 @@ export const POSWorkspacePage = () => {
   const googleSheetsCanonical = useAppSelector(selectGoogleSheetsSettings);
   const { state, actions } = usePos();
 
-  const canView = hasPermission(permissions, 'pos', 'view');
-  const canImport =
-    hasPermission(permissions, 'pos', 'create') && hasPermission(permissions, 'pos', 'actions:import');
+  const canView = canShowPos(permissions);
+  const canImport = canImportPos(permissions);
+  const canTable = canUsePosTab(permissions, 'table');
+  const canAnalytics = canUsePosTab(permissions, 'analytics');
+  const canSaleTax = canUsePosTab(permissions, 'saleTax');
+  const allowedViews = useMemo(
+    () =>
+      (['table', 'analytics', 'saleTax'] as const).filter((view) => {
+        if (view === 'table') return canTable;
+        if (view === 'analytics') return canAnalytics;
+        return canSaleTax;
+      }),
+    [canAnalytics, canSaleTax, canTable]
+  );
 
   const [openImportModal, setOpenImportModal] = useState(false);
 
@@ -147,6 +158,13 @@ export const POSWorkspacePage = () => {
     if (settings?.lastImportAt) return new Date(settings.lastImportAt).toLocaleString();
     return 'Never';
   }, [state.lastSyncAt, settings?.lastImportAt]);
+
+  useEffect(() => {
+    if (!canView || allowedViews.length === 0) return;
+    if (!allowedViews.includes(state.view)) {
+      actions.setView(allowedViews[0]);
+    }
+  }, [actions, allowedViews, canView, state.view]);
 
   useEffect(() => {
     if (!canView) return;
@@ -287,18 +305,24 @@ export const POSWorkspacePage = () => {
             }}
             aria-label="POS view switch"
           >
-            <ToggleButton value="table" aria-label="Table view">
-              <TableRowsIcon fontSize="small" sx={{ mr: 0.75 }} />
-              Table
-            </ToggleButton>
-            <ToggleButton value="analytics" aria-label="Analytics view">
-              <InsightsIcon fontSize="small" sx={{ mr: 0.75 }} />
-              Analytics
-            </ToggleButton>
-            <ToggleButton value="saleTax" aria-label="Sale tax view">
-              <ReceiptLongIcon fontSize="small" sx={{ mr: 0.75 }} />
-              Sale Tax
-            </ToggleButton>
+            {canTable ? (
+              <ToggleButton value="table" aria-label="Table view">
+                <TableRowsIcon fontSize="small" sx={{ mr: 0.75 }} />
+                Table
+              </ToggleButton>
+            ) : null}
+            {canAnalytics ? (
+              <ToggleButton value="analytics" aria-label="Analytics view">
+                <InsightsIcon fontSize="small" sx={{ mr: 0.75 }} />
+                Analytics
+              </ToggleButton>
+            ) : null}
+            {canSaleTax ? (
+              <ToggleButton value="saleTax" aria-label="Sale tax view">
+                <ReceiptLongIcon fontSize="small" sx={{ mr: 0.75 }} />
+                Sale Tax
+              </ToggleButton>
+            ) : null}
           </ToggleButtonGroup>
         }
         actions={

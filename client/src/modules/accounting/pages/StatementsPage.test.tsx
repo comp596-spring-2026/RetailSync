@@ -24,9 +24,11 @@ vi.mock('../api', () => ({
   }
 }));
 
+let quickBooksConnected = true;
+
 vi.mock('../hooks/useQuickBooksWorkspace', () => ({
   useQuickBooksWorkspace: () => ({
-    isConnected: true
+    isConnected: quickBooksConnected
   })
 }));
 
@@ -40,10 +42,12 @@ vi.mock('../components', async () => {
 
 const createPermissions = ({
   accountingView = false,
-  bankStatementsView = false
+  bankStatementsView = false,
+  quickbooksView = true
 }: {
   accountingView?: boolean;
   bankStatementsView?: boolean;
+  quickbooksView?: boolean;
 } = {}) => {
   const permissions = {} as PermissionsMap;
   for (const moduleKey of moduleKeys) {
@@ -61,6 +65,9 @@ const createPermissions = ({
   }
   if (permissions.bankStatements) {
     permissions.bankStatements.view = bankStatementsView;
+  }
+  if (permissions.quickbooks) {
+    permissions.quickbooks.view = quickbooksView;
   }
 
   return permissions;
@@ -101,6 +108,7 @@ describe('StatementsPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    quickBooksConnected = true;
     window.localStorage.clear();
     listStatementsMock.mockResolvedValue({
       data: {
@@ -144,6 +152,24 @@ describe('StatementsPage', () => {
     );
 
     expect(screen.getByText('No Access')).toBeInTheDocument();
+    expect(listStatementsMock).not.toHaveBeenCalled();
+  });
+
+  it('shows Go to Settings when QuickBooks is not connected', () => {
+    quickBooksConnected = false;
+    window.localStorage.setItem('accounting.statement.defaultBankAccountId', '35');
+
+    render(
+      <Provider store={createStore({ bankStatementsView: true })}>
+        <MemoryRouter>
+          <StatementsPage />
+        </MemoryRouter>
+      </Provider>
+    );
+
+    expect(screen.getAllByRole('button', { name: /Go to Settings/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Connect QuickBooks in Settings/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText('No statements yet')).not.toBeInTheDocument();
     expect(listStatementsMock).not.toHaveBeenCalled();
   });
 

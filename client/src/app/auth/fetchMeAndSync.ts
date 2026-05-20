@@ -17,7 +17,19 @@ export type MeData = {
 export async function fetchMeAndSync(dispatch: AppDispatch): Promise<MeData> {
   const res = await authApi.me();
   const data = res.data.data as MeData;
-  dispatch(setAuthContext({ user: data.user, role: data.role, permissions: data.permissions }));
+  const normalizedPermissions = data.permissions ?? data.role?.permissions ?? null;
+  dispatch(
+    setAuthContext({
+      user: data.user,
+      role: data.role
+        ? {
+            ...data.role,
+            permissions: normalizedPermissions ?? data.role.permissions
+          }
+        : null,
+      permissions: normalizedPermissions
+    })
+  );
   dispatch(setCompany(data.company ?? null));
   return data;
 }

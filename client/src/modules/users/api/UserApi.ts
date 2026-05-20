@@ -5,6 +5,14 @@ export class UserApi {
     return api.get('/users');
   }
 
+  updateUser(userId: string, payload: { firstName: string; lastName: string }) {
+    return api.put(`/users/${userId}`, payload);
+  }
+
+  deleteUser(userId: string) {
+    return api.delete(`/users/${userId}`);
+  }
+
   assignRole(userId: string, roleId: string) {
     return api.put(`/users/${userId}/role`, { roleId });
   }

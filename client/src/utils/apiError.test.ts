@@ -24,4 +24,25 @@ describe('apiError', () => {
       'The PDF uploaded, but RetailSync could not start statement processing. Retry in a moment.',
     );
   });
+
+  it('extracts RBAC role delete and assign-role API messages', () => {
+    const deleteError = new AxiosError('Bad Request', undefined, undefined, undefined, {
+      data: {
+        status: 'error',
+        message: 'Cannot delete this role because users are assigned to it. Reassign users first.'
+      }
+    } as never);
+    const selfAssignError = new AxiosError('Bad Request', undefined, undefined, undefined, {
+      data: { status: 'error', message: 'You cannot change your own role.' }
+    } as never);
+    const systemRoleError = new AxiosError('Bad Request', undefined, undefined, undefined, {
+      data: { status: 'error', message: 'System roles are read-only.' }
+    } as never);
+
+    expect(extractApiErrorMessage(deleteError, 'Fallback')).toBe(
+      'Cannot delete this role because users are assigned to it. Reassign users first.'
+    );
+    expect(extractApiErrorMessage(selfAssignError, 'Fallback')).toBe('You cannot change your own role.');
+    expect(extractApiErrorMessage(systemRoleError, 'Fallback')).toBe('System roles are read-only.');
+  });
 });

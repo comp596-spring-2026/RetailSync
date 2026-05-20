@@ -126,6 +126,11 @@ Hidden or redirected legacy entry points:
 | procurement | Placeholder/partial routing only | Hidden from active nav | `PARTIAL` | `TODO` | `HIDDEN` |
 | inventory | Removed from active application | Removed from active application | n/a | legacy tests removed | `HIDDEN` |
 
+### Google Sheets settings (OAuth + mapping persistence)
+
+- **Fix (2026-05):** `GET /api/settings` returns canonical `oauth` / `shared` connectors (not legacy-only payload); shared verify mirrors into `shared.profiles`; wizard commit stores `mappingHash` / `mappingConfirmedAt`.
+- **Docs:** [operations/google-sheets-e2e.md](operations/google-sheets-e2e.md), [architecture/sheets-integration-flows.md](architecture/sheets-integration-flows.md)
+
 ### POS Georgia sales tax review
 
 - **View:** POS toolbar → **Sale Tax** (`POSSaleTaxPage`)

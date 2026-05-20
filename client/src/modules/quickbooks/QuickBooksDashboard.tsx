@@ -16,9 +16,11 @@ import { useAppDispatch, useAppSelector } from '../../app/store/hooks';
 import { showSnackbar } from '../../app/store/uiSlice';
 import { getAppErrorMessage } from '../../constants/errorCodes';
 import { hasPermission } from '../../utils/permissions';
+import { canQuickBooksConnect } from '../../utils/quickbooksPermissions';
 import { extractApiErrorMessage } from '../../utils/apiError';
 import { accountingApi } from '../accounting/api';
 import { useQuickBooksWorkspace } from './hooks/useQuickBooksWorkspace';
+import { QuickBooksLockedSight } from './components';
 import { QuickBooksCard } from './components/QuickBooksCard';
 import { QUICKBOOKS_QUICK_ACCESS_ITEMS, QUICKBOOKS_SECTION_DESCRIPTIONS } from './constants';
 
@@ -45,7 +47,7 @@ export const QuickBooksDashboard = () => {
   const location = useLocation();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const canConnect = hasPermission(permissions, 'quickbooks', 'actions:connect');
+  const canConnect = canQuickBooksConnect(permissions);
 
   const {
     settings,
@@ -54,6 +56,7 @@ export const QuickBooksDashboard = () => {
     error,
     load,
     connectionStatus,
+    isConnected,
     warning
   } = useQuickBooksWorkspace(canView);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -138,39 +141,54 @@ export const QuickBooksDashboard = () => {
       {pageError ? <Alert severity="error">{pageError}</Alert> : null}
       {warning ? <Alert severity="warning">{warning}</Alert> : null}
 
-      <Stack spacing={2.5}>
-        {Object.entries(groupedQuickAccess).map(([section, items]) => (
-          <Stack key={section} spacing={1.25}>
-            <Stack spacing={0.35}>
-              <Typography variant="overline" color="text.secondary">
-                {section}
-              </Typography>
-              <Typography variant="h6">{QUICKBOOKS_SECTION_DESCRIPTIONS[section as keyof typeof QUICKBOOKS_SECTION_DESCRIPTIONS]}</Typography>
+      <QuickBooksLockedSight
+        locked={!loading && !isConnected}
+        message="Connect QuickBooks to open accounts, contacts, sales, money, and reports."
+        actionLabel={settings?.connected ? 'Reconnect QuickBooks' : 'Connect QuickBooks'}
+        onAction={() => void onConnect()}
+        actionDisabled={!canConnect || busy}
+        actionHint={
+          !canConnect && !busy
+            ? 'Your role needs QuickBooks connect access. In Access → Roles, enable Connect QuickBooks (or Edit QuickBooks records) under the QuickBooks module.'
+            : undefined
+        }
+      >
+        <Stack spacing={2.5}>
+          {Object.entries(groupedQuickAccess).map(([section, items]) => (
+            <Stack key={section} spacing={1.25}>
+              <Stack spacing={0.35}>
+                <Typography variant="overline" color="text.secondary">
+                  {section}
+                </Typography>
+                <Typography variant="h6">
+                  {QUICKBOOKS_SECTION_DESCRIPTIONS[section as keyof typeof QUICKBOOKS_SECTION_DESCRIPTIONS]}
+                </Typography>
+              </Stack>
+              <Stack
+                sx={{
+                  display: 'grid',
+                  gap: 2,
+                  gridTemplateColumns: {
+                    xs: '1fr',
+                    sm: 'repeat(2, minmax(0, 1fr))',
+                    xl: 'repeat(4, minmax(0, 1fr))'
+                  }
+                }}
+              >
+                {items.map((item) => (
+                  <QuickBooksCard
+                    key={item.to}
+                    title={item.title}
+                    description={item.description}
+                    icon={item.icon}
+                    onClick={() => navigate(item.to)}
+                  />
+                ))}
+              </Stack>
             </Stack>
-            <Stack
-              sx={{
-                display: 'grid',
-                gap: 2,
-                gridTemplateColumns: {
-                  xs: '1fr',
-                  sm: 'repeat(2, minmax(0, 1fr))',
-                  xl: 'repeat(4, minmax(0, 1fr))'
-                }
-              }}
-            >
-              {items.map((item) => (
-                <QuickBooksCard
-                  key={item.to}
-                  title={item.title}
-                  description={item.description}
-                  icon={item.icon}
-                  onClick={() => navigate(item.to)}
-                />
-              ))}
-            </Stack>
-          </Stack>
-        ))}
-      </Stack>
+          ))}
+        </Stack>
+      </QuickBooksLockedSight>
 
       <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>
         <Stack spacing={2.5}>

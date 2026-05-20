@@ -42,10 +42,12 @@ const parseRangeTab = (range?: string) => {
 
 export const useSettingsPageViewModel = ({
   canEdit,
+  canConnectQuickbooks,
   canViewQuickbooks,
   canSyncQuickbooks,
 }: {
   canEdit: boolean;
+  canConnectQuickbooks: boolean;
   canViewQuickbooks: boolean;
   canSyncQuickbooks: boolean;
 }) => {
@@ -288,7 +290,7 @@ export const useSettingsPageViewModel = ({
   }, [canEdit, dispatch, settings, sharedHeaderRow, sharedSheetName, sharedSpreadsheetId]);
 
   const onConnectQuickBooks = useCallback(async () => {
-    if (!canEdit) return;
+    if (!canConnectQuickbooks) return;
     try {
       setIsBusyLocal(true);
       const url = await dispatch(connectQuickBooksThunk('/dashboard/settings')).unwrap();
@@ -300,17 +302,17 @@ export const useSettingsPageViewModel = ({
     } finally {
       setIsBusyLocal(false);
     }
-  }, [canEdit, dispatch]);
+  }, [canConnectQuickbooks, dispatch]);
 
   const onDisconnectQuickBooks = useCallback(async () => {
-    if (!canEdit) return;
+    if (!canConnectQuickbooks) return;
     try {
       await dispatch(disconnectQuickBooksThunk()).unwrap();
       await reloadQuickbooksSurface();
     } catch (err) {
       dispatch(showSnackbar({ message: getErrorMessage(err, 'Failed to disconnect QuickBooks'), severity: 'error' }));
     }
-  }, [canEdit, dispatch, reloadQuickbooksSurface]);
+  }, [canConnectQuickbooks, dispatch, reloadQuickbooksSurface]);
 
   const onRefreshQuickbooksReferences = useCallback(async () => {
     if (!canSyncQuickbooks) return;

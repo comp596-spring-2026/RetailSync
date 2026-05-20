@@ -34,6 +34,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logoutThunk } from '../../modules/auth/state';
 import { hasPermission } from '../../utils/permissions';
+import { canShowAccess, canShowAccounting, canShowDashboard, canShowPos, canShowQuickbooks, canShowSettings } from '../../utils/productPermissions';
 import { LogoHorizontal } from '../../components';
 import { useEffect, useMemo, useState } from 'react';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -77,9 +78,10 @@ export const DashboardLayout = () => {
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const isDevelopment = import.meta.env.DEV;
   const userDisplayName = user ? `${user.firstName} ${user.lastName}` : 'User';
-  const canViewAccountingStatements = hasPermission(permissions, 'bankStatements', 'view');
-  const canViewQuickbooksHome = hasPermission(permissions, 'quickbooks', 'view');
-  const canViewAccounting = canViewAccountingStatements;
+  const canViewAccounting = canShowAccounting(permissions);
+  const canViewQuickbooksHome = canShowQuickbooks(permissions);
+  const canViewSettings = canShowSettings(permissions);
+  const isAuthenticated = Boolean(user);
   const closeMobileDrawer = () => setMobileDrawerOpen(false);
 
   const onLogout = async () => {
@@ -136,10 +138,10 @@ export const DashboardLayout = () => {
   };
 
   const coreLinks: NavItem[] = [
-    ...(hasPermission(permissions, 'dashboard', 'view')
+    ...(canShowDashboard(permissions)
       ? [{ label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon fontSize="small" /> }]
       : []),
-    ...(hasPermission(permissions, 'pos', 'view')
+    ...(canShowPos(permissions)
       ? [{ label: 'POS', path: '/dashboard/pos', icon: <PointOfSaleIcon fontSize="small" /> }]
       : []),
     ...(canViewAccounting
@@ -158,11 +160,13 @@ export const DashboardLayout = () => {
           icon: <CalculateOutlinedIcon fontSize="small" />
         }]
       : []),
-    { label: 'Settings', path: '/dashboard/settings', icon: <SettingsOutlinedIcon fontSize="small" /> }
+    ...(canViewSettings
+      ? [{ label: 'Settings', path: '/dashboard/settings', icon: <SettingsOutlinedIcon fontSize="small" /> }]
+      : [])
   ];
 
   const hubLinks: NavItem[] = [
-    ...(hasPermission(permissions, 'users', 'view') || hasPermission(permissions, 'rolesSettings', 'view')
+    ...(canShowAccess(permissions)
       ? [{ label: 'Access', path: '/dashboard/access/users', matchPrefix: '/dashboard/access', icon: <AdminPanelSettingsIcon fontSize="small" /> }]
       : [])
   ];
@@ -309,12 +313,14 @@ export const DashboardLayout = () => {
           </MenuItem>
         ) : null}
         {isDevelopment && hasPermission(permissions, 'dashboard', 'view') ? <Divider /> : null}
-        <MenuItem component={Link} to="/dashboard/settings" onClick={onCloseProfileMenu}>
-          <ListItemIcon>
-            <SettingsOutlinedIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>Settings</ListItemText>
-        </MenuItem>
+        {isAuthenticated ? (
+          <MenuItem component={Link} to="/dashboard/settings" onClick={onCloseProfileMenu}>
+            <ListItemIcon>
+              <SettingsOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Settings</ListItemText>
+          </MenuItem>
+        ) : null}
         <Divider />
         <MenuItem
           onClick={() => {

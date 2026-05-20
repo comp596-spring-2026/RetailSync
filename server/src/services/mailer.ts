@@ -2,6 +2,11 @@ import net from 'node:net';
 import tls from 'node:tls';
 import { APP_NAME } from '@retailsync/shared';
 import { env } from '../config/env';
+import {
+  renderTransactionalEmailHtml,
+  renderTransactionalEmailText,
+  type TransactionalEmailContent
+} from './emailTemplates';
 
 type MailRecipient = {
   email: string;
@@ -348,42 +353,18 @@ export const buildInviteUrl = (inviteCode: string, email: string) =>
     email
   });
 
-const renderEmailHtml = (args: {
-  title: string;
-  intro: string;
-  actionLabel: string;
-  actionUrl: string;
-  outro: string;
-}) => `<!doctype html>
-<html lang="en">
-  <body style="margin:0;padding:24px;background:#f4f8f6;font-family:Arial,sans-serif;color:#18352a;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="100%" style="max-width:560px;background:#ffffff;border-radius:20px;padding:32px;border:1px solid #dbe8e1;">
-            <tr>
-              <td>
-                <div style="font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5d7d70;margin-bottom:12px;">${APP_NAME}</div>
-                <h1 style="margin:0 0 16px;font-size:28px;line-height:1.2;color:#10281f;">${args.title}</h1>
-                <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#355448;">${args.intro}</p>
-                <p style="margin:0 0 24px;">
-                  <a href="${args.actionUrl}" style="display:inline-block;background:#1f7a52;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:12px;font-weight:700;">
-                    ${args.actionLabel}
-                  </a>
-                </p>
-                <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#5a7469;">If the button does not work, use this link:</p>
-                <p style="margin:0 0 24px;font-size:13px;line-height:1.6;word-break:break-all;">
-                  <a href="${args.actionUrl}" style="color:#1f7a52;">${args.actionUrl}</a>
-                </p>
-                <p style="margin:0;font-size:13px;line-height:1.7;color:#6c8579;">${args.outro}</p>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`;
+const sendTransactionalEmail = async (message: {
+  to: MailRecipient;
+  subject: string;
+  content: TransactionalEmailContent;
+}) => {
+  await sendConfiguredMail({
+    to: message.to,
+    subject: message.subject,
+    text: renderTransactionalEmailText(message.content),
+    html: renderTransactionalEmailHtml(message.content)
+  });
+};
 
 export const sendVerificationEmail = async (args: {
   email: string;
@@ -391,24 +372,20 @@ export const sendVerificationEmail = async (args: {
   verificationToken: string;
 }) => {
   const verificationUrl = buildVerificationUrl(args.verificationToken);
-  await sendConfiguredMail({
+  await sendTransactionalEmail({
     to: { email: args.email, name: args.firstName },
     subject: `Verify your ${APP_NAME} email`,
-    text: [
-      `Hi ${args.firstName},`,
-      '',
-      `Please verify your ${APP_NAME} email address by opening this link:`,
-      verificationUrl,
-      '',
-      'If you did not create this account, you can ignore this email.'
-    ].join('\n'),
-    html: renderEmailHtml({
-      title: `Verify your email`,
-      intro: `Hi ${args.firstName}, please confirm your ${APP_NAME} email address to continue setting up your account.`,
+    content: {
+      preheader: `Confirm your ${APP_NAME} email to finish signing up.`,
+      title: 'Verify your email',
+      greeting: `Hi ${args.firstName},`,
+      paragraphs: [
+        `Thanks for creating a ${APP_NAME} account. Confirm your email address to continue setting up your workspace.`
+      ],
       actionLabel: 'Verify email',
       actionUrl: verificationUrl,
-      outro: 'If you did not create this account, you can safely ignore this email.'
-    })
+      footnote: 'If you did not create this account, you can safely ignore this email.'
+    }
   });
 };
 
@@ -418,24 +395,21 @@ export const sendPasswordResetEmail = async (args: {
   resetToken: string;
 }) => {
   const resetUrl = buildPasswordResetUrl(args.resetToken);
-  await sendConfiguredMail({
+  await sendTransactionalEmail({
     to: { email: args.email, name: args.firstName },
     subject: `Reset your ${APP_NAME} password`,
-    text: [
-      `Hi ${args.firstName},`,
-      '',
-      `Use this link to reset your ${APP_NAME} password:`,
-      resetUrl,
-      '',
-      'If you did not request this password reset, you can ignore this email.'
-    ].join('\n'),
-    html: renderEmailHtml({
+    content: {
+      preheader: `Reset your ${APP_NAME} password.`,
       title: 'Reset your password',
-      intro: `Hi ${args.firstName}, use the button below to choose a new password for your ${APP_NAME} account.`,
+      greeting: `Hi ${args.firstName},`,
+      paragraphs: [
+        `We received a request to reset the password for your ${APP_NAME} account.`,
+        'Choose a new password using the button below. This link expires for your security.'
+      ],
       actionLabel: 'Reset password',
       actionUrl: resetUrl,
-      outro: 'If you did not request this password reset, you can safely ignore this email.'
-    })
+      footnote: 'If you did not request this password reset, you can safely ignore this email.'
+    }
   });
 };
 
@@ -447,23 +421,24 @@ export const sendInviteEmail = async (args: {
   roleName: string;
 }) => {
   const inviteUrl = buildInviteUrl(args.inviteCode, args.email);
-  await sendConfiguredMail({
+  await sendTransactionalEmail({
     to: { email: args.email, name: args.firstName },
-    subject: `You're invited to join ${args.companyName}`,
-    text: [
-      `Hi ${args.firstName},`,
-      '',
-      `${args.companyName} invited you to ${APP_NAME} as ${args.roleName}.`,
-      '',
-      'Open this link to set your password and activate your access:',
-      inviteUrl
-    ].join('\n'),
-    html: renderEmailHtml({
-      title: `You're invited to join ${args.companyName}`,
-      intro: `Hi ${args.firstName}, ${args.companyName} invited you to ${APP_NAME} as ${args.roleName}.`,
+    subject: `You're invited to join ${args.companyName} on ${APP_NAME}`,
+    content: {
+      preheader: `${args.companyName} invited you to join ${APP_NAME} as ${args.roleName}.`,
+      title: `Join ${args.companyName}`,
+      greeting: `Hi ${args.firstName},`,
+      paragraphs: [
+        `${args.companyName} invited you to ${APP_NAME}.`,
+        'Activate your access to set your password and start using the workspace.'
+      ],
+      detailRows: [
+        { label: 'Company', value: args.companyName },
+        { label: 'Role', value: args.roleName }
+      ],
       actionLabel: 'Activate access',
       actionUrl: inviteUrl,
-      outro: 'Open the link above to set your password and finish joining the workspace.'
-    })
+      footnote: 'If you were not expecting this invitation, you can ignore this email.'
+    }
   });
 };
