@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Types } from 'mongoose';
 
 const {
   statementTransactionFindOneMock,
@@ -48,7 +47,7 @@ vi.mock('./matchingEngine', () => ({
 }));
 
 describe('resolveStatementEntryForCheckSuggestion', () => {
-  const companyId = new Types.ObjectId();
+  const companyId = 'company-1';
   const statementId = 'statement-1';
   const checkId = '6a0e0853da00376987bb9b5b';
 
