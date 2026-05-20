@@ -584,8 +584,8 @@ describe('accountingTaskRunner', () => {
 
     const check = stores.checks[0];
     expect(check.extracted.checkNumber).toBe('1001');
-    // Table-row parser bboxes are ignored; placement uses the check-image grid.
-    expect(check.artifacts.cropBBox).toEqual([97, 137, 451, 292]);
+    // Table-row parser bboxes are ignored; valid OCR check regions are reused on spawn.
+    expect(check.artifacts.cropBBox).toEqual([10, 20, 200, 120]);
     // cropImagePath is intentionally absent until check.process uploads the PNG;
     // publishing it earlier causes 404s when the UI tries to open the crop.
     expect(check.artifacts.cropImagePath).toBeUndefined();
