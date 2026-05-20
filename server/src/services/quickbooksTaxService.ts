@@ -1,5 +1,6 @@
 import {
   createQuickBooksAccount,
+  createQuickBooksItem,
   listQuickBooksItems,
   createQuickBooksCheckTransaction,
   createQuickBooksJournalEntry,
@@ -741,6 +742,186 @@ const operationSortMap: Record<string, Record<string, 1 | -1>> = {
   '-updatedAt': { updatedAt: -1, _id: -1 }
 };
 
+type HubLiveChartItem = QuickBooksHubChartOfAccountsResponse['items'][number];
+
+const normalizeQuickBooksAccountType = (accountType: string | null | undefined) =>
+  (accountType ?? '').trim().toLowerCase();
+
+const isQuickBooksBankAccount = (account: { accountType: string | null; active: boolean }) =>
+  account.active && normalizeQuickBooksAccountType(account.accountType) === 'bank';
+
+const isQuickBooksIncomeAccount = (account: { accountType: string | null; active: boolean }) => {
+  const normalized = normalizeQuickBooksAccountType(account.accountType);
+  return (
+    account.active &&
+    (normalized === 'income' ||
+      normalized === 'other income' ||
+      normalized.includes('income'))
+  );
+};
+
+const isQuickBooksExpenseAccount = (account: { accountType: string | null; active: boolean }) =>
+  account.active && normalizeQuickBooksAccountType(account.accountType) === 'expense';
+
+const isQuickBooksDepositLineAccount = (account: { accountType: string | null; active: boolean }) => {
+  if (!account.active) return false;
+  if (isQuickBooksBankAccount(account)) return false;
+  const mappedType = mapQuickBooksAccountType(account.accountType);
+  if (mappedType === 'revenue' || mappedType === 'equity' || mappedType === 'liability') {
+    return true;
+  }
+  if (mappedType === 'asset') {
+    const normalized = normalizeQuickBooksAccountType(account.accountType);
+    return normalized !== 'bank' && normalized !== 'accounts receivable';
+  }
+  return false;
+};
+
+const matchesHubAccountKind = (
+  account: { accountType: string | null; active: boolean },
+  accountKind: 'bank' | 'income' | 'expense' | 'deposit_line'
+) => {
+  if (!account.active) return false;
+  if (accountKind === 'bank') return isQuickBooksBankAccount(account);
+  if (accountKind === 'deposit_line') return isQuickBooksDepositLineAccount(account);
+  const mappedType = mapQuickBooksAccountType(account.accountType);
+  if (accountKind === 'income') return mappedType === 'revenue';
+  return mappedType === 'expense' || isQuickBooksExpenseAccount(account);
+};
+
+const hubMongoTypesForAccountKind = (
+  accountKind: 'bank' | 'income' | 'expense' | 'deposit_line'
+): Array<'asset' | 'liability' | 'equity' | 'revenue' | 'expense'> => {
+  if (accountKind === 'bank') return ['asset'];
+  if (accountKind === 'income') return ['revenue'];
+  if (accountKind === 'deposit_line') return ['revenue', 'liability', 'equity', 'asset'];
+  return ['expense'];
+};
+
+const listQuickBooksHubChartOfAccountsFromMongoByKind = async (args: {
+  companyId: string;
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort: 'name' | '-name' | 'type' | '-type' | 'status' | '-status' | 'updatedAt' | '-updatedAt';
+  accountKind: 'bank' | 'income' | 'expense' | 'deposit_line';
+}): Promise<QuickBooksHubChartOfAccountsResponse> => {
+  const mongoTypes = hubMongoTypesForAccountKind(args.accountKind);
+  const filter: Record<string, unknown> = {
+    companyId: args.companyId,
+    type: mongoTypes.length === 1 ? mongoTypes[0] : { $in: mongoTypes },
+    isSystem: false
+  };
+  if (args.search) {
+    const regex = new RegExp(escapeRegex(args.search), 'i');
+    filter.$or = [{ name: regex }, { code: regex }, { qbAccountId: regex }];
+  }
+
+  const accounts = await ChartOfAccountModel.find(filter).sort(chartAccountSortMap[args.sort]).lean();
+  let items = accounts.map((account) => ({
+    id: account._id.toString(),
+    qbId: account.qbAccountId ?? null,
+    name: account.name,
+    type: account.type ?? null,
+    detailType: null,
+    status: 'active' as const,
+    balance: null
+  }));
+
+  if (args.accountKind === 'bank') {
+    items = items.filter((item) => {
+      const haystack = `${item.name ?? ''} ${item.detailType ?? ''}`.toLowerCase();
+      return haystack.includes('bank') || haystack.includes('checking') || haystack.includes('savings');
+    });
+  } else if (args.accountKind === 'deposit_line') {
+    items = items.filter((item) => {
+      const haystack = `${item.name ?? ''} ${item.detailType ?? ''} ${item.type ?? ''}`.toLowerCase();
+      if (haystack.includes('checking') || haystack.includes('savings') || haystack.includes('bank')) {
+        return false;
+      }
+      return item.type === 'revenue' || item.type === 'liability' || item.type === 'equity' || item.type === 'asset';
+    });
+  }
+
+  const total = items.length;
+  const skip = (args.page - 1) * args.pageSize;
+  const paged = items.slice(skip, skip + args.pageSize);
+  return {
+    ...toPageMeta(args.page, args.pageSize, total),
+    items: paged
+  };
+};
+
+const mapLiveQuickBooksAccountToHubItem = (account: {
+  id: string;
+  name: string;
+  code: string | null;
+  accountType: string | null;
+  accountSubType: string | null;
+  active: boolean;
+}): HubLiveChartItem => ({
+  id: account.id,
+  qbId: account.id,
+  name: account.name,
+  type: mapQuickBooksAccountType(account.accountType),
+  detailType: account.accountSubType,
+  status: 'active',
+  balance: null
+});
+
+const sortHubLiveChartItems = (
+  items: HubLiveChartItem[],
+  sort: 'name' | '-name' | 'type' | '-type' | 'status' | '-status' | 'updatedAt' | '-updatedAt'
+) => {
+  const factor = sort.startsWith('-') ? -1 : 1;
+  const field = sort.replace(/^-/, '');
+  return [...items].sort((left, right) => {
+    if (field === 'type') {
+      const leftValue = `${left.type ?? ''} ${left.detailType ?? ''}`.toLowerCase();
+      const rightValue = `${right.type ?? ''} ${right.detailType ?? ''}`.toLowerCase();
+      return leftValue.localeCompare(rightValue) * factor;
+    }
+    if (field === 'status') {
+      return left.status.localeCompare(right.status) * factor;
+    }
+    const leftName = left.name.toLowerCase();
+    const rightName = right.name.toLowerCase();
+    return leftName.localeCompare(rightName) * factor;
+  });
+};
+
+const listQuickBooksHubChartOfAccountsFromLive = async (args: {
+  companyId: string;
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort: 'name' | '-name' | 'type' | '-type' | 'status' | '-status' | 'updatedAt' | '-updatedAt';
+  accountKind: 'bank' | 'income' | 'expense' | 'deposit_line';
+}): Promise<QuickBooksHubChartOfAccountsResponse> => {
+  const accounts = await listQuickBooksAccounts(args.companyId);
+  let items = accounts
+    .filter((account) => matchesHubAccountKind(account, args.accountKind))
+    .map((account) => mapLiveQuickBooksAccountToHubItem(account));
+
+  if (args.search) {
+    const needle = args.search.trim().toLowerCase();
+    items = items.filter((item) => {
+      const haystack = `${item.name} ${item.qbId ?? ''} ${item.detailType ?? ''}`.toLowerCase();
+      return haystack.includes(needle);
+    });
+  }
+
+  const sortedItems = sortHubLiveChartItems(items, args.sort);
+  const total = sortedItems.length;
+  const skip = (args.page - 1) * args.pageSize;
+  const paged = sortedItems.slice(skip, skip + args.pageSize);
+
+  return {
+    ...toPageMeta(args.page, args.pageSize, total),
+    items: paged
+  };
+};
+
 export const listQuickBooksHubChartOfAccounts = async (args: {
   companyId: string;
   page: number;
@@ -749,7 +930,48 @@ export const listQuickBooksHubChartOfAccounts = async (args: {
   sort: 'name' | '-name' | 'type' | '-type' | 'status' | '-status' | 'updatedAt' | '-updatedAt';
   type?: string;
   status?: 'active' | 'system';
+  accountKind?: 'bank' | 'income' | 'expense' | 'deposit_line';
 }): Promise<QuickBooksHubChartOfAccountsResponse> => {
+  if (args.accountKind) {
+    let liveItems: QuickBooksHubChartOfAccountsResponse['items'] = [];
+    try {
+      const live = await listQuickBooksHubChartOfAccountsFromLive({
+        companyId: args.companyId,
+        page: args.page,
+        pageSize: args.pageSize,
+        search: args.search,
+        sort: args.sort,
+        accountKind: args.accountKind
+      });
+      liveItems = live.items;
+      if (liveItems.length > 0) {
+        return live;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message !== 'quickbooks_not_connected') {
+        throw error;
+      }
+    }
+
+    const mongo = await listQuickBooksHubChartOfAccountsFromMongoByKind({
+      companyId: args.companyId,
+      page: args.page,
+      pageSize: args.pageSize,
+      search: args.search,
+      sort: args.sort,
+      accountKind: args.accountKind
+    });
+    if (mongo.items.length > 0) {
+      return mongo;
+    }
+
+    return {
+      ...toPageMeta(args.page, args.pageSize, 0),
+      items: liveItems
+    };
+  }
+
   const filter: Record<string, unknown> = {
     companyId: args.companyId
   };
@@ -806,6 +1028,17 @@ export const listQuickBooksHubItems = async (args: {
     items
   };
 };
+
+export const createQuickBooksHubItem = async (args: {
+  companyId: string;
+  name: string;
+  type?: 'Service';
+}) =>
+  createQuickBooksItem({
+    companyId: args.companyId,
+    name: args.name,
+    type: args.type
+  });
 
 export const createQuickBooksHubChartAccount = async (args: {
   companyId: string;

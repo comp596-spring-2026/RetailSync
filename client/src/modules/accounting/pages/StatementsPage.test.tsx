@@ -196,6 +196,7 @@ describe('StatementsPage', () => {
                 remainingChecks: 3
               },
               issuesCount: 0,
+              bankAccountId: '35',
               updatedAt: '2026-03-18T18:51:49.113Z',
               createdAt: '2026-03-18T18:51:49.113Z'
             }
@@ -212,7 +213,21 @@ describe('StatementsPage', () => {
       </Provider>
     );
 
-    expect(await screen.findByText(/Running/i)).toBeInTheDocument();
+    await screen.findByText(/Running/i);
+    expect(getQuickbooksHubChartOfAccountsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountKind: 'bank',
+        status: 'active',
+        page: 1,
+        pageSize: 100
+      })
+    );
+    expect(listStatementsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bankAccountId: '35' })
+    );
+    expect(listStatementMonthsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bankAccountId: '35' })
+    );
     expect(screen.getByRole('button', { name: /Open workspace/i })).toBeInTheDocument();
     expect(screen.getByText(/Mar 2026 · Checks/i)).toBeInTheDocument();
     expect(screen.getByText(/2 done • 3 left/i)).toBeInTheDocument();
@@ -241,6 +256,7 @@ describe('StatementsPage', () => {
                 remainingChecks: 0
               },
               issuesCount: 0,
+              bankAccountId: '35',
               updatedAt: '2026-03-18T18:51:49.113Z',
               createdAt: '2026-03-18T18:51:49.113Z'
             }

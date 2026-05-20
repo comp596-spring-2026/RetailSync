@@ -389,12 +389,19 @@ export const createBankStatementSchema = z.object({
   periodStart: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   periodEnd: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   source: bankStatementSourceSchema.optional().default('upload'),
+  /** QuickBooks bank account id (qbId) — statement is scoped to this bank for its lifetime. */
   bankAccountId: z.string().trim().min(1).optional()
 });
 
 export const listBankStatementsQuerySchema = z.object({
   month: statementMonthSchema.optional(),
-  status: bankStatementStatusSchema.optional()
+  status: bankStatementStatusSchema.optional(),
+  /** QuickBooks bank account id (qbId) — limits results to statements uploaded for that bank. */
+  bankAccountId: z.string().trim().min(1).optional()
+});
+
+export const listStatementMonthsQuerySchema = z.object({
+  bankAccountId: z.string().trim().min(1).optional()
 });
 
 export const reprocessBankStatementSchema = z.object({
@@ -969,21 +976,31 @@ export const quickBooksHubChartAccountSchema = z.object({
   balance: z.number().nullable()
 });
 
+export const quickBooksHubChartAccountKindSchema = z.enum([
+  'bank',
+  'expense',
+  'income',
+  'deposit_line'
+]);
+
 export const quickBooksHubChartOfAccountsQuerySchema = z.object({
   page: quickBooksHubPageSchema,
   pageSize: quickBooksHubPageSizeSchema,
   search: z.string().trim().optional(),
   sort: quickBooksHubAccountSortSchema.optional().default('name'),
   type: z.string().trim().optional(),
-  status: quickBooksHubAccountStatusSchema.optional()
+  status: quickBooksHubAccountStatusSchema.optional(),
+  /**
+   * When set, returns active accounts live from QuickBooks (not only the local ChartOfAccount cache).
+   * `deposit_line` = income, other income, liability, equity, and non-bank asset accounts usable on Deposit lines.
+   */
+  accountKind: quickBooksHubChartAccountKindSchema.optional()
 });
 
 export const quickBooksHubChartOfAccountsResponseSchema =
   quickBooksHubListResponseMetaSchema.extend({
     items: z.array(quickBooksHubChartAccountSchema)
   });
-
-export const quickBooksHubChartAccountKindSchema = z.enum(['bank', 'expense', 'income']);
 
 export const quickBooksHubChartAccountCreateInputSchema = z.object({
   accountKind: quickBooksHubChartAccountKindSchema.optional(),
@@ -1007,6 +1024,15 @@ export const quickBooksHubItemsQuerySchema = z.object({
 
 export const quickBooksHubItemsResponseSchema = quickBooksHubListResponseMetaSchema.extend({
   items: z.array(quickBooksHubItemSchema)
+});
+
+export const quickBooksHubItemCreateInputSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  type: z.enum(['Service']).optional().default('Service')
+});
+
+export const quickBooksHubItemCreateResponseSchema = z.object({
+  item: quickBooksHubItemSchema
 });
 
 export const quickBooksHubChartAccountCreateResponseSchema = z.object({
@@ -1458,6 +1484,8 @@ export type QuickBooksHubChartAccountCreateResponse = z.infer<
 export type QuickBooksHubItem = z.infer<typeof quickBooksHubItemSchema>;
 export type QuickBooksHubItemsQuery = z.infer<typeof quickBooksHubItemsQuerySchema>;
 export type QuickBooksHubItemsResponse = z.infer<typeof quickBooksHubItemsResponseSchema>;
+export type QuickBooksHubItemCreateInput = z.infer<typeof quickBooksHubItemCreateInputSchema>;
+export type QuickBooksHubItemCreateResponse = z.infer<typeof quickBooksHubItemCreateResponseSchema>;
 export type QuickBooksHubEntity = z.infer<typeof quickBooksHubEntitySchema>;
 export type QuickBooksHubEntitiesQuery = z.infer<typeof quickBooksHubEntitiesQuerySchema>;
 export type QuickBooksHubEntitiesResponse = z.infer<typeof quickBooksHubEntitiesResponseSchema>;
@@ -1569,6 +1597,7 @@ export type DetectStatementMonthResponse = z.infer<typeof detectStatementMonthRe
 export type CreateBankStatementInput = z.infer<typeof createBankStatementSchema>;
 export type AssignStatementBankAccountInput = z.infer<typeof assignStatementBankAccountSchema>;
 export type ListBankStatementsQuery = z.infer<typeof listBankStatementsQuerySchema>;
+export type ListStatementMonthsQuery = z.infer<typeof listStatementMonthsQuerySchema>;
 export type ReprocessBankStatementInput = z.infer<typeof reprocessBankStatementSchema>;
 export type BankStatementListItem = z.infer<typeof bankStatementListItemSchema>;
 export type BankStatementDetail = z.infer<typeof bankStatementDetailSchema>;

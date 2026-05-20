@@ -1,4 +1,5 @@
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -85,8 +86,25 @@ import {
   formatProgressSummary,
   formatStatusLabel,
   getStatementViewerArtifacts,
-  isImagePath
+  isCheckSuggestionItem,
+  isImagePath,
+  filterDepositLineAccounts,
+  filterExpenseLineAccounts,
+  formatDepositLineAccountLabel,
+  isGenericBankDepositRow,
+  pickDefaultDepositLineAccount,
+  pickDefaultExpenseLineAccount,
+  resolveLineAccountRefFromPool,
+  resolveCategoryAccountSeed,
+  resolveCheckNumberForReview,
+  resolveLinkedCheck,
+  resolvePayeeNameForReview
 } from '../utils/statementDetailHelpers';
+import {
+  QUICKBOOKS_HUB_MAX_PAGE_SIZE,
+  StatementBankAccountAutocomplete,
+  chartAccountRefValue
+} from '../components/StatementBankAccountAutocomplete';
 import { StatementOverviewTab } from '../components/statementDetail/StatementOverviewTab';
 import { StatementSourceProofTab } from '../components/statementDetail/StatementSourceProofTab';
 import { buildStatementOverview, sectionWorkflowHint } from '../utils/statementOverviewModel';
@@ -98,8 +116,6 @@ import {
 } from '../utils/statementCategoryPresets';
 
 const shouldLogStatementProgress = import.meta.env.DEV;
-
-const chartAccountRefValue = (account: QuickBooksHubChartAccount) => account.qbId?.trim() || account.id;
 
 const REVIEW_SECTION_PAGE_SIZE = 20;
 
@@ -244,9 +260,20 @@ export const StatementDetailPage = () => {
   });
   const [contactCreating, setContactCreating] = useState(false);
   const [bankAccounts, setBankAccounts] = useState<QuickBooksHubChartAccount[]>([]);
+  const [bankAccountsLoading, setBankAccountsLoading] = useState(false);
+  const [bankAccountSearch, setBankAccountSearch] = useState('');
   const [lineAccounts, setLineAccounts] = useState<QuickBooksHubChartAccount[]>([]);
+  const [lineAccountSearch, setLineAccountSearch] = useState('');
+  const [depositLineAccounts, setDepositLineAccounts] = useState<QuickBooksHubChartAccount[]>([]);
   const [lineAccountsLoading, setLineAccountsLoading] = useState(false);
-  const lineAccountPrefilledRef = useRef(false);
+  const [depositLineAccountsLoading, setDepositLineAccountsLoading] = useState(false);
+  const [depositLineAccountSearch, setDepositLineAccountSearch] = useState('');
+  const [depositLineAccountInput, setDepositLineAccountInput] = useState('');
+  const [refreshingQuickBooksAccounts, setRefreshingQuickBooksAccounts] = useState(false);
+  const [reviewQuickBooksBootstrapping, setReviewQuickBooksBootstrapping] = useState(false);
+  const bankAccountsRef = useRef<QuickBooksHubChartAccount[]>([]);
+  const reviewQuickBooksBootstrapGenRef = useRef(0);
+  const lineAccountPrefilledRef = useRef<string | null>(null);
   const approveMenuAnchorRef = useRef<HTMLDivElement>(null);
   const [approveMenuOpen, setApproveMenuOpen] = useState(false);
   const [createBankAccountOpen, setCreateBankAccountOpen] = useState(false);
@@ -266,11 +293,14 @@ export const StatementDetailPage = () => {
   const [qbItems, setQbItems] = useState<QuickBooksHubItem[]>([]);
   const [qbItemsLoading, setQbItemsLoading] = useState(false);
   const [qbItemSearch, setQbItemSearch] = useState('');
+  const [qbItemCreating, setQbItemCreating] = useState(false);
   const [openInvoices, setOpenInvoices] = useState<
     Array<{ qbTxnId: string; label: string; balanceAmount: number | null }>
   >([]);
   const [openInvoicesLoading, setOpenInvoicesLoading] = useState(false);
   const blobUrlsRef = useRef<Record<string, string>>({});
+  const [reviewCheckImageUrl, setReviewCheckImageUrl] = useState<string | null>(null);
+  const [reviewCheckImageLoading, setReviewCheckImageLoading] = useState(false);
   const lastProgressLogRef = useRef<string>('');
   const lastCheckLogRef = useRef<string>('');
 
@@ -614,11 +644,54 @@ export const StatementDetailPage = () => {
     }
   };
 
+  const editModalLinkedCheck = useMemo(
+    () => (editItem ? resolveLinkedCheck(editItem, checks) : undefined),
+    [editItem, checks]
+  );
+
+  const depositLineAccountOptions = useMemo(
+    () => filterDepositLineAccounts(depositLineAccounts),
+    [depositLineAccounts]
+  );
+  const expenseLineAccountOptions = useMemo(() => filterExpenseLineAccounts(lineAccounts), [lineAccounts]);
+
+  const resolveSelectedLineAccountRef = useCallback(
+    (forWorkflow: WorkflowTxnType) => {
+      const pool = forWorkflow === 'Deposit' ? depositLineAccountOptions : expenseLineAccountOptions;
+      return resolveLineAccountRefFromPool(pool, {
+        lineAccountRef: workflowForm.lineAccountRef,
+        lineAccountInput: forWorkflow === 'Deposit' ? depositLineAccountInput : undefined,
+        categorySeed: editItem ? resolveCategoryAccountSeed(editItem, editModalLinkedCheck) : undefined,
+        chartAccountRefValue
+      });
+    },
+    [
+      depositLineAccountOptions,
+      depositLineAccountInput,
+      editItem,
+      editModalLinkedCheck,
+      expenseLineAccountOptions,
+      workflowForm.lineAccountRef
+    ]
+  );
+
+  const reviewModalQuickBooksLoading = editModalOpen && reviewQuickBooksBootstrapping;
+
   const postingBlockingErrors = useMemo(() => {
     if (!editModalOpen || !editItem || !statement) return [];
     const errors: string[] = [];
+    if (reviewModalQuickBooksLoading) {
+      errors.push('Loading QuickBooks accounts for this transaction…');
+      return errors;
+    }
     const qb = mapWorkflowToProposedType(workflowType);
-    const lineRef = workflowForm.lineAccountRef.trim();
+    const lineRef =
+      workflowType === 'Deposit'
+        ? resolveSelectedLineAccountRef('Deposit')
+        : resolveSelectedLineAccountRef(workflowType);
+    const effectiveCheckNumber = resolveCheckNumberForReview(editItem, editModalLinkedCheck);
+    const effectiveVendor =
+      workflowForm.vendor.trim() || resolvePayeeNameForReview(editItem, editModalLinkedCheck);
     const bankPaidFrom = (workflowForm.transferFromAccount || effectiveBankAccountId || '').trim();
     const depositTo = (workflowForm.depositToAccount || effectiveBankAccountId || '').trim();
 
@@ -642,15 +715,17 @@ export const StatementDetailPage = () => {
 
     if (qb === 'Deposit') {
       if (!depositTo) errors.push('Select the bank account to deposit into.');
-      if (!lineRef) errors.push('Select an income / other credit line account.');
-      if (depositTo && lineRef && depositTo === lineRef) errors.push('Deposit-to bank and income line accounts must differ.');
+      if (!lineRef) errors.push('Select a deposit line account.');
+      if (depositTo && lineRef && depositTo === lineRef) {
+        errors.push('Deposit-to bank and deposit line accounts must differ.');
+      }
     }
 
     if (qb === 'Expense' || qb === 'Check') {
       if (!bankPaidFrom) errors.push('Select the bank account paid from.');
-      if (!workflowForm.vendor.trim()) errors.push('Enter a vendor or payee.');
+      if (!effectiveVendor) errors.push('Enter a vendor or payee.');
       if (!lineRef) errors.push('Select a QuickBooks expense line account.');
-      if (workflowType === 'Check' && !workflowForm.checkNumber.trim()) errors.push('Enter the check number.');
+      if (workflowType === 'Check' && !effectiveCheckNumber) errors.push('Enter the check number.');
       if (bankPaidFrom && lineRef && bankPaidFrom === lineRef) errors.push('Bank account and expense line must differ.');
     }
 
@@ -666,7 +741,17 @@ export const StatementDetailPage = () => {
     }
 
     return errors;
-  }, [editModalOpen, editItem, effectiveBankAccountId, statement, workflowType, workflowForm]);
+  }, [
+    editModalOpen,
+    editItem,
+    editModalLinkedCheck,
+    effectiveBankAccountId,
+    resolveSelectedLineAccountRef,
+    reviewModalQuickBooksLoading,
+    statement,
+    workflowType,
+    workflowForm
+  ]);
 
   const primaryApproveLabel = useMemo(() => {
     switch (workflowType) {
@@ -687,22 +772,37 @@ export const StatementDetailPage = () => {
     }
   }, [workflowType]);
 
-  const buildStatementProposalPatch = useCallback((): StatementProposalPatch | undefined => {
+  const buildStatementProposalPatch = useCallback(
+    (overrides?: { lineRef?: string }): StatementProposalPatch | undefined => {
     if (!statement || !editItem) return undefined;
     if (['JournalEntry', 'Bill', 'BillPayment'].includes(workflowType)) return undefined;
     const qbTxnType = mapWorkflowToProposedType(workflowType);
     if (!qbTxnType) return undefined;
 
-    const lineRef = workflowForm.lineAccountRef.trim();
+    let lineRef =
+      overrides?.lineRef ??
+      (workflowType === 'Deposit' ||
+      workflowType === 'Expense' ||
+      workflowType === 'Check'
+        ? resolveSelectedLineAccountRef(workflowType === 'Deposit' ? 'Deposit' : workflowType)
+        : workflowForm.lineAccountRef.trim() || resolveCategoryAccountSeed(editItem, editModalLinkedCheck));
+    if (workflowType === 'Deposit' && !lineRef && depositLineAccountOptions.length > 0) {
+      const fallbackLine = pickDefaultDepositLineAccount(depositLineAccounts);
+      if (fallbackLine) lineRef = chartAccountRefValue(fallbackLine);
+    }
     const memo = workflowForm.memo.trim() || undefined;
     const payeeName =
-      workflowType === 'SalesReceipt' || workflowType === 'Deposit' || workflowType === 'CustomerPayment'
-        ? workflowForm.customer.trim() || editItem.payeeName
-        : workflowForm.vendor.trim() || editItem.payeeName;
+      workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment'
+        ? workflowForm.customer.trim() || resolvePayeeNameForReview(editItem, editModalLinkedCheck)
+        : workflowType === 'Deposit'
+          ? workflowForm.customer.trim() || undefined
+          : workflowForm.vendor.trim() || resolvePayeeNameForReview(editItem, editModalLinkedCheck);
     const payeeId =
-      workflowType === 'SalesReceipt' || workflowType === 'Deposit' || workflowType === 'CustomerPayment'
+      workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment'
         ? workflowForm.customerQbId.trim() || undefined
-        : workflowForm.vendorQbId.trim() || undefined;
+        : workflowType === 'Deposit'
+          ? workflowForm.customerQbId.trim() || undefined
+          : workflowForm.vendorQbId.trim() || undefined;
 
     if (qbTxnType === 'Transfer') {
       return {
@@ -721,22 +821,42 @@ export const StatementDetailPage = () => {
         ? bankForDeposit
         : bankForOutflow;
 
-    return {
-      qbTxnType,
-      bankAccountId,
-      categoryAccountId:
-        qbTxnType === 'SalesReceipt' || qbTxnType === 'Payment' ? undefined : lineRef || undefined,
-      payeeName: payeeName || undefined,
-      payeeId,
-      memo,
-      checkNumber: workflowType === 'Check' ? workflowForm.checkNumber.trim() || undefined : undefined,
-      matchExistingCheck: workflowType === 'Check' ? workflowForm.matchExistingCheck : undefined,
-      salesItemRefId:
-        workflowType === 'SalesReceipt' ? workflowForm.salesItemRefId.trim() || undefined : undefined,
-      linkedInvoiceTxnId:
-        workflowType === 'CustomerPayment' ? workflowForm.linkedInvoiceTxnId.trim() || undefined : undefined
-    };
-  }, [statement, editItem, workflowType, workflowForm]);
+    const patch: StatementProposalPatch = { qbTxnType };
+    if (bankAccountId) patch.bankAccountId = bankAccountId;
+    if (qbTxnType !== 'SalesReceipt' && qbTxnType !== 'Payment' && lineRef) {
+      patch.categoryAccountId = lineRef;
+    } else if (qbTxnType === 'Deposit' && !lineRef) {
+      const fallbackLine = pickDefaultDepositLineAccount(depositLineAccounts);
+      if (fallbackLine) patch.categoryAccountId = chartAccountRefValue(fallbackLine);
+    }
+    if (payeeName) patch.payeeName = payeeName;
+    if (payeeId) patch.payeeId = payeeId;
+    if (memo) patch.memo = memo;
+    if (workflowType === 'Check') {
+      const checkNumber =
+        resolveCheckNumberForReview(editItem, editModalLinkedCheck) || workflowForm.checkNumber.trim();
+      if (checkNumber) patch.checkNumber = checkNumber;
+      patch.matchExistingCheck = workflowForm.matchExistingCheck;
+    }
+    if (workflowType === 'SalesReceipt' && workflowForm.salesItemRefId.trim()) {
+      patch.salesItemRefId = workflowForm.salesItemRefId.trim();
+    }
+    if (workflowType === 'CustomerPayment' && workflowForm.linkedInvoiceTxnId.trim()) {
+      patch.linkedInvoiceTxnId = workflowForm.linkedInvoiceTxnId.trim();
+    }
+    return patch;
+  },
+  [
+    statement,
+    editItem,
+    editModalLinkedCheck,
+    depositLineAccountOptions,
+    depositLineAccounts,
+    effectiveBankAccountId,
+    resolveSelectedLineAccountRef,
+    workflowType,
+    workflowForm
+  ]);
 
   const updateSuggestionReviewStatus = async (
     suggestion: StatementSuggestionItem,
@@ -848,7 +968,10 @@ export const StatementDetailPage = () => {
       setContactOptions((current) => ({ ...current, [entityType]: [] }));
       dispatch(
         showSnackbar({
-          message: extractApiErrorMessage(apiError, `Unable to load ${entityType} list`),
+          message: extractApiErrorMessage(
+            apiError,
+            `Unable to load ${entityType} list. Sync QuickBooks reference data from Settings or ask an admin for access.`
+          ),
           severity: 'warning'
         })
       );
@@ -891,67 +1014,147 @@ export const StatementDetailPage = () => {
     }
   }, [dispatch]);
 
-  const loadBankAccounts = useCallback(async () => {
+  const loadBankAccounts = useCallback(async (search = ''): Promise<QuickBooksHubChartAccount[]> => {
+    setBankAccountsLoading(true);
     try {
       const response = await accountingApi.getQuickbooksHubChartOfAccounts({
-        type: 'asset',
+        accountKind: 'bank',
         status: 'active',
         page: 1,
-        pageSize: 100,
-        sort: 'name'
+        pageSize: QUICKBOOKS_HUB_MAX_PAGE_SIZE,
+        sort: 'name',
+        search: search.trim() || undefined
       });
-      setBankAccounts(response.data.data.items ?? []);
+      const items = response.data.data.items ?? [];
+      bankAccountsRef.current = items;
+      setBankAccounts(items);
+      return items;
     } catch {
-      // leave existing list intact on failure
+      return bankAccountsRef.current;
+    } finally {
+      setBankAccountsLoading(false);
     }
   }, []);
 
-  const loadLineAccounts = useCallback(async () => {
+  const loadLineAccounts = useCallback(async (search = ''): Promise<QuickBooksHubChartAccount[]> => {
     setLineAccountsLoading(true);
     try {
-      const [expenseResponse, revenueResponse] = await Promise.all([
-        accountingApi.getQuickbooksHubChartOfAccounts({
-          type: 'expense',
-          status: 'active',
-          page: 1,
-          pageSize: 500,
-          sort: 'name'
-        }),
-        accountingApi.getQuickbooksHubChartOfAccounts({
-          type: 'revenue',
-          status: 'active',
-          page: 1,
-          pageSize: 500,
-          sort: 'name'
-        })
-      ]);
-      const merged = [...(expenseResponse.data.data.items ?? []), ...(revenueResponse.data.data.items ?? [])];
-      const seen = new Set<string>();
-      setLineAccounts(
-        merged.filter((row) => {
-          if (seen.has(row.id)) return false;
-          seen.add(row.id);
-          return true;
+      const response = await accountingApi.getQuickbooksHubChartOfAccounts({
+        accountKind: 'expense',
+        status: 'active',
+        page: 1,
+        pageSize: QUICKBOOKS_HUB_MAX_PAGE_SIZE,
+        sort: 'name',
+        search: search.trim() || undefined
+      });
+      const items = response.data.data.items ?? [];
+      setLineAccounts(items);
+      return items;
+    } catch (apiError) {
+      setLineAccounts([]);
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Could not load QuickBooks expense accounts.'),
+          severity: 'warning'
         })
       );
-    } catch {
-      setLineAccounts([]);
+      return [];
     } finally {
       setLineAccountsLoading(false);
     }
-  }, []);
+  }, [dispatch]);
+
+  const loadDepositLineAccounts = useCallback(async (search = ''): Promise<QuickBooksHubChartAccount[]> => {
+    setDepositLineAccountsLoading(true);
+    try {
+      const response = await accountingApi.getQuickbooksHubChartOfAccounts({
+        accountKind: 'deposit_line',
+        status: 'active',
+        page: 1,
+        pageSize: QUICKBOOKS_HUB_MAX_PAGE_SIZE,
+        sort: 'name',
+        search: search.trim() || undefined
+      });
+      const items = response.data.data.items ?? [];
+      setDepositLineAccounts(items);
+      return items;
+    } catch (apiError) {
+      setDepositLineAccounts([]);
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(
+            apiError,
+            'Could not load QuickBooks deposit line accounts. Check your QuickBooks connection.'
+          ),
+          severity: 'warning'
+        })
+      );
+      return [];
+    } finally {
+      setDepositLineAccountsLoading(false);
+    }
+  }, [dispatch]);
+
+  const refreshQuickBooksAccounts = useCallback(async () => {
+    setRefreshingQuickBooksAccounts(true);
+    try {
+      await accountingApi.refreshQuickbooksReferenceData();
+      await Promise.all([loadBankAccounts(), loadLineAccounts(), loadDepositLineAccounts()]);
+      dispatch(showSnackbar({ message: 'QuickBooks accounts refreshed', severity: 'success' }));
+    } catch (apiError) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Failed to refresh QuickBooks accounts'),
+          severity: 'error'
+        })
+      );
+    } finally {
+      setRefreshingQuickBooksAccounts(false);
+    }
+  }, [dispatch, loadBankAccounts, loadDepositLineAccounts, loadLineAccounts]);
 
   useEffect(() => {
     void loadBankAccounts();
   }, [loadBankAccounts]);
 
   useEffect(() => {
-    if (!editModalOpen) {
-      lineAccountPrefilledRef.current = false;
-      return;
-    }
     void loadLineAccounts();
-  }, [editModalOpen, loadLineAccounts]);
+    void loadDepositLineAccounts();
+  }, [loadDepositLineAccounts, loadLineAccounts]);
+
+  useEffect(() => {
+    if (!editModalOpen) return;
+    const timer = setTimeout(() => {
+      void loadBankAccounts(bankAccountSearch);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [bankAccountSearch, editModalOpen, loadBankAccounts]);
+
+  useEffect(() => {
+    if (!editModalOpen || workflowType !== 'Deposit') return;
+    const timer = setTimeout(() => {
+      void loadDepositLineAccounts(depositLineAccountSearch);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [depositLineAccountSearch, editModalOpen, loadDepositLineAccounts, workflowType]);
+
+  useEffect(() => {
+    if (!editModalOpen || !['Expense', 'Check', 'Bill', 'BillPayment'].includes(workflowType)) return;
+    const timer = setTimeout(() => {
+      void loadLineAccounts(lineAccountSearch);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [editModalOpen, lineAccountSearch, loadLineAccounts, workflowType]);
+
+  useEffect(() => {
+    if (!editModalOpen) {
+      lineAccountPrefilledRef.current = null;
+      setDepositLineAccountSearch('');
+      setDepositLineAccountInput('');
+      setBankAccountSearch('');
+      setLineAccountSearch('');
+    }
+  }, [editModalOpen]);
 
   const openCreateBankAccountDialog = useCallback(
     (target: 'transferFrom' | 'transferTo' | 'depositTo' | 'check') => {
@@ -1060,6 +1263,9 @@ export const StatementDetailPage = () => {
       const newAccountId = chartAccountRefValue(created);
       if (newAccountId) {
         setWorkflowForm((form) => ({ ...form, lineAccountRef: newAccountId }));
+        if (createLineAccountKind === 'income') {
+          setDepositLineAccountInput(created.name);
+        }
       }
       setCreateLineAccountOpen(false);
       dispatch(
@@ -1096,6 +1302,102 @@ export const StatementDetailPage = () => {
     }
   }, []);
 
+  const ensureReviewQuickBooksData = useCallback(async () => {
+    const tasks: Array<Promise<unknown>> = [loadBankAccounts(bankAccountSearch)];
+    if (workflowType === 'Deposit') {
+      tasks.push(loadDepositLineAccounts(depositLineAccountSearch));
+    }
+    if (['Expense', 'Check', 'Bill', 'BillPayment'].includes(workflowType)) {
+      tasks.push(loadLineAccounts(lineAccountSearch));
+    }
+    if (workflowType === 'SalesReceipt') {
+      tasks.push(loadQbItems(qbItemSearch));
+    }
+    if (
+      workflowType === 'SalesReceipt' ||
+      workflowType === 'CustomerPayment' ||
+      workflowType === 'Deposit'
+    ) {
+      tasks.push(loadContactOptions('customer', contactSearch.customer));
+    }
+    if (
+      workflowType === 'Expense' ||
+      workflowType === 'Check' ||
+      workflowType === 'Bill' ||
+      workflowType === 'BillPayment'
+    ) {
+      tasks.push(loadContactOptions('vendor', contactSearch.vendor));
+    }
+    await Promise.all(tasks);
+  }, [
+    bankAccountSearch,
+    contactSearch.customer,
+    contactSearch.vendor,
+    depositLineAccountSearch,
+    lineAccountSearch,
+    loadBankAccounts,
+    loadContactOptions,
+    loadDepositLineAccounts,
+    loadLineAccounts,
+    loadQbItems,
+    qbItemSearch,
+    workflowType
+  ]);
+
+  useEffect(() => {
+    if (!editModalOpen || !editItem) {
+      setReviewQuickBooksBootstrapping(false);
+      return;
+    }
+    const generation = reviewQuickBooksBootstrapGenRef.current + 1;
+    reviewQuickBooksBootstrapGenRef.current = generation;
+    setReviewQuickBooksBootstrapping(true);
+    void ensureReviewQuickBooksData().finally(() => {
+      if (reviewQuickBooksBootstrapGenRef.current === generation) {
+        setReviewQuickBooksBootstrapping(false);
+      }
+    });
+    return () => {
+      reviewQuickBooksBootstrapGenRef.current += 1;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once per modal/item/workflow; avoid reload loop
+  }, [editModalOpen, editItem?.id, workflowType]);
+
+  const createQbItem = useCallback(async (rawName: string) => {
+    const trimmedName = rawName.trim();
+    if (!trimmedName) {
+      dispatch(showSnackbar({ message: 'Item name is required', severity: 'error' }));
+      return;
+    }
+    setQbItemCreating(true);
+    try {
+      const response = await accountingApi.createQuickbooksHubItem({
+        name: trimmedName,
+        type: 'Service'
+      });
+      const created = response.data.data.item;
+      setQbItems((current) => {
+        const withoutDuplicate = current.filter((item) => item.id !== created.id);
+        return [created, ...withoutDuplicate];
+      });
+      setQbItemSearch(created.name);
+      setWorkflowForm((form) => ({
+        ...form,
+        salesItemRefId: created.id
+      }));
+      dispatch(showSnackbar({ message: 'QuickBooks product/service item created', severity: 'success' }));
+    } catch (apiError) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(apiError, 'Failed to create QuickBooks item'),
+          severity: 'error'
+        })
+      );
+    } finally {
+      setQbItemCreating(false);
+    }
+  }, [dispatch]);
+
   const loadOpenInvoices = useCallback(async (customerQbId: string) => {
     if (!customerQbId.trim()) {
       setOpenInvoices([]);
@@ -1128,14 +1430,16 @@ export const StatementDetailPage = () => {
   }, []);
 
   useEffect(() => {
+    if (!editModalOpen) return;
     const timer = setTimeout(() => { void loadContactOptions('vendor', contactSearch.vendor); }, 250);
     return () => clearTimeout(timer);
-  }, [contactSearch.vendor, loadContactOptions]);
+  }, [editModalOpen, contactSearch.vendor, loadContactOptions]);
 
   useEffect(() => {
+    if (!editModalOpen) return;
     const timer = setTimeout(() => { void loadContactOptions('customer', contactSearch.customer); }, 250);
     return () => clearTimeout(timer);
-  }, [contactSearch.customer, loadContactOptions]);
+  }, [editModalOpen, contactSearch.customer, loadContactOptions]);
 
   useEffect(() => {
     if (!editModalOpen || workflowType !== 'SalesReceipt') return;
@@ -1160,21 +1464,31 @@ export const StatementDetailPage = () => {
     setEditItem(item);
     setSaveAndNext(autoSaveAndNext);
     setEditModalOpen(true);
-    const initialType = suggestWorkflowType({
-      direction: item.direction,
-      description: item.description ?? '',
-      transactionFamily: item.transactionFamily,
-      proposedTxnType: item.proposedTxnType,
-      checkNumber: item.checkNumber,
-      section: item.section,
-      rowType: item.rowType
-    });
+    setDepositLineAccountSearch('');
+    setDepositLineAccountInput('');
+    const linkedCheck = resolveLinkedCheck(item, checks);
+    const initialType = isCheckSuggestionItem(item)
+      ? 'Check'
+      : isGenericBankDepositRow(item)
+        ? 'Deposit'
+        : suggestWorkflowType({
+            direction: item.direction,
+            description: item.description ?? '',
+            transactionFamily: item.transactionFamily,
+            proposedTxnType: item.proposedTxnType,
+            checkNumber: item.checkNumber,
+            section: item.section,
+            rowType: item.rowType
+          });
     setWorkflowType(initialType);
     const suggestion = suggestCategoryPreset({
       direction: item.direction,
       description: item.description ?? ''
     });
     const defaultBankAccountId = effectiveBankAccountId;
+    const payeeSeed = resolvePayeeNameForReview(item, linkedCheck);
+    const categorySeed = resolveCategoryAccountSeed(item, linkedCheck);
+    const checkNumberSeed = resolveCheckNumberForReview(item, linkedCheck);
     // For Transfer rows, the upload account is one side of the move and the
     // counterparty (e.g. xxx3588 hint) is the other side. Direction tells us
     // which side the upload account is on:
@@ -1193,10 +1507,10 @@ export const StatementDetailPage = () => {
     } else if (initialType === 'Check') {
       defaultTransferFromAccount = defaultBankAccountId || (item.statementAccountMask ?? '');
     }
-    lineAccountPrefilledRef.current = false;
+    lineAccountPrefilledRef.current = null;
     setWorkflowForm({
-      vendor: item.direction === 'debit' ? item.payeeName ?? '' : '',
-      customer: item.direction === 'credit' ? item.payeeName ?? '' : '',
+      vendor: item.direction === 'debit' ? payeeSeed : '',
+      customer: item.direction === 'credit' ? payeeSeed : '',
       categoryLabel: suggestion?.label ?? '',
       customCategory: '',
       salesItemRefId: '',
@@ -1208,10 +1522,10 @@ export const StatementDetailPage = () => {
           : '',
       transferFromAccount: defaultTransferFromAccount,
       transferToAccount: defaultTransferToAccount,
-      memo: item.sourceText ?? '',
-      checkNumber: item.checkNumber ?? '',
-      lineAccountRef: item.categoryAccountId?.trim() ?? '',
-      vendorQbId: '',
+      memo: linkedCheck?.extracted?.memo ?? item.sourceText ?? '',
+      checkNumber: checkNumberSeed,
+      lineAccountRef: categorySeed,
+      vendorQbId: linkedCheck?.proposal?.payeeId?.trim() ?? '',
       customerQbId: '',
       matchExistingCheck: true
     });
@@ -1241,53 +1555,170 @@ export const StatementDetailPage = () => {
   }, [editModalOpen, editItem, effectiveBankAccountId, workflowType]);
 
   useEffect(() => {
-    if (!editModalOpen || !editItem || lineAccountsLoading || lineAccounts.length === 0 || lineAccountPrefilledRef.current) return;
-    const seed = editItem.categoryAccountId?.trim();
-    if (seed) {
-      const byId = lineAccounts.find((a) => chartAccountRefValue(a) === seed || a.id === seed);
-      setWorkflowForm((f) => ({ ...f, lineAccountRef: byId ? chartAccountRefValue(byId) : seed }));
-      lineAccountPrefilledRef.current = true;
+    if (!editModalOpen || !editItem) return;
+    const prefillKey = `${editItem.id}:${workflowType}`;
+    if (lineAccountPrefilledRef.current === prefillKey) return;
+
+    const prefillFromPool = (
+      pool: QuickBooksHubChartAccount[],
+      defaultPicker: (accounts: QuickBooksHubChartAccount[]) => QuickBooksHubChartAccount | undefined
+    ) => {
+      const seed = resolveCategoryAccountSeed(editItem, editModalLinkedCheck);
+      if (seed) {
+        const normalizedSeed = seed.toLowerCase();
+        const byId = pool.find(
+          (account) =>
+            chartAccountRefValue(account) === seed ||
+            account.id === seed ||
+            account.name.trim().toLowerCase() === normalizedSeed
+        );
+        if (byId) {
+          setWorkflowForm((form) => ({
+            ...form,
+            lineAccountRef: chartAccountRefValue(byId)
+          }));
+          if (workflowType === 'Deposit') {
+            setDepositLineAccountInput(byId.name);
+          }
+          lineAccountPrefilledRef.current = prefillKey;
+          return true;
+        }
+        if (pool.length > 0) {
+          return false;
+        }
+        setWorkflowForm((form) => ({
+          ...form,
+          lineAccountRef: seed
+        }));
+        if (workflowType === 'Deposit') {
+          setDepositLineAccountInput(seed);
+        }
+        lineAccountPrefilledRef.current = prefillKey;
+        return true;
+      }
+      const preset = suggestCategoryPreset({
+        direction: editItem.direction,
+        description: editItem.description ?? ''
+      });
+      if (preset) {
+        const fuzzy = pool.find((account) => account.name === preset.label);
+        if (fuzzy) {
+          setWorkflowForm((form) => ({
+            ...form,
+            categoryLabel: preset.label,
+            lineAccountRef: chartAccountRefValue(fuzzy)
+          }));
+          if (workflowType === 'Deposit') {
+            setDepositLineAccountInput(fuzzy.name);
+          }
+          lineAccountPrefilledRef.current = prefillKey;
+          return true;
+        }
+      }
+      const fallback = defaultPicker(pool);
+      if (fallback) {
+        setWorkflowForm((form) => ({
+          ...form,
+          lineAccountRef: chartAccountRefValue(fallback)
+        }));
+        if (workflowType === 'Deposit') {
+          setDepositLineAccountInput(fallback.name);
+        }
+        lineAccountPrefilledRef.current = prefillKey;
+        return true;
+      }
+      return false;
+    };
+
+    if (workflowType === 'Deposit') {
+      if (depositLineAccountsLoading || depositLineAccounts.length === 0) return;
+      prefillFromPool(depositLineAccounts, pickDefaultDepositLineAccount);
       return;
     }
-    const preset = suggestCategoryPreset({
-      direction: editItem.direction,
-      description: editItem.description ?? ''
-    });
-    if (preset) {
-      const fuzzy = lineAccounts.find((a) => a.name === preset.label);
-      if (fuzzy) {
-        setWorkflowForm((f) => ({
-          ...f,
-          categoryLabel: preset.label,
-          lineAccountRef: chartAccountRefValue(fuzzy)
-        }));
-        lineAccountPrefilledRef.current = true;
+
+    if (lineAccountsLoading || lineAccounts.length === 0) return;
+
+    if (workflowType === 'SalesReceipt') {
+      const revenuePool = depositLineAccounts.filter((account) => account.type === 'revenue');
+      if (revenuePool.length > 0) {
+        prefillFromPool(revenuePool, pickDefaultDepositLineAccount);
         return;
       }
     }
-    if (workflowType === 'Deposit' || workflowType === 'SalesReceipt') {
-      const revenueAccount =
-        lineAccounts.find((account) => account.type === 'revenue') ??
-        lineAccounts.find((account) => String(account.type ?? '').toLowerCase().includes('income'));
-      if (revenueAccount) {
+
+    if (workflowType === 'Check' || workflowType === 'Expense') {
+      const expenseAccount = pickDefaultExpenseLineAccount(lineAccounts);
+      if (expenseAccount) {
+        setLineAccountSearch(expenseAccount.name);
         setWorkflowForm((form) => ({
           ...form,
-          lineAccountRef: chartAccountRefValue(revenueAccount)
+          lineAccountRef: chartAccountRefValue(expenseAccount)
         }));
       }
     }
-    lineAccountPrefilledRef.current = true;
-  }, [editModalOpen, editItem, lineAccounts, lineAccountsLoading, workflowType]);
+    lineAccountPrefilledRef.current = prefillKey;
+  }, [
+    editModalOpen,
+    editItem,
+    editModalLinkedCheck,
+    depositLineAccounts,
+    depositLineAccountsLoading,
+    lineAccounts,
+    lineAccountsLoading,
+    workflowType
+  ]);
+
+  useEffect(() => {
+    if (!editModalOpen || !statementId) {
+      setReviewCheckImageUrl(null);
+      setReviewCheckImageLoading(false);
+      return;
+    }
+
+    const cropPath = editModalLinkedCheck?.artifacts?.cropImagePath?.trim();
+    if (!cropPath) {
+      setReviewCheckImageUrl(null);
+      setReviewCheckImageLoading(false);
+      return;
+    }
+
+    if (blobUrlsRef.current[cropPath]) {
+      setReviewCheckImageUrl(blobUrlsRef.current[cropPath]);
+      return;
+    }
+
+    let cancelled = false;
+    setReviewCheckImageLoading(true);
+    void accountingApi
+      .getStatementArtifactBlob(statementId, cropPath)
+      .then((response) => {
+        if (cancelled) return;
+        const nextUrl = URL.createObjectURL(response.data);
+        setArtifactBlobUrls((current) => ({ ...current, [cropPath]: nextUrl }));
+        setReviewCheckImageUrl(nextUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setReviewCheckImageUrl(null);
+      })
+      .finally(() => {
+        if (!cancelled) setReviewCheckImageLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editModalOpen, editModalLinkedCheck?.artifacts?.cropImagePath, statementId]);
 
   const closeEditModal = () => {
     setEditModalOpen(false);
     setEditItem(null);
     setSaveAndNext(false);
     setApproveMenuOpen(false);
+    setReviewCheckImageUrl(null);
   };
 
   const saveEditModal = async (action: 'save' | 'save_next' | 'mark_non_posting') => {
-    if (!editItem || !statement) return;
+    if (!editItem || !statement || mutating) return;
     if (action !== 'mark_non_posting' && postingBlockingErrors.length > 0) {
       dispatch(
         showSnackbar({
@@ -1298,30 +1729,89 @@ export const StatementDetailPage = () => {
       return;
     }
 
-    const proposalPatch = action === 'mark_non_posting' ? undefined : buildStatementProposalPatch();
-    const mergedSuggestion: StatementSuggestionItem = {
-      ...editItem,
-      payeeName:
-        workflowType === 'SalesReceipt' || workflowType === 'Deposit' || workflowType === 'CustomerPayment'
-          ? workflowForm.customer || editItem.payeeName
-          : workflowForm.vendor || editItem.payeeName,
-      categoryAccountId: workflowForm.lineAccountRef.trim() || editItem.categoryAccountId,
-      proposedTxnType: mapWorkflowToProposedType(workflowType) ?? editItem.proposedTxnType,
-      resolvedRelatedAccountId:
-        workflowType === 'Transfer'
-          ? workflowForm.transferToAccount || editItem.resolvedRelatedAccountId
-          : editItem.resolvedRelatedAccountId,
-      checkNumber: workflowType === 'Check' ? workflowForm.checkNumber || editItem.checkNumber : editItem.checkNumber,
-      bankAccountId:
-        workflowType === 'Deposit' || workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment'
-          ? workflowForm.depositToAccount || effectiveBankAccountId || editItem.bankAccountId
-          : workflowForm.transferFromAccount || effectiveBankAccountId || editItem.bankAccountId
-    };
+    setMutating(true);
+    let resolvedLineAccountRef = '';
+    let proposalPatch: StatementProposalPatch | undefined;
+    try {
+      if (action !== 'mark_non_posting') {
+        await ensureReviewQuickBooksData();
+        const loadedDepositLines =
+          workflowType === 'Deposit' ? await loadDepositLineAccounts(depositLineAccountSearch) : depositLineAccounts;
+        const loadedExpenseLines =
+          workflowType === 'Expense' || workflowType === 'Check'
+            ? await loadLineAccounts(lineAccountSearch)
+            : lineAccounts;
+        const depositPool = filterDepositLineAccounts(loadedDepositLines);
+        const expensePool = filterExpenseLineAccounts(loadedExpenseLines);
+        const pool = workflowType === 'Deposit' ? depositPool : expensePool;
+        resolvedLineAccountRef = resolveLineAccountRefFromPool(pool, {
+          lineAccountRef: workflowForm.lineAccountRef,
+          lineAccountInput: workflowType === 'Deposit' ? depositLineAccountInput : undefined,
+          categorySeed: resolveCategoryAccountSeed(editItem, editModalLinkedCheck),
+          chartAccountRefValue
+        });
+        if (!resolvedLineAccountRef && workflowType === 'Deposit') {
+          const fallbackLine = pickDefaultDepositLineAccount(loadedDepositLines);
+          if (fallbackLine) resolvedLineAccountRef = chartAccountRefValue(fallbackLine);
+        }
+        if (!resolvedLineAccountRef && (workflowType === 'Expense' || workflowType === 'Check')) {
+          const fallbackLine = pickDefaultExpenseLineAccount(loadedExpenseLines);
+          if (fallbackLine) resolvedLineAccountRef = chartAccountRefValue(fallbackLine);
+        }
+        const bankPaidFrom = (workflowForm.transferFromAccount || effectiveBankAccountId || '').trim();
+        const depositTo = (workflowForm.depositToAccount || effectiveBankAccountId || '').trim();
+        const qb = mapWorkflowToProposedType(workflowType);
+        if (qb === 'Deposit' && (!depositTo || !resolvedLineAccountRef)) {
+          dispatch(
+            showSnackbar({
+              message: !depositTo
+                ? 'Select the bank account to deposit into.'
+                : 'Select a deposit line account.',
+              severity: 'error'
+            })
+          );
+          return;
+        }
+        if ((qb === 'Expense' || qb === 'Check') && (!bankPaidFrom || !resolvedLineAccountRef)) {
+          dispatch(
+            showSnackbar({
+              message: !bankPaidFrom
+                ? 'Select the bank account paid from.'
+                : 'Select a QuickBooks expense line account.',
+              severity: 'error'
+            })
+          );
+          return;
+        }
+        proposalPatch = buildStatementProposalPatch({ lineRef: resolvedLineAccountRef });
+      }
 
-    if (action === 'mark_non_posting') {
-      await updateSuggestionReviewStatus(mergedSuggestion, 'excluded', undefined, false);
-    } else {
-      await updateSuggestionReviewStatus(mergedSuggestion, 'approved', proposalPatch, true);
+      const mergedSuggestion: StatementSuggestionItem = {
+        ...editItem,
+        payeeName:
+          workflowType === 'SalesReceipt' || workflowType === 'Deposit' || workflowType === 'CustomerPayment'
+            ? workflowForm.customer || editItem.payeeName
+            : workflowForm.vendor || editItem.payeeName,
+        categoryAccountId: resolvedLineAccountRef || editItem.categoryAccountId,
+        proposedTxnType: mapWorkflowToProposedType(workflowType) ?? editItem.proposedTxnType,
+        resolvedRelatedAccountId:
+          workflowType === 'Transfer'
+            ? workflowForm.transferToAccount || editItem.resolvedRelatedAccountId
+            : editItem.resolvedRelatedAccountId,
+        checkNumber: workflowType === 'Check' ? workflowForm.checkNumber || editItem.checkNumber : editItem.checkNumber,
+        bankAccountId:
+          workflowType === 'Deposit' || workflowType === 'SalesReceipt' || workflowType === 'CustomerPayment'
+            ? workflowForm.depositToAccount || effectiveBankAccountId || editItem.bankAccountId
+            : workflowForm.transferFromAccount || effectiveBankAccountId || editItem.bankAccountId
+      };
+
+      if (action === 'mark_non_posting') {
+        await updateSuggestionReviewStatus(mergedSuggestion, 'excluded', undefined, false);
+      } else {
+        await updateSuggestionReviewStatus(mergedSuggestion, 'approved', proposalPatch, true);
+      }
+    } finally {
+      setMutating(false);
     }
     if (action === 'save_next' || saveAndNext) {
       const currentId = editItem.id;
@@ -2405,7 +2895,45 @@ export const StatementDetailPage = () => {
                 </Paper>
 
                 <Grid container spacing={1.5}>
-                  <Grid size={{ xs: 12 }}>
+                  {editModalLinkedCheck?.artifacts?.cropImagePath ? (
+                    <Grid size={{ xs: 12, md: 5 }}>
+                      <Paper variant="outlined" sx={{ p: 1.5, height: '100%' }}>
+                        <Typography variant="overline" color="text.secondary">
+                          Check image
+                        </Typography>
+                        <Box
+                          sx={{
+                            mt: 0.75,
+                            minHeight: 180,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            bgcolor: 'background.default',
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            overflow: 'hidden'
+                          }}
+                        >
+                          {reviewCheckImageLoading ? (
+                            <CircularProgress size={28} />
+                          ) : reviewCheckImageUrl ? (
+                            <Box
+                              component="img"
+                              src={reviewCheckImageUrl}
+                              alt={`Check ${resolveCheckNumberForReview(editItem, editModalLinkedCheck) || 'scan'}`}
+                              sx={{ width: '100%', maxHeight: 320, objectFit: 'contain' }}
+                            />
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              Check image is not available yet.
+                            </Typography>
+                          )}
+                        </Box>
+                      </Paper>
+                    </Grid>
+                  ) : null}
+                  <Grid size={{ xs: 12, md: editModalLinkedCheck?.artifacts?.cropImagePath ? 7 : 12 }}>
                     <Paper variant="outlined" sx={{ p: 1.5 }}>
                       <Typography variant="overline" color="text.secondary">Source proof</Typography>
                       <Box
@@ -2428,60 +2956,6 @@ export const StatementDetailPage = () => {
                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
                         Page {editItem.sourcePage ?? '-'} · {formatStatusLabel(editItem.section ?? 'unknown')}
                       </Typography>
-                    </Paper>
-                  </Grid>
-
-                  <Grid size={{ xs: 12 }}>
-                    <Paper variant="outlined" sx={{ p: 1.5 }}>
-                      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-                        <Typography variant="subtitle2">Type</Typography>
-                        {(() => {
-                          const suggestedType = suggestWorkflowType({
-                            direction: editItem.direction,
-                            description: editItem.description ?? '',
-                            transactionFamily: editItem.transactionFamily,
-                            proposedTxnType: editItem.proposedTxnType,
-                            checkNumber: editItem.checkNumber,
-                            section: editItem.section,
-                            rowType: editItem.rowType
-                          });
-                          if (suggestedType === workflowType) return null;
-                          return (
-                            <Chip
-                              size="small"
-                              color="primary"
-                              variant="outlined"
-                              label={`Use ${suggestedType}`}
-                              onClick={() => setWorkflowType(suggestedType)}
-                            />
-                          );
-                        })()}
-                      </Stack>
-                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                        {(editItem.direction === 'debit'
-                          ? (['Expense', 'Check', 'Bill', 'BillPayment', 'Transfer', 'JournalEntry'] as WorkflowTxnType[])
-                          : (['Deposit', 'CustomerPayment', 'SalesReceipt', 'Transfer', 'JournalEntry'] as WorkflowTxnType[])
-                        ).map((type) => (
-                          <Chip
-                            key={type}
-                            size="small"
-                            label={
-                              type === 'BillPayment'
-                                ? 'Bill Payment'
-                                : type === 'SalesReceipt'
-                                  ? 'Sales Receipt'
-                                  : type === 'CustomerPayment'
-                                    ? 'Customer Payment'
-                                    : type === 'JournalEntry'
-                                      ? 'Journal Entry'
-                                      : type
-                            }
-                            color={workflowType === type ? 'primary' : 'default'}
-                            variant={workflowType === type ? 'filled' : 'outlined'}
-                            onClick={() => setWorkflowType(type)}
-                          />
-                        ))}
-                      </Stack>
                     </Paper>
                   </Grid>
 
@@ -2553,53 +3027,89 @@ export const StatementDetailPage = () => {
                             />
                           </Grid>
                           <Grid size={{ xs: 12, md: 6 }}>
-                            <Autocomplete
-                              size="small"
-                              options={lineAccounts.filter((row) => row.type === 'expense')}
-                              loading={lineAccountsLoading}
-                              getOptionLabel={(option) => option.name}
-                              isOptionEqualToValue={(option, value) => chartAccountRefValue(option) === chartAccountRefValue(value)}
-                              filterOptions={(options) => [
-                                ...options,
-                                {
-                                  id: '__create_line__',
-                                  qbId: null,
-                                  name: '+ Create expense account in QuickBooks…',
-                                  type: 'expense',
-                                  detailType: null,
-                                  status: 'active' as const,
-                                  balance: null
+                            <Stack direction="row" spacing={0.75} alignItems="flex-start">
+                              <Autocomplete
+                                size="small"
+                                openOnFocus
+                                sx={{ flex: 1 }}
+                                options={expenseLineAccountOptions}
+                                loading={lineAccountsLoading}
+                                getOptionLabel={(option) => option.name}
+                                isOptionEqualToValue={(option, value) =>
+                                  chartAccountRefValue(option) === chartAccountRefValue(value)
                                 }
-                              ]}
-                              value={lineAccounts.find((row) => row.type === 'expense' && chartAccountRefValue(row) === workflowForm.lineAccountRef) ?? null}
-                              onChange={(_event, value) => {
-                                if (value?.id === '__create_line__') {
-                                  openCreateLineAccountDialog('expense');
-                                  return;
+                                filterOptions={(options) => [
+                                  ...options,
+                                  {
+                                    id: '__create_line__',
+                                    qbId: null,
+                                    name: '+ Create expense account in QuickBooks…',
+                                    type: 'expense',
+                                    detailType: null,
+                                    status: 'active' as const,
+                                    balance: null
+                                  }
+                                ]}
+                                value={
+                                  expenseLineAccountOptions.find(
+                                    (row) => chartAccountRefValue(row) === workflowForm.lineAccountRef
+                                  ) ?? null
                                 }
-                                setWorkflowForm((form) => ({
-                                  ...form,
-                                  lineAccountRef: value ? chartAccountRefValue(value) : ''
-                                }));
-                              }}
-                              renderInput={(params) => (
-                                <TextField
-                                  {...params}
-                                  label="Expense category (QuickBooks account)"
-                                  placeholder="Search expense / COGS accounts"
-                                  InputLabelProps={{ shrink: true }}
-                                  InputProps={{
-                                    ...params.InputProps,
-                                    endAdornment: (
-                                      <>
-                                        {lineAccountsLoading ? <CircularProgress size={14} /> : null}
-                                        {params.InputProps.endAdornment}
-                                      </>
-                                    )
-                                  }}
-                                />
-                              )}
-                            />
+                                inputValue={lineAccountSearch}
+                                onInputChange={(_event, value, reason) => {
+                                  if (reason === 'reset') return;
+                                  setLineAccountSearch(value);
+                                  if (reason === 'input' && workflowForm.lineAccountRef) {
+                                    setWorkflowForm((form) => ({ ...form, lineAccountRef: '' }));
+                                  }
+                                }}
+                                onChange={(_event, value) => {
+                                  if (value?.id === '__create_line__') {
+                                    openCreateLineAccountDialog('expense');
+                                    return;
+                                  }
+                                  setLineAccountSearch(value?.name ?? '');
+                                  setWorkflowForm((form) => ({
+                                    ...form,
+                                    lineAccountRef: value ? chartAccountRefValue(value) : ''
+                                  }));
+                                }}
+                                renderInput={(params) => (
+                                  <TextField
+                                    {...params}
+                                    label="Expense category (QuickBooks account)"
+                                    placeholder="Search expense / COGS accounts"
+                                    InputLabelProps={{ shrink: true }}
+                                    InputProps={{
+                                      ...params.InputProps,
+                                      endAdornment: (
+                                        <>
+                                          {lineAccountsLoading ? <CircularProgress size={14} /> : null}
+                                          {params.InputProps.endAdornment}
+                                        </>
+                                      )
+                                    }}
+                                  />
+                                )}
+                              />
+                              <Tooltip title="Refresh QuickBooks expense accounts">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    aria-label="Refresh QuickBooks expense accounts"
+                                    onClick={() => void refreshQuickBooksAccounts()}
+                                    disabled={refreshingQuickBooksAccounts}
+                                    sx={{ mt: 0.5 }}
+                                  >
+                                    {refreshingQuickBooksAccounts ? (
+                                      <CircularProgress size={18} />
+                                    ) : (
+                                      <RefreshIcon fontSize="small" />
+                                    )}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            </Stack>
                           </Grid>
                           {workflowType === 'Check' ? (
                             <Grid size={{ xs: 12, md: 6 }}>
@@ -2634,51 +3144,27 @@ export const StatementDetailPage = () => {
                             </Grid>
                           ) : null}
                           <Grid size={{ xs: 12, md: 6 }}>
-                            <TextField
-                              size="small"
-                              select={bankAccounts.length > 0}
+                            <StatementBankAccountAutocomplete
                               label="Paid from (bank account)"
-                              placeholder="e.g. Checking xxx1234"
+                              placeholder="Search QuickBooks bank accounts"
                               value={workflowForm.transferFromAccount}
-                              onChange={(event) => {
-                                const value = event.target.value;
-                                if (value === '__create__') {
-                                  openCreateBankAccountDialog('check');
-                                  return;
-                                }
-                                setWorkflowForm((form) => ({ ...form, transferFromAccount: value }));
-                              }}
-                              fullWidth
-                              InputLabelProps={{ shrink: true }}
+                              onChange={(accountRef) =>
+                                setWorkflowForm((form) => ({ ...form, transferFromAccount: accountRef }))
+                              }
+                              onInputChange={setBankAccountSearch}
+                              accounts={bankAccounts}
+                              loading={bankAccountsLoading}
+                              refreshing={refreshingQuickBooksAccounts}
+                              onRefresh={() => void refreshQuickBooksAccounts()}
+                              onCreateNew={() => openCreateBankAccountDialog('check')}
                               helperText={
                                 effectiveBankAccountId &&
                                 workflowForm.transferFromAccount === effectiveBankAccountId
                                   ? 'Defaulted to the bank chart account selected at upload.'
                                   : undefined
                               }
-                              SelectProps={bankAccounts.length > 0 ? { displayEmpty: true } : undefined}
-                            >
-                              {bankAccounts.length > 0
-                                ? [
-                                    <MenuItem key="__none__" value="">
-                                      <em>— Select bank account —</em>
-                                    </MenuItem>,
-                                    ...bankAccounts.map((account) => {
-                                      const detail = account.detailType || account.type;
-                                      const ref = chartAccountRefValue(account);
-                                      return (
-                                        <MenuItem key={account.id} value={ref}>
-                                          {detail ? `${account.name} · ${detail}` : account.name}
-                                        </MenuItem>
-                                      );
-                                    }),
-                                    <Divider key="div-pf" sx={{ my: 0.5 }} component="li" />,
-                                    <MenuItem key="__create__pf" value="__create__" sx={{ color: 'primary.main', fontWeight: 600 }}>
-                                      + Create new bank account…
-                                    </MenuItem>
-                                  ]
-                                : null}
-                            </TextField>
+                              required
+                            />
                           </Grid>
                           <Grid size={{ xs: 12 }}>
                             <TextField
@@ -2697,6 +3183,129 @@ export const StatementDetailPage = () => {
 
                       {workflowType === 'Deposit' ? (
                         <Grid container spacing={1.25} sx={{ mt: 0.25 }}>
+                          <Grid size={{ xs: 12, md: 6 }}>
+                            <StatementBankAccountAutocomplete
+                              label="Deposit to (bank account)"
+                              placeholder="Search QuickBooks bank accounts"
+                              value={workflowForm.depositToAccount}
+                              onChange={(accountRef) =>
+                                setWorkflowForm((form) => ({ ...form, depositToAccount: accountRef }))
+                              }
+                              onInputChange={setBankAccountSearch}
+                              accounts={bankAccounts}
+                              loading={bankAccountsLoading}
+                              refreshing={refreshingQuickBooksAccounts}
+                              onRefresh={() => void refreshQuickBooksAccounts()}
+                              onCreateNew={() => openCreateBankAccountDialog('depositTo')}
+                              helperText={
+                                effectiveBankAccountId &&
+                                workflowForm.depositToAccount === effectiveBankAccountId
+                                  ? 'Defaulted to the bank selected at upload.'
+                                  : 'QuickBooks bank account where this deposit lands.'
+                              }
+                              required
+                            />
+                          </Grid>
+                          <Grid size={{ xs: 12, md: 6 }}>
+                            <Stack direction="row" spacing={0.75} alignItems="flex-start">
+                              <Autocomplete
+                                size="small"
+                                openOnFocus
+                                sx={{ flex: 1 }}
+                                options={depositLineAccountOptions}
+                                loading={depositLineAccountsLoading}
+                                noOptionsText={
+                                  depositLineAccountsLoading
+                                    ? 'Loading deposit line accounts…'
+                                    : 'No deposit line accounts found. Refresh QuickBooks accounts or create an account in QuickBooks.'
+                                }
+                                getOptionLabel={(option) => formatDepositLineAccountLabel(option)}
+                                isOptionEqualToValue={(option, value) =>
+                                  chartAccountRefValue(option) === chartAccountRefValue(value)
+                                }
+                                filterOptions={(options) => [
+                                  ...options,
+                                  {
+                                    id: '__create_line__',
+                                    qbId: null,
+                                    name: '+ Create account in QuickBooks…',
+                                    type: 'revenue',
+                                    detailType: null,
+                                    status: 'active' as const,
+                                    balance: null
+                                  }
+                                ]}
+                                value={
+                                  depositLineAccountOptions.find(
+                                    (row) => chartAccountRefValue(row) === workflowForm.lineAccountRef
+                                  ) ?? null
+                                }
+                                inputValue={depositLineAccountInput}
+                                onInputChange={(_event, value, reason) => {
+                                  if (reason === 'reset') return;
+                                  setDepositLineAccountSearch(value);
+                                  setDepositLineAccountInput(value);
+                                  if (reason === 'input' && workflowForm.lineAccountRef) {
+                                    setWorkflowForm((form) => ({ ...form, lineAccountRef: '' }));
+                                  }
+                                }}
+                                onChange={(_event, value) => {
+                                  if (value?.id === '__create_line__') {
+                                    openCreateLineAccountDialog('income');
+                                    return;
+                                  }
+                                  setDepositLineAccountInput(value?.name ?? '');
+                                  setWorkflowForm((form) => ({
+                                    ...form,
+                                    lineAccountRef: value ? chartAccountRefValue(value) : ''
+                                  }));
+                                }}
+                                renderInput={(params) => (
+                                  <TextField
+                                    {...params}
+                                    label="Deposit line account (QuickBooks)"
+                                    placeholder="Search income, liability, equity, or clearing accounts"
+                                    required
+                                    InputLabelProps={{ shrink: true }}
+                                    helperText={
+                                      depositLineAccountsLoading
+                                        ? 'Loading deposit line accounts from QuickBooks…'
+                                        : depositLineAccountOptions.length === 0
+                                          ? 'No deposit line accounts found. Refresh QuickBooks accounts or create an account in QuickBooks.'
+                                          : undefined
+                                    }
+                                    error={!depositLineAccountsLoading && depositLineAccountOptions.length === 0}
+                                    InputProps={{
+                                      ...params.InputProps,
+                                      endAdornment: (
+                                        <>
+                                          {depositLineAccountsLoading ? <CircularProgress size={14} /> : null}
+                                          {params.InputProps.endAdornment}
+                                        </>
+                                      )
+                                    }}
+                                  />
+                                )}
+                              />
+                              <Tooltip title="Refresh QuickBooks accounts">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    aria-label="Refresh QuickBooks accounts"
+                                    onClick={() => void refreshQuickBooksAccounts()}
+                                    disabled={refreshingQuickBooksAccounts}
+                                    sx={{ mt: 0.5 }}
+                                  >
+                                    {refreshingQuickBooksAccounts ? (
+                                      <CircularProgress size={18} />
+                                    ) : (
+                                      <RefreshIcon fontSize="small" />
+                                    )}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            </Stack>
+                          </Grid>
                           <Grid size={{ xs: 12, md: 6 }}>
                             <Autocomplete
                               size="small"
@@ -2743,9 +3352,10 @@ export const StatementDetailPage = () => {
                               renderInput={(params) => (
                                 <TextField
                                   {...params}
-                                  label="Received from"
+                                  label="Received from (optional)"
                                   placeholder="Search QuickBooks customers"
                                   InputLabelProps={{ shrink: true }}
+                                  helperText="Not required to post a bank deposit in QuickBooks."
                                   InputProps={{
                                     ...params.InputProps,
                                     endAdornment: (
@@ -2758,85 +3368,6 @@ export const StatementDetailPage = () => {
                                 />
                               )}
                             />
-                          </Grid>
-                          <Grid size={{ xs: 12, md: 6 }}>
-                            <Autocomplete
-                              size="small"
-                              options={lineAccounts.filter((row) => row.type === 'revenue')}
-                              loading={lineAccountsLoading}
-                              getOptionLabel={(option) => option.name}
-                              isOptionEqualToValue={(option, value) => chartAccountRefValue(option) === chartAccountRefValue(value)}
-                              filterOptions={(options) => [
-                                ...options,
-                                {
-                                  id: '__create_line__',
-                                  qbId: null,
-                                  name: '+ Create income account in QuickBooks…',
-                                  type: 'revenue',
-                                  detailType: null,
-                                  status: 'active' as const,
-                                  balance: null
-                                }
-                              ]}
-                              value={lineAccounts.find((row) => row.type === 'revenue' && chartAccountRefValue(row) === workflowForm.lineAccountRef) ?? null}
-                              onChange={(_event, value) => {
-                                if (value?.id === '__create_line__') {
-                                  openCreateLineAccountDialog('income');
-                                  return;
-                                }
-                                setWorkflowForm((form) => ({
-                                  ...form,
-                                  lineAccountRef: value ? chartAccountRefValue(value) : ''
-                                }));
-                              }}
-                              renderInput={(params) => (
-                                <TextField
-                                  {...params}
-                                  label="Income / other credit account"
-                                  placeholder="Search income accounts"
-                                  InputLabelProps={{ shrink: true }}
-                                  InputProps={{
-                                    ...params.InputProps,
-                                    endAdornment: (
-                                      <>
-                                        {lineAccountsLoading ? <CircularProgress size={14} /> : null}
-                                        {params.InputProps.endAdornment}
-                                      </>
-                                    )
-                                  }}
-                                />
-                              )}
-                            />
-                          </Grid>
-                          <Grid size={{ xs: 12, md: 6 }}>
-                            <TextField
-                              size="small"
-                              select={bankAccounts.length > 0}
-                              label="Deposit to account"
-                              placeholder="e.g. Checking xxx1234"
-                              value={workflowForm.depositToAccount}
-                              onChange={(event) => setWorkflowForm((form) => ({ ...form, depositToAccount: event.target.value }))}
-                              fullWidth
-                              InputLabelProps={{ shrink: true }}
-                              SelectProps={bankAccounts.length > 0 ? { displayEmpty: true } : undefined}
-                            >
-                              {bankAccounts.length > 0
-                                ? [
-                                    <MenuItem key="__none__" value="">
-                                      <em>— Select bank account —</em>
-                                    </MenuItem>,
-                                    ...bankAccounts.map((account) => {
-                                      const detail = account.detailType || account.type;
-                                      const ref = chartAccountRefValue(account);
-                                      return (
-                                        <MenuItem key={account.id} value={ref}>
-                                          {detail ? `${account.name} · ${detail}` : account.name}
-                                        </MenuItem>
-                                      );
-                                    })
-                                  ]
-                                : null}
-                            </TextField>
                           </Grid>
                           <Grid size={{ xs: 12 }}>
                             <TextField
@@ -2908,35 +3439,21 @@ export const StatementDetailPage = () => {
                             />
                           </Grid>
                           <Grid size={{ xs: 12, md: 6 }}>
-                            <TextField
-                              size="small"
-                              select={bankAccounts.length > 0}
+                            <StatementBankAccountAutocomplete
                               label="Deposit to account"
+                              placeholder="Search QuickBooks bank accounts"
                               value={workflowForm.depositToAccount}
-                              onChange={(event) =>
-                                setWorkflowForm((form) => ({ ...form, depositToAccount: event.target.value }))
+                              onChange={(accountRef) =>
+                                setWorkflowForm((form) => ({ ...form, depositToAccount: accountRef }))
                               }
-                              fullWidth
-                              InputLabelProps={{ shrink: true }}
-                              SelectProps={bankAccounts.length > 0 ? { displayEmpty: true } : undefined}
-                            >
-                              {bankAccounts.length > 0
-                                ? [
-                                    <MenuItem key="__none__" value="">
-                                      <em>— Select bank account —</em>
-                                    </MenuItem>,
-                                    ...bankAccounts.map((account) => {
-                                      const detail = account.detailType || account.type;
-                                      const ref = chartAccountRefValue(account);
-                                      return (
-                                        <MenuItem key={account.id} value={ref}>
-                                          {detail ? `${account.name} · ${detail}` : account.name}
-                                        </MenuItem>
-                                      );
-                                    })
-                                  ]
-                                : null}
-                            </TextField>
+                              onInputChange={setBankAccountSearch}
+                              accounts={bankAccounts}
+                              loading={bankAccountsLoading}
+                              refreshing={refreshingQuickBooksAccounts}
+                              onRefresh={() => void refreshQuickBooksAccounts()}
+                              onCreateNew={() => openCreateBankAccountDialog('depositTo')}
+                              required
+                            />
                           </Grid>
                           <Grid size={{ xs: 12, md: 6 }}>
                             <Autocomplete
@@ -3061,18 +3578,56 @@ export const StatementDetailPage = () => {
                           <Grid size={{ xs: 12, md: 6 }}>
                             <Autocomplete
                               size="small"
+                              freeSolo
                               options={qbItems}
-                              loading={qbItemsLoading}
+                              loading={qbItemsLoading || qbItemCreating}
                               getOptionLabel={(option) =>
-                                option.type ? `${option.name} · ${option.type}` : option.name
+                                typeof option === 'string'
+                                  ? option
+                                  : option.type ? `${option.name} · ${option.type}` : option.name
                               }
+                              filterOptions={(options, state) => {
+                                const input = state.inputValue.trim().toLowerCase();
+                                const matches = options.filter((option) =>
+                                  `${option.name} ${option.type ?? ''}`.toLowerCase().includes(input)
+                                );
+                                const hasExact = input && options.some((option) => option.name.toLowerCase() === input);
+                                if (input && !hasExact) {
+                                  return [
+                                    ...matches,
+                                    {
+                                      id: '__create__',
+                                      name: `+ Create product/service item "${state.inputValue.trim()}"`,
+                                      type: 'Service',
+                                      active: true
+                                    }
+                                  ];
+                                }
+                                return matches;
+                              }}
                               isOptionEqualToValue={(option, value) => option.id === value.id}
                               value={qbItems.find((row) => row.id === workflowForm.salesItemRefId) ?? null}
                               onInputChange={(_event, value) => setQbItemSearch(value)}
                               onChange={(_event, value) => {
+                                if (!value) {
+                                  setWorkflowForm((form) => ({
+                                    ...form,
+                                    salesItemRefId: ''
+                                  }));
+                                  return;
+                                }
+                                if (typeof value === 'string') {
+                                  void createQbItem(value);
+                                  return;
+                                }
+                                if (value.id === '__create__') {
+                                  const raw = value.name.match(/"(.+)"$/)?.[1] ?? qbItemSearch;
+                                  void createQbItem(raw);
+                                  return;
+                                }
                                 setWorkflowForm((form) => ({
                                   ...form,
-                                  salesItemRefId: value?.id ?? ''
+                                  salesItemRefId: value.id
                                 }));
                               }}
                               renderInput={(params) => (
@@ -3085,7 +3640,7 @@ export const StatementDetailPage = () => {
                                     ...params.InputProps,
                                     endAdornment: (
                                       <>
-                                        {qbItemsLoading ? <CircularProgress size={14} /> : null}
+                                        {(qbItemsLoading || qbItemCreating) ? <CircularProgress size={14} /> : null}
                                         {params.InputProps.endAdornment}
                                       </>
                                     )
@@ -3095,39 +3650,21 @@ export const StatementDetailPage = () => {
                             />
                           </Grid>
                           <Grid size={{ xs: 12, md: 6 }}>
-                            <TextField
-                              size="small"
-                              select={bankAccounts.length > 0}
+                            <StatementBankAccountAutocomplete
                               label="Deposit to account"
-                              placeholder="e.g. Checking xxx1234 or Undeposited Funds"
+                              placeholder="e.g. Checking or Undeposited Funds"
                               value={workflowForm.depositToAccount}
-                              onChange={(event) => setWorkflowForm((form) => ({ ...form, depositToAccount: event.target.value }))}
-                              fullWidth
-                              InputLabelProps={{ shrink: true }}
-                              SelectProps={bankAccounts.length > 0 ? { displayEmpty: true } : undefined}
-                            >
-                              {bankAccounts.length > 0
-                                ? [
-                                    <MenuItem key="__none__" value="">
-                                      <em>— Select bank account —</em>
-                                    </MenuItem>,
-                                    ...bankAccounts.map((account) => {
-                                      const detail = account.detailType || account.type;
-                                      const ref = chartAccountRefValue(account);
-                                      return (
-                                        <MenuItem key={account.id} value={ref}>
-                                          {detail ? `${account.name} · ${detail}` : account.name}
-                                        </MenuItem>
-                                      );
-                                    })
-                                  ]
-                                : null}
-                            </TextField>
-                          </Grid>
-                          <Grid size={{ xs: 12 }}>
-                            <Alert severity="info" sx={{ py: 0.5 }}>
-                              Revenue posts through the QuickBooks item&rsquo;s income account mapping — no separate line account is required on sales receipts.
-                            </Alert>
+                              onChange={(accountRef) =>
+                                setWorkflowForm((form) => ({ ...form, depositToAccount: accountRef }))
+                              }
+                              onInputChange={setBankAccountSearch}
+                              accounts={bankAccounts}
+                              loading={bankAccountsLoading}
+                              refreshing={refreshingQuickBooksAccounts}
+                              onRefresh={() => void refreshQuickBooksAccounts()}
+                              onCreateNew={() => openCreateBankAccountDialog('depositTo')}
+                              required
+                            />
                           </Grid>
                           <Grid size={{ xs: 12 }}>
                             <TextField
@@ -3174,11 +3711,10 @@ export const StatementDetailPage = () => {
                                 <em>— Select bank account —</em>
                               </MenuItem>
                               {bankAccounts.map((account) => {
-                                const detail = account.detailType || account.type;
                                 const ref = chartAccountRefValue(account);
                                 return (
                                   <MenuItem key={`from-${account.id}`} value={ref}>
-                                    {detail ? `${account.name} · ${detail}` : account.name}
+                                    {account.name}
                                   </MenuItem>
                                 );
                               })}
@@ -3215,10 +3751,9 @@ export const StatementDetailPage = () => {
                                 <em>— Select bank account —</em>
                               </MenuItem>
                               {bankAccounts.map((account) => {
-                                const detail = account.detailType || account.type;
                                 return (
                                   <MenuItem key={`to-${account.id}`} value={chartAccountRefValue(account)}>
-                                    {detail ? `${account.name} · ${detail}` : account.name}
+                                    {account.name}
                                   </MenuItem>
                                 );
                               })}
@@ -3581,11 +4116,6 @@ export const StatementDetailPage = () => {
               sx={{ ml: 'auto', flexShrink: 0 }}
             >
               {renderStageIndicator()}
-              {statement?.status === 'ready_for_review' ? (
-                <Button variant="contained" onClick={() => navigate('/dashboard/accounting/ledger')}>
-                  Open Ledger Review
-                </Button>
-              ) : null}
               {statement &&
               canEdit &&
               canCompleteMonth &&

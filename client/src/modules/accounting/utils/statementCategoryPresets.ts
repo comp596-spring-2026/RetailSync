@@ -282,9 +282,29 @@ export const suggestWorkflowType = (args: {
   }
 
   if (args.direction === 'credit') {
+    if (args.proposedTxnType === 'Transfer' || args.transactionFamily === 'transfer') {
+      return 'Transfer';
+    }
+    if (args.proposedTxnType === 'Payment') return 'CustomerPayment';
+    if (
+      args.rowType === 'electronic_credit' ||
+      args.section === 'electronic_credits' ||
+      args.rowType === 'other_credit' ||
+      args.section === 'other_credits'
+    ) {
+      return 'SalesReceipt';
+    }
+    if (args.proposedTxnType === 'Deposit') return 'Deposit';
+
+    const description = args.description ?? '';
+    if (/\bdeposit\b/i.test(description)) {
+      return 'Deposit';
+    }
+
     if (args.proposedTxnType === 'SalesReceipt') return 'SalesReceipt';
     if (inferred === 'Transfer') return 'Transfer';
-    const salesMatch = incomeCategoryPresets.find((preset) => preset.keywords.test(args.description));
+
+    const salesMatch = incomeCategoryPresets.find((preset) => preset.keywords.test(description));
     if (
       salesMatch &&
       (salesMatch.id === 'income.sales' ||

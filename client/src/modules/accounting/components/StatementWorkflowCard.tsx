@@ -36,7 +36,6 @@ type StatementWorkflowCardProps = {
   canEdit: boolean;
   canDelete: boolean;
   onOpenWorkspace: () => void;
-  onOpenLedger: () => void;
   onReprocess: () => void;
   onDelete: () => void;
 };
@@ -56,7 +55,6 @@ export const StatementWorkflowCard = ({
   canEdit,
   canDelete,
   onOpenWorkspace,
-  onOpenLedger,
   onReprocess,
   onDelete
 }: StatementWorkflowCardProps) => {
@@ -165,14 +163,6 @@ export const StatementWorkflowCard = ({
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
           <Button size="small" variant="contained" onClick={onOpenWorkspace}>
             Open workspace
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={onOpenLedger}
-            disabled={row.status !== 'ready_for_review'}
-          >
-            Open ledger
           </Button>
           {canEdit ? (
             <Button size="small" variant="outlined" onClick={onReprocess}>

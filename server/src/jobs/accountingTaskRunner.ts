@@ -28,6 +28,7 @@ import {
   buildFallbackManualCheckSlots,
   computeManualCheckSlot,
   detectCheckImagePages,
+  resolveDefaultCheckFallbackStartPage,
   DEFAULT_CHECK_IMAGE_PRESET,
   isCheckImagePageText,
   isLikelyChecksClearedTableCrop,
@@ -1992,6 +1993,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       const uniqueOrderedCheckNumbers = Array.from(new Set(orderedCheckNumbers));
 
       let detectedCheckPages: number[] = [];
+      let checkFallbackStartPage = 4;
       const statementOcrPathForChecks = String(freshStatement.artifacts?.ocrPath ?? '');
       if (uniqueOrderedCheckNumbers.length > 0 && statementOcrPathForChecks) {
         try {
@@ -1999,12 +2001,12 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
             bucketName,
             statementOcrPathForChecks
           );
-          detectedCheckPages = detectCheckImagePages(
-            ocrPages.map((page) => ({
-              pageNumber: Number(page.pageNumber),
-              text: String(page.text ?? '')
-            }))
-          );
+          const checkPageInputs = ocrPages.map((page) => ({
+            pageNumber: Number(page.pageNumber),
+            text: String(page.text ?? '')
+          }));
+          detectedCheckPages = detectCheckImagePages(checkPageInputs);
+          checkFallbackStartPage = resolveDefaultCheckFallbackStartPage(checkPageInputs);
         } catch (detectError) {
           // eslint-disable-next-line no-console
           console.warn('[checks.spawn] failed to detect check-image pages from OCR', {
@@ -2116,7 +2118,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
           const slotIndex = orderIndex != null ? orderIndex : unmappedSlotCursor;
           computedSlot = computeManualCheckSlot(slotIndex, {
             pages: detectedCheckPages.length > 0 ? detectedCheckPages : undefined,
-            fallbackStartPage: 4,
+            fallbackStartPage: checkFallbackStartPage,
             preset: DEFAULT_CHECK_IMAGE_PRESET
           });
           if (orderIndex == null) unmappedSlotCursor += 1;
@@ -2364,16 +2366,17 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
       // createdAt-order so checks without check numbers still get a bbox.
       if (!cropBox) {
         let detectedCheckPages: number[] = [];
+        let checkFallbackStartPage = Number(check.artifacts?.pageNumber ?? 4) || 4;
         const statementOcrPathForCrop = String(parentStatement?.artifacts?.ocrPath ?? '');
         if (statementOcrPathForCrop) {
           try {
             const { pages: ocrPages } = await readStatementOcrPages(bucketName, statementOcrPathForCrop);
-            detectedCheckPages = detectCheckImagePages(
-              ocrPages.map((page) => ({
-                pageNumber: Number(page.pageNumber),
-                text: String(page.text ?? '')
-              }))
-            );
+            const checkPageInputs = ocrPages.map((page) => ({
+              pageNumber: Number(page.pageNumber),
+              text: String(page.text ?? '')
+            }));
+            detectedCheckPages = detectCheckImagePages(checkPageInputs);
+            checkFallbackStartPage = resolveDefaultCheckFallbackStartPage(checkPageInputs);
           } catch {
             detectedCheckPages = [];
           }
@@ -2407,7 +2410,7 @@ const runTaskLogic = async (payload: AccountingTaskPayload) => {
         if (orderIndex >= 0) {
           const computed = computeManualCheckSlot(orderIndex, {
             pages: detectedCheckPages.length > 0 ? detectedCheckPages : undefined,
-            fallbackStartPage: Number(check.artifacts?.pageNumber ?? 4) || 4,
+            fallbackStartPage: checkFallbackStartPage,
             preset: DEFAULT_CHECK_IMAGE_PRESET
           });
           if (computed) {

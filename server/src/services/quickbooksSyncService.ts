@@ -1,9 +1,15 @@
 import mongoose from 'mongoose';
+import { BankStatement } from '../models/BankStatement';
 import { ChartOfAccountModel } from '../models/ChartOfAccount';
 import { IntegrationSettingsModel } from '../models/IntegrationSettings';
 import { LedgerEntryModel } from '../models/LedgerEntry';
 import { QuickBooksReferenceModel } from '../models/QuickBooksReference';
 import { StatementTransactionModel } from '../models/StatementTransaction';
+import {
+  resolveChartAccountQbId,
+  resolveDefaultDepositLineQbId,
+  resolveDefaultExpenseCategoryQbId
+} from './chartAccountPostingResolve';
 import { ensureDefaultChartOfAccounts } from './ledgerService';
 import { buildStatementPostingPreviewLines } from '@retailsync/shared';
 import {
@@ -304,21 +310,8 @@ const setPostingFailure = async (entryId: string, companyId: string, error: stri
   );
 };
 
-const resolvePostingAccountRef = async (companyId: string, ref?: string | null): Promise<string | undefined> => {
-  const trimmed = String(ref ?? '').trim();
-  if (!trimmed) return undefined;
-  if (mongoose.isValidObjectId(trimmed)) {
-    const doc = await ChartOfAccountModel.findOne({
-      companyId,
-      _id: new mongoose.Types.ObjectId(trimmed)
-    })
-      .select('qbAccountId name')
-      .lean();
-    const qb = doc?.qbAccountId?.trim();
-    if (qb) return qb;
-  }
-  return trimmed;
-};
+const resolvePostingAccountRef = (companyId: string, ref?: string | null) =>
+  resolveChartAccountQbId(companyId, ref);
 
 const resolvePostingAccountLabel = async (companyId: string, ref?: string | null): Promise<string | undefined> => {
   const trimmed = String(ref ?? '').trim();
@@ -374,14 +367,58 @@ const resolvePayeeRefId = async (
   return entity?.qbId ? String(entity.qbId) : undefined;
 };
 
+const enrichProposalForPosting = async (
+  companyId: string,
+  proposal: LedgerProposalForPosting,
+  statementTransactionId: string
+): Promise<LedgerProposalForPosting> => {
+  const enriched = { ...proposal };
+  if (!String(enriched.bankAccountId ?? '').trim()) {
+    const txn = await StatementTransactionModel.findOne({
+      _id: statementTransactionId,
+      companyId
+    })
+      .select('statementId')
+      .lean();
+    if (txn?.statementId) {
+      const statement = await BankStatement.findOne({
+        _id: txn.statementId,
+        companyId
+      })
+        .select('bankAccountId')
+        .lean();
+      const statementBank = String(statement?.bankAccountId ?? '').trim();
+      if (statementBank) {
+        enriched.bankAccountId = statementBank;
+      }
+    }
+  }
+  if (!String(enriched.categoryAccountId ?? '').trim()) {
+    if (enriched.qbTxnType === 'Expense' || enriched.qbTxnType === 'Check') {
+      const qb = await resolveDefaultExpenseCategoryQbId(companyId);
+      if (qb) enriched.categoryAccountId = qb;
+    } else if (enriched.qbTxnType === 'Deposit') {
+      const qb = await resolveDefaultDepositLineQbId(companyId);
+      if (qb) enriched.categoryAccountId = qb;
+    }
+  }
+  return enriched;
+};
+
 export const postLedgerEntryToQuickBooks = async (
   companyId: string,
   entry: LedgerEntryForPosting
 ): Promise<PostLedgerEntryResult> => {
-  const proposal = entry.proposal;
-  if (!proposal?.qbTxnType) {
+  const baseProposal = entry.proposal;
+  if (!baseProposal?.qbTxnType) {
     return { ok: false, error: 'Missing proposal.qbTxnType' };
   }
+
+  const proposal = await enrichProposalForPosting(
+    companyId,
+    baseProposal,
+    entry.statementTransactionId
+  );
 
   const resolvedBank = await resolvePostingAccountRef(companyId, proposal.bankAccountId);
   const resolvedCategory = await resolvePostingAccountRef(companyId, proposal.categoryAccountId);
@@ -417,7 +454,13 @@ export const postLedgerEntryToQuickBooks = async (
       qbTxnId = result.txnId;
     } else if (proposal.qbTxnType === 'Deposit') {
       if (!resolvedBank || !resolvedCategory) {
-        throw new Error('Deposit requires bankAccountId and categoryAccountId');
+        if (!resolvedBank && !resolvedCategory) {
+          throw new Error('Deposit requires bankAccountId and categoryAccountId');
+        }
+        if (!resolvedBank) {
+          throw new Error('Deposit requires bankAccountId (deposit-to bank account)');
+        }
+        throw new Error('Deposit requires categoryAccountId (deposit line / income account)');
       }
       if (resolvedBank === resolvedCategory) {
         throw new Error('Deposit bank and line accounts must differ');
@@ -445,13 +488,21 @@ export const postLedgerEntryToQuickBooks = async (
       if (!itemRefId) {
         throw new Error('Sales receipt requires a QuickBooks service item');
       }
+      const receiptAmount = Math.abs(entry.amount);
       const result = await createQuickBooksSalesReceiptTransaction({
         companyId,
         txnDate: entry.date,
         customerRefId,
         depositToAccountId: resolvedBank,
         memo: proposal.memo ?? entry.description,
-        lines: [{ amount: Math.abs(entry.amount), itemRefId }]
+        lines: [
+          {
+            amount: receiptAmount,
+            itemRefId,
+            quantity: 1,
+            unitPrice: receiptAmount
+          }
+        ]
       });
       qbTxnId = result.txnId;
     } else if (proposal.qbTxnType === 'Payment') {

@@ -3,6 +3,7 @@ import {
   quickBooksAccountRegisterQuerySchema,
   quickBooksHubChartOfAccountsQuerySchema,
   quickBooksHubChartAccountCreateInputSchema,
+  quickBooksHubItemCreateInputSchema,
   quickBooksHubItemsQuerySchema,
   quickBooksContactCreateInputSchema,
   quickBooksContactUpdateInputSchema,
@@ -40,6 +41,7 @@ import {
   getQuickBooksTransactionDetail,
   listQuickBooksHubChartOfAccounts,
   createQuickBooksHubChartAccount,
+  createQuickBooksHubItem,
   listQuickBooksHubItems,
   listQuickBooksHubEntities,
   listQuickBooksHubOperations,
@@ -92,7 +94,8 @@ const mapQuickBooksTaxErrorStatus = (message: string) => {
     message === 'quickbooks_vendor_payment_fields_missing' ||
     message === 'quickbooks_journal_line_invalid' ||
     message === 'quickbooks_unbalanced_journal' ||
-    message === 'quickbooks_write_type_mismatch'
+    message === 'quickbooks_write_type_mismatch' ||
+    message === 'quickbooks_income_account_required'
   ) {
     return 422;
   }
@@ -262,6 +265,28 @@ export const getQuickBooksHubItems = async (req: Request, res: Response) => {
     return ok(res, data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'QuickBooks hub items fetch failed';
+    return fail(res, message, mapQuickBooksTaxErrorStatus(message));
+  }
+};
+
+export const postQuickBooksHubItem = async (req: Request, res: Response) => {
+  const companyId = withCompanyId(req, res);
+  if (!companyId) return;
+
+  const parsed = quickBooksHubItemCreateInputSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  try {
+    const item = await createQuickBooksHubItem({
+      companyId,
+      name: parsed.data.name,
+      type: parsed.data.type
+    });
+    return ok(res, { item }, 201);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'QuickBooks hub item create failed';
     return fail(res, message, mapQuickBooksTaxErrorStatus(message));
   }
 };

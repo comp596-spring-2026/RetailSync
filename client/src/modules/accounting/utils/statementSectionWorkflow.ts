@@ -29,7 +29,7 @@ export const sectionWorkflowHint = (sectionKey: string): SectionWorkflowHint => 
     case 'electronic_credits':
       return { primary: 'Deposit', alternatives: ['Transfer', 'Journal Entry'] };
     case 'other_credits':
-      return { primary: 'Deposit', alternatives: ['Sales Receipt', 'Journal Entry'] };
+      return { primary: 'Sales Receipt', alternatives: ['Deposit', 'Journal Entry'] };
     case 'electronic_debits':
       return { primary: 'Expense', alternatives: ['Bill Payment', 'Transfer'] };
     case 'checks_cleared':

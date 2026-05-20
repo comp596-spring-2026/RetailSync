@@ -41,6 +41,7 @@ type StatementItem = {
   id: string;
   statementMonth: string;
   fileName: string;
+  bankAccountId?: string;
   status: BankStatementStatus;
   progress: {
     phase: BankStatementStatus;
@@ -118,9 +119,12 @@ export const StatementsPage = () => {
       try {
         const [listResponse, monthsResponse] = await Promise.all([
           accountingApi.listStatements({
-            month: monthFilter || undefined
+            month: monthFilter || undefined,
+            bankAccountId: selectedBankAccountId || undefined
           }),
-          accountingApi.listStatementMonths()
+          accountingApi.listStatementMonths({
+            bankAccountId: selectedBankAccountId || undefined
+          })
         ]);
         setRows(listResponse.data.data.statements);
         setMonthInfos(monthsResponse.data.data.months as StatementMonthInfo[]);
@@ -130,8 +134,13 @@ export const StatementsPage = () => {
         setLoading(false);
       }
     },
-    [canView, filterMonth, workspaceReady]
+    [canView, filterMonth, selectedBankAccountId, workspaceReady]
   );
+
+  useEffect(() => {
+    if (!workspaceReady) return;
+    setFilterMonth('');
+  }, [selectedBankAccountId, workspaceReady]);
 
   const loadBankAccounts = useCallback(async () => {
     if (!canView || !canViewQuickBooks || !quickBooksConnected) {
@@ -144,9 +153,9 @@ export const StatementsPage = () => {
     try {
       const response = await accountingApi.getQuickbooksHubChartOfAccounts({
         page: 1,
-        pageSize: 200,
+        pageSize: 100,
         status: 'active',
-        type: 'asset',
+        accountKind: 'bank',
         sort: 'name'
       });
       const items = response.data.data.items ?? [];
@@ -197,7 +206,19 @@ export const StatementsPage = () => {
     writeDefaultStatementBankAccountId(selectedBankAccountId);
   }, [selectedBankAccountId]);
 
-  const hasInFlightRows = useMemo(() => rows.some((row) => isStatementInFlight(row.status)), [rows]);
+  const bankScopedRows = useMemo(() => {
+    if (!selectedBankAccountId) return rows;
+    const selectedAccount = bankAccounts.find((account) => account.qbId === selectedBankAccountId);
+    const allowedRefs = new Set(
+      [selectedBankAccountId, selectedAccount?.id, selectedAccount?.qbId].filter(Boolean) as string[]
+    );
+    return rows.filter((row) => row.bankAccountId && allowedRefs.has(row.bankAccountId));
+  }, [bankAccounts, rows, selectedBankAccountId]);
+
+  const hasInFlightRows = useMemo(
+    () => bankScopedRows.some((row) => isStatementInFlight(row.status)),
+    [bankScopedRows]
+  );
 
   useEffect(() => {
     if (!canView || !workspaceReady) return;
@@ -295,34 +316,34 @@ export const StatementsPage = () => {
     }
   };
 
-  const hasRows = useMemo(() => rows.length > 0, [rows]);
+  const hasRows = useMemo(() => bankScopedRows.length > 0, [bankScopedRows]);
 
   const sections = useMemo(
     () => [
       {
         title: 'Queued',
         subtitle: 'Waiting to start extraction.',
-        rows: rows.filter((row) => row.status === 'uploaded')
+        rows: bankScopedRows.filter((row) => row.status === 'uploaded')
       },
       {
         title: 'Running',
         subtitle: 'Extraction, structuring, or checks in progress.',
-        rows: rows.filter((row) =>
+        rows: bankScopedRows.filter((row) =>
           row.status === 'extracting' || row.status === 'structuring' || row.status === 'checks_queued'
         )
       },
       {
         title: 'Attention',
         subtitle: 'Failed or needs reprocess.',
-        rows: rows.filter((row) => row.status === 'failed')
+        rows: bankScopedRows.filter((row) => row.status === 'failed')
       },
       {
         title: 'Ready',
-        subtitle: 'Ready for workspace review.',
-        rows: rows.filter((row) => row.status === 'ready_for_review')
+        subtitle: 'Workspace review available.',
+        rows: bankScopedRows.filter((row) => row.status === 'ready_for_review')
       }
     ],
-    [rows]
+    [bankScopedRows]
   );
 
   const sectionsWithRows = useMemo(
@@ -460,7 +481,6 @@ export const StatementsPage = () => {
                             canEdit={canEdit}
                             canDelete={canDelete}
                             onOpenWorkspace={() => navigate(`/dashboard/accounting/statements/${row.id}`)}
-                            onOpenLedger={() => navigate('/dashboard/accounting/ledger')}
                             onReprocess={() => void reprocess(row.id)}
                             onDelete={() => void deleteStatement(row.id, row.statementMonth)}
                           />
