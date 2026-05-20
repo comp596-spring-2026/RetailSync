@@ -156,6 +156,95 @@ export type CheckPageClassificationInput = {
 
 const normalize = (value: string) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
+const isExcludedSummaryPageText = (text: string): boolean => {
+  const compact = normalize(text);
+  if (!compact) return true;
+  if (/checks\s+cleared/i.test(compact)) return true;
+  if (
+    /account\s+summary|deposits\s+and\s+other\s+credits|electronic\s+credits|electronic\s+debits|other\s+credits|other\s+debits|description|daily\s+balance/i.test(
+      compact
+    )
+  ) {
+    return true;
+  }
+  return false;
+};
+
+/** Daily Balances table page — check scans normally start on the following page(s). */
+export const isDailyBalancePageText = (text: string): boolean => {
+  const compact = normalize(text);
+  if (!compact) return false;
+  if (!/daily\s+balance/i.test(compact)) return false;
+  const checkTokens = compact.match(/#\s*0*\d{2,4}\b/g) ?? [];
+  if (checkTokens.length >= 4) return false;
+  const datedAmounts = compact.match(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+\$?[\d,]+\.\d{2}/g) ?? [];
+  return datedAmounts.length >= 2 || /ending\s+balance|balance\s+forward/i.test(compact);
+};
+
+export const findLastDailyBalancePageNumber = (
+  pages: CheckPageClassificationInput[]
+): number | null => {
+  let last: number | null = null;
+  for (const page of pages) {
+    if (!isDailyBalancePageText(page.text ?? '')) continue;
+    const pageNumber = Number(page.pageNumber);
+    if (Number.isFinite(pageNumber) && pageNumber > 0) {
+      last = last == null ? pageNumber : Math.max(last, pageNumber);
+    }
+  }
+  return last;
+};
+
+const detectCheckImagePagesByHashHeuristic = (pages: CheckPageClassificationInput[]): number[] =>
+  pages
+    .filter((page) => isCheckImagePageText(page.text ?? ''))
+    .map((page) => Number(page.pageNumber))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((left, right) => left - right);
+
+/**
+ * After the Daily Balances page, treat following pages as check-image pages until a
+ * summary/transaction section appears (common US bank statement layout).
+ */
+export const detectCheckImagePagesAfterDailyBalances = (
+  pages: CheckPageClassificationInput[],
+  maxPagesAfter = 16
+): number[] => {
+  const anchor = findLastDailyBalancePageNumber(pages);
+  if (anchor == null) return [];
+
+  const sortedPageNumbers = pages
+    .map((page) => Number(page.pageNumber))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((left, right) => left - right);
+  const maxPage = sortedPageNumbers[sortedPageNumbers.length - 1] ?? anchor;
+  const textByPage = new Map(pages.map((page) => [Number(page.pageNumber), page.text ?? '']));
+
+  const result: number[] = [];
+  for (let pageNumber = anchor + 1; pageNumber <= maxPage && result.length < maxPagesAfter; pageNumber += 1) {
+    const text = textByPage.get(pageNumber) ?? '';
+    if (!text.trim()) {
+      result.push(pageNumber);
+      continue;
+    }
+    if (isDailyBalancePageText(text)) continue;
+    if (isExcludedSummaryPageText(text)) break;
+    result.push(pageNumber);
+  }
+
+  return result;
+};
+
+export const resolveDefaultCheckFallbackStartPage = (
+  pages: CheckPageClassificationInput[]
+): number => {
+  const anchor = findLastDailyBalancePageNumber(pages);
+  if (anchor != null) return anchor + 1;
+  const detected = detectCheckImagePagesByHashHeuristic(pages);
+  if (detected.length > 0) return detected[0];
+  return 4;
+};
+
 // Returns true when the given page's text looks like a page of imaged checks
 // rather than a text-only transactions or "Checks cleared" summary page.
 // Heuristics mirror the fixture extraction script (runStatementFixtureExtraction.ts):
@@ -166,27 +255,19 @@ const normalize = (value: string) => String(value ?? '').replace(/\s+/g, ' ').tr
 export const isCheckImagePageText = (text: string): boolean => {
   const compact = normalize(text);
   if (!compact) return false;
-  if (/checks\s+cleared/i.test(compact)) return false;
-  if (
-    /account\s+summary|deposits\s+and\s+other\s+credits|electronic\s+credits|electronic\s+debits|other\s+credits|other\s+debits|description|daily\s+balance/i.test(
-      compact
-    )
-  ) {
-    return false;
-  }
+  if (isExcludedSummaryPageText(compact)) return false;
   const checkTokens = compact.match(/#\s*0*\d{2,4}\b/g) ?? [];
   const amountTokens = compact.match(/\$\s*\d[\d,]*\.\d{2}/g) ?? [];
   return checkTokens.length >= 4 && amountTokens.length >= 4;
 };
 
-export const detectCheckImagePages = (
-  pages: CheckPageClassificationInput[]
-): number[] =>
-  pages
-    .filter((page) => isCheckImagePageText(page.text ?? ''))
-    .map((page) => Number(page.pageNumber))
-    .filter((value) => Number.isFinite(value) && value > 0)
-    .sort((left, right) => left - right);
+export const detectCheckImagePages = (pages: CheckPageClassificationInput[]): number[] => {
+  const merged = new Set<number>([
+    ...detectCheckImagePagesByHashHeuristic(pages),
+    ...detectCheckImagePagesAfterDailyBalances(pages)
+  ]);
+  return [...merged].sort((left, right) => left - right);
+};
 
 // Deterministic grid slot for the Nth check in the ordered list. Guarantees
 // that EVERY check lands on a page + bbox, regardless of whether OCR-based
@@ -288,12 +369,20 @@ export const resolveCheckImageCropPlacement = (args: {
     }
   }
 
-  if (manualSlot && !isLikelyChecksClearedTableCrop({ bbox: manualSlot.bbox })) {
-    return {
-      pageNumber: manualSlot.pageNumber,
-      cropBBox: toCheckCropBoxTuple(manualSlot.bbox),
-      source: 'grid'
-    };
+  if (args.parserBBox && args.parserPageNumber != null) {
+    const pageNumber = Number(args.parserPageNumber);
+    const parserBox = toCheckCropBox(args.parserBBox);
+    const tableLike = isLikelyChecksClearedTableCrop({
+      bbox: parserBox,
+      regionText: args.parserRegionText
+    });
+    if (!tableLike) {
+      return {
+        pageNumber,
+        cropBBox: args.parserBBox,
+        source: 'ocr_region'
+      };
+    }
   }
 
   if (offline?.imageBox) {
@@ -313,21 +402,12 @@ export const resolveCheckImageCropPlacement = (args: {
     }
   }
 
-  if (args.parserBBox && args.parserPageNumber != null) {
-    const pageNumber = Number(args.parserPageNumber);
-    const onCheckImagePage = args.detectedCheckPages.includes(pageNumber);
-    const parserBox = toCheckCropBox(args.parserBBox);
-    const tableLike = isLikelyChecksClearedTableCrop({
-      bbox: parserBox,
-      regionText: args.parserRegionText
-    });
-    if (onCheckImagePage && !tableLike) {
-      return {
-        pageNumber,
-        cropBBox: args.parserBBox,
-        source: 'ocr_region'
-      };
-    }
+  if (manualSlot && !isLikelyChecksClearedTableCrop({ bbox: manualSlot.bbox })) {
+    return {
+      pageNumber: manualSlot.pageNumber,
+      cropBBox: toCheckCropBoxTuple(manualSlot.bbox),
+      source: 'grid'
+    };
   }
 
   return null;
@@ -350,7 +430,7 @@ export const computeManualCheckSlot = (
   const pagesList = Array.isArray(options.pages) && options.pages.length > 0 ? options.pages : null;
   const pageNumber = pagesList
     ? pagesList[Math.min(pageOffset, pagesList.length - 1)] + Math.max(0, pageOffset - (pagesList.length - 1))
-    : (options.fallbackStartPage ?? 4) + pageOffset;
+    : (options.fallbackStartPage ?? resolveDefaultCheckFallbackStartPage([])) + pageOffset;
 
   const localIndex = index % cellsPerPage;
   const row = Math.floor(localIndex / preset.columns);

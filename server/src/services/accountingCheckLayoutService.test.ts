@@ -4,10 +4,14 @@ import {
   buildFallbackManualCheckSlots,
   computeManualCheckSlot,
   detectCheckImagePages,
+  detectCheckImagePagesAfterDailyBalances,
+  findLastDailyBalancePageNumber,
   isCheckImagePageText,
+  isDailyBalancePageText,
   isLikelyChecksClearedTableCrop,
   isLikelyTableRowCropBox,
-  resolveCheckImageCropPlacement
+  resolveCheckImageCropPlacement,
+  resolveDefaultCheckFallbackStartPage
 } from './accountingCheckLayoutService';
 
 describe('accountingCheckLayoutService', () => {
@@ -67,6 +71,47 @@ describe('accountingCheckLayoutService', () => {
       ];
 
       expect(detectCheckImagePages(pages)).toEqual([4, 5]);
+    });
+
+    it('includes pages after Daily Balances when check OCR tokens are sparse', () => {
+      const pages = [
+        { pageNumber: 1, text: 'Account Summary Beginning Balance $10,000.00' },
+        { pageNumber: 2, text: 'Checks Cleared 0321 12/02 $1,245.00 0322 12/03 $375.00' },
+        {
+          pageNumber: 3,
+          text: 'Daily Balances 12/01 $1,000.00 12/02 $1,100.00 ending balance forward'
+        },
+        { pageNumber: 4, text: 'check image scan page with little text' },
+        { pageNumber: 5, text: 'second check image page' }
+      ];
+
+      expect(findLastDailyBalancePageNumber(pages)).toBe(3);
+      expect(detectCheckImagePagesAfterDailyBalances(pages)).toEqual([4, 5]);
+      expect(detectCheckImagePages(pages)).toEqual([4, 5]);
+      expect(resolveDefaultCheckFallbackStartPage(pages)).toBe(4);
+    });
+
+    it('stops after Daily Balances when a summary section appears', () => {
+      const pages = [
+        { pageNumber: 3, text: 'Daily Balances 12/01 $500.00 12/02 $600.00' },
+        { pageNumber: 4, text: 'check scans' },
+        { pageNumber: 5, text: 'Account Summary ending balance $12,000.00' }
+      ];
+
+      expect(detectCheckImagePagesAfterDailyBalances(pages)).toEqual([4]);
+    });
+  });
+
+  describe('isDailyBalancePageText', () => {
+    it('recognizes a daily balance table page', () => {
+      expect(
+        isDailyBalancePageText('Daily Balances 12/01 $1,000.00 12/02 $1,100.00 ending balance')
+      ).toBe(true);
+    });
+
+    it('rejects a page that is mostly imaged checks', () => {
+      const text = '#0321 $1,245.00 #0322 $375.00 #0323 $88.40 #0324 $2,014.78';
+      expect(isDailyBalancePageText(text)).toBe(false);
     });
   });
 
@@ -147,7 +192,7 @@ describe('accountingCheckLayoutService', () => {
       expect(isLikelyTableRowCropBox({ left: 100, top: 140, right: 400, bottom: 320 })).toBe(false);
     });
 
-    it('prefers grid slots over parser bboxes from summary pages', () => {
+    it('prefers parser bboxes over grid slots when a region is available', () => {
       const gridSlot = computeManualCheckSlot(0, { pages: [8], fallbackStartPage: 8 });
       const placement = resolveCheckImageCropPlacement({
         checkNumber: '97',
@@ -157,8 +202,8 @@ describe('accountingCheckLayoutService', () => {
         parserPageNumber: 3,
         parserRegionText: '97 12/03/2025 305.84\n98 12/02/2025 55.00'
       });
-      expect(placement?.source).toBe('grid');
-      expect(placement?.pageNumber).toBe(8);
+      expect(placement?.source).toBe('ocr_region');
+      expect(placement?.pageNumber).toBe(3);
     });
 
     it('allows parser bboxes on detected check-image pages', () => {

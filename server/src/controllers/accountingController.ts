@@ -7,6 +7,7 @@ import {
   createBankStatementSchema,
   detectStatementMonthResponseSchema,
   listBankStatementsQuerySchema,
+  listStatementMonthsQuerySchema,
   listChecksQuerySchema,
   createStatementRuleSchema,
   updateStatementRuleSchema,
@@ -53,6 +54,8 @@ import { parseStatementLines } from '../statement-extraction/offline/parseStatem
 import { getPdfPageCount, scalePdfBoxToImageBox } from '../statement-extraction/offline/renderPdfPage';
 import type { Box, CheckCaption, CheckRow, DetectedCheckImage, StatementTransaction } from '../statement-extraction/offline/types';
 import { persistStatementFailure } from '../services/bankStatementPersistence';
+import { mergeStatementProposal } from '../services/chartAccountPostingResolve';
+import { resolveStatementEntryForCheckSuggestion } from '../services/statementCheckLinkService';
 import { postApprovedLedgerEntryByStatementTransactionId } from '../services/quickbooksSyncService';
 import { evaluateStatementRules, listStatementRules } from '../services/statementRuleService';
 import { fail, ok } from '../utils/apiResponse';
@@ -395,6 +398,46 @@ const buildAccountingEnvSnapshot = () => ({
   statementOcrProvider: env.statementOcrProvider,
   statementGeminiConfigured: Boolean(env.statementGeminiApiKey)
 });
+
+const resolveStatementBankAccountQbId = async (
+  companyId: string,
+  ref: string | undefined
+): Promise<string | undefined> => {
+  const trimmed = ref?.trim();
+  if (!trimmed) return undefined;
+
+  const accountQuery: Record<string, unknown> = { companyId };
+  if (Types.ObjectId.isValid(trimmed)) {
+    accountQuery._id = new Types.ObjectId(trimmed);
+  } else {
+    accountQuery.qbAccountId = trimmed;
+  }
+
+  const account = await ChartOfAccountModel.findOne(accountQuery).select('qbAccountId').lean();
+  return account?.qbAccountId?.trim() || trimmed;
+};
+
+const statementBankAccountIdFilter = async (
+  companyId: string,
+  ref: string
+): Promise<Record<string, unknown>> => {
+  const trimmed = ref.trim();
+  const candidates = new Set<string>([trimmed]);
+
+  const accountQuery: Record<string, unknown> = { companyId };
+  if (Types.ObjectId.isValid(trimmed)) {
+    accountQuery._id = new Types.ObjectId(trimmed);
+  } else {
+    accountQuery.qbAccountId = trimmed;
+  }
+
+  const account = await ChartOfAccountModel.findOne(accountQuery).select('_id qbAccountId').lean();
+  if (account?.qbAccountId) candidates.add(String(account.qbAccountId).trim());
+  if (account?._id) candidates.add(String(account._id));
+
+  const values = [...candidates].filter(Boolean);
+  return values.length === 1 ? { bankAccountId: values[0] } : { bankAccountId: { $in: values } };
+};
 
 const purgeStatementsFromMongo = async (args: {
   companyId: string;
@@ -973,6 +1016,27 @@ const buildStatementSuggestions = async (statement: any) => {
       .sort({ createdAt: 1 })
       .lean()
   ]);
+  const transactionMap = await loadStatementTransactions(
+    statement._id.toString(),
+    statement.companyId
+  );
+  const clearedCheckKeys = new Set<string>();
+  for (const check of checks) {
+    const date = String(check.extracted?.date ?? check.autoFill?.date ?? '').trim();
+    const amount = Number(check.extracted?.amount ?? check.autoFill?.amount ?? 0);
+    if (date && Number.isFinite(amount)) {
+      clearedCheckKeys.add(`${date}::${amount.toFixed(2)}`);
+    }
+  }
+  const isDuplicateOfClearedCheck = (txn: any) => {
+    if (txn.statementCheckId) return true;
+    const rowType = String(txn.rowType ?? '');
+    if (rowType !== 'check_cleared' && rowType !== 'electronic_debit') return false;
+    const date = String(txn.postDate ?? '').trim();
+    const amount = Number(txn.amount ?? 0);
+    if (!date || !Number.isFinite(amount)) return false;
+    return clearedCheckKeys.has(`${date}::${amount.toFixed(2)}`);
+  };
   const bankAccounts = await ChartOfAccountModel.find({
     companyId: statement.companyId,
     type: 'asset'
@@ -990,6 +1054,7 @@ const buildStatementSuggestions = async (statement: any) => {
   const rules = await listStatementRules(String(statement._id), String(statement.companyId));
   const postingCandidateTransactions = transactions.filter((txn: any) => {
     if (txn.isPostingCandidate === false) return false;
+    if (isDuplicateOfClearedCheck(txn)) return false;
     const rowType = String(txn.rowType ?? '');
     if (!rowType) return true;
     return (
@@ -1067,9 +1132,13 @@ const buildStatementSuggestions = async (statement: any) => {
       const payeeNameFromRule =
         selectedRule?.action?.type === 'suggestPayee' ? selectedRule.action.payeeName : undefined;
       const ruleReasons = matchedRules.map((rule) => `Matched ${rule.hardness} rule: ${rule.name}`);
+      const statementBankId = String(statement.bankAccountId ?? '').trim();
       const resolvedProposal = {
         qbTxnType: proposedTxnTypeFromRule ?? txn.proposal?.qbTxnType ?? undefined,
-        bankAccountId: bankAccountIdFromRule ?? txn.proposal?.bankAccountId ?? undefined,
+        bankAccountId:
+          bankAccountIdFromRule ??
+          txn.proposal?.bankAccountId ??
+          (statementBankId || undefined),
         categoryAccountId: categoryAccountIdFromRule ?? txn.proposal?.categoryAccountId ?? undefined
       };
       resolvedProposal.qbTxnType =
@@ -1164,6 +1233,10 @@ const buildStatementSuggestions = async (statement: any) => {
       };
     }),
     ...checks.map((check: any) => {
+      const relatedTxn =
+        transactionMap.get(String(check.match?.statementTransactionId ?? '')) ??
+        transactionMap.get(String(check._id));
+      const txnProposal = relatedTxn?.proposal;
       const checkNumberLabel = firstNonBlank(
         check.extracted?.checkNumber,
         check.autoFill?.checkNumber,
@@ -1172,6 +1245,7 @@ const buildStatementSuggestions = async (statement: any) => {
         firstNonBlank(
           check.extracted?.payeeName,
           check.autoFill?.payeeName,
+          txnProposal?.payeeName,
           check.extracted?.memo,
           check.autoFill?.memo,
         ) || `Check ${checkNumberLabel || String(check._id).slice(-6)}`;
@@ -1181,16 +1255,26 @@ const buildStatementSuggestions = async (statement: any) => {
         amount: Number(check.extracted?.amount ?? check.autoFill?.amount ?? 0),
         direction: 'debit',
         date: check.extracted?.date ?? check.autoFill?.date ?? undefined,
-        payeeName: check.extracted?.payeeName ?? check.autoFill?.payeeName ?? undefined
+        payeeName:
+          check.extracted?.payeeName ??
+          check.autoFill?.payeeName ??
+          txnProposal?.payeeName ??
+          undefined
       });
       const selectedRule = matchedRules.find((rule) => rule.hardness === 'hard') ?? matchedRules[0];
       const ruleReasons = matchedRules.map((rule) => `Matched ${rule.hardness} rule: ${rule.name}`);
+      const statementBankId = String(statement.bankAccountId ?? '').trim();
       const resolvedProposal = {
         qbTxnType:
           (selectedRule?.action?.type === 'suggestTxnType' ? selectedRule.action.proposedTxnType : undefined) ??
+          txnProposal?.qbTxnType ??
           undefined,
-        bankAccountId: selectedRule?.action?.bankAccountId ?? undefined,
-        categoryAccountId: selectedRule?.action?.categoryAccountId ?? undefined
+        bankAccountId:
+          selectedRule?.action?.bankAccountId ??
+          txnProposal?.bankAccountId ??
+          (statementBankId || undefined),
+        categoryAccountId:
+          selectedRule?.action?.categoryAccountId ?? txnProposal?.categoryAccountId ?? undefined
       };
       resolvedProposal.qbTxnType =
         resolvedProposal.qbTxnType ??
@@ -1218,6 +1302,7 @@ const buildStatementSuggestions = async (statement: any) => {
           (selectedRule?.action?.type === 'suggestPayee' ? selectedRule.action.payeeName : undefined) ??
           check.extracted?.payeeName ??
           check.autoFill?.payeeName ??
+          txnProposal?.payeeName ??
           undefined,
         proposedTxnType: resolvedProposal.qbTxnType,
         bankAccountId: resolvedProposal.bankAccountId,
@@ -1700,11 +1785,30 @@ export const createStatement = async (req: Request, res: Response) => {
       _id: parsed.data.statementId,
       companyId
     });
-    const monthConflicts = await BankStatement.find({
+    const normalizedBankAccountId = await resolveStatementBankAccountQbId(
+      companyId,
+      parsed.data.bankAccountId
+    );
+
+    // Replace prior upload for the same bank + month only (other banks keep their own statement).
+    const monthConflictFilter: Record<string, unknown> = {
       companyId,
       statementMonth: parsed.data.statementMonth,
       _id: { $ne: parsed.data.statementId }
-    })
+    };
+    if (normalizedBankAccountId) {
+      Object.assign(
+        monthConflictFilter,
+        await statementBankAccountIdFilter(companyId, normalizedBankAccountId)
+      );
+    } else {
+      monthConflictFilter.$or = [
+        { bankAccountId: { $exists: false } },
+        { bankAccountId: null },
+        { bankAccountId: '' }
+      ];
+    }
+    const monthConflicts = await BankStatement.find(monthConflictFilter)
       .select('_id status')
       .lean();
 
@@ -1735,8 +1839,8 @@ export const createStatement = async (req: Request, res: Response) => {
       statement = existing;
       statement.periodStart = parsed.data.periodStart;
       statement.periodEnd = parsed.data.periodEnd;
-      if (parsed.data.bankAccountId) {
-        statement.bankAccountId = parsed.data.bankAccountId;
+      if (normalizedBankAccountId) {
+        statement.bankAccountId = normalizedBankAccountId;
       }
       statement.status = 'uploaded';
       statement.hash = undefined;
@@ -1764,7 +1868,7 @@ export const createStatement = async (req: Request, res: Response) => {
         status: 'uploaded',
         periodStart: parsed.data.periodStart,
         periodEnd: parsed.data.periodEnd,
-        bankAccountId: parsed.data.bankAccountId ?? undefined,
+        bankAccountId: normalizedBankAccountId,
         gcs: {
           rootPrefix: expectedRootPrefix,
           pdfPath: parsed.data.gcsPath
@@ -1863,7 +1967,9 @@ export const listStatements = async (req: Request, res: Response) => {
 
   const parsed = listBankStatementsQuerySchema.safeParse({
     month: typeof req.query.month === 'string' ? req.query.month : undefined,
-    status: typeof req.query.status === 'string' ? req.query.status : undefined
+    status: typeof req.query.status === 'string' ? req.query.status : undefined,
+    bankAccountId:
+      typeof req.query.bankAccountId === 'string' ? req.query.bankAccountId : undefined
   });
   if (!parsed.success) {
     return fail(res, 'Validation failed', 422, parsed.error.flatten());
@@ -1875,6 +1981,9 @@ export const listStatements = async (req: Request, res: Response) => {
   }
   if (parsed.data.status) {
     filter.status = parsed.data.status;
+  }
+  if (parsed.data.bankAccountId) {
+    Object.assign(filter, await statementBankAccountIdFilter(req.companyId, parsed.data.bankAccountId));
   }
 
   try {
@@ -1892,8 +2001,21 @@ export const listStatements = async (req: Request, res: Response) => {
 export const listStatementMonths = async (req: Request, res: Response) => {
   if (!req.companyId) return fail(res, 'Company onboarding required', 403);
 
-  const statements = await BankStatement.find({ companyId: req.companyId })
-    .select('_id statementMonth status updatedAt createdAt monthClose')
+  const parsed = listStatementMonthsQuerySchema.safeParse({
+    bankAccountId:
+      typeof req.query.bankAccountId === 'string' ? req.query.bankAccountId : undefined
+  });
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  const filter: Record<string, unknown> = { companyId: req.companyId };
+  if (parsed.data.bankAccountId) {
+    Object.assign(filter, await statementBankAccountIdFilter(req.companyId, parsed.data.bankAccountId));
+  }
+
+  const statements = await BankStatement.find(filter)
+    .select('_id statementMonth status updatedAt createdAt monthClose bankAccountId')
     .sort({ statementMonth: -1, createdAt: -1 })
     .lean();
 
@@ -2028,6 +2150,15 @@ export const assignStatementBankAccount = async (req: Request, res: Response) =>
         res,
         'QuickBooks bank account not found. Assign a bank chart account created in QuickBooks (Statements page → Create account).',
         404
+      );
+    }
+
+    const existingBank = String(statement.bankAccountId ?? '').trim();
+    if (existingBank && existingBank !== qbAccountId) {
+      return fail(
+        res,
+        'This statement is already linked to a different bank account and cannot be reassigned.',
+        409
       );
     }
 
@@ -2296,29 +2427,39 @@ export const updateStatementSuggestionReview = async (req: Request, res: Respons
     });
     if (!entry) return fail(res, 'Suggestion not found', 404);
   } else {
-    entry = await StatementTransactionModel.findOne({
-      statementCheckId: req.params.suggestionId,
-      statementId: req.params.id,
-      companyId: req.companyId
+    const resolved = await resolveStatementEntryForCheckSuggestion({
+      companyId: String(req.companyId),
+      statementId: String(req.params.id),
+      checkId: String(req.params.suggestionId),
+      statement: {
+        bankAccountId: statement.bankAccountId,
+        gcs: { pdfPath: statement.gcs?.pdfPath }
+      }
     });
-    if (!entry) {
-      return fail(
-        res,
-        'This check is not linked to a statement transaction yet. Reprocess the statement or wait for check matching before approving.',
-        409,
-        { code: 'check_not_linked_to_transaction', checkId: req.params.suggestionId }
-      );
+    if (!resolved.ok) {
+      return fail(res, resolved.error, resolved.status, resolved.details);
     }
+    entry = resolved.entry;
   }
 
   const proposalPatch = parsed.data.proposal;
   const reviewStatus = parsed.data.reviewStatus;
 
-  const mergedProposal = {
-    ...(entry.proposal ?? {}),
+  const mergedProposal = mergeStatementProposal(entry.proposal ?? {}, {
     ...(proposalPatch ?? {}),
     status: reviewStatus
-  } as any;
+  }) as any;
+
+  const statementBankId = String(statement.bankAccountId ?? '').trim();
+  if (
+    !mergedProposal.bankAccountId?.trim() &&
+    statementBankId &&
+    ['Expense', 'Deposit', 'Check', 'SalesReceipt', 'Payment', 'Transfer'].includes(
+      String(mergedProposal.qbTxnType ?? '')
+    )
+  ) {
+    mergedProposal.bankAccountId = statementBankId;
+  }
 
   if (
     (mergedProposal.qbTxnType === 'Expense' ||
@@ -2330,6 +2471,36 @@ export const updateStatementSuggestionReview = async (req: Request, res: Respons
     mergedProposal.bankAccountId === mergedProposal.categoryAccountId
   ) {
     return fail(res, 'Bank account and line/category account must differ for QuickBooks posting', 422);
+  }
+
+  if (mergedProposal.qbTxnType === 'Expense' || mergedProposal.qbTxnType === 'Check') {
+    if (!mergedProposal.bankAccountId?.trim()) {
+      return fail(res, 'Expense requires a bank account (paid from)', 422);
+    }
+    if (!mergedProposal.categoryAccountId?.trim()) {
+      return fail(res, 'Expense requires an expense category account', 422);
+    }
+  }
+
+  if (mergedProposal.qbTxnType === 'Deposit') {
+    if (!mergedProposal.bankAccountId?.trim()) {
+      return fail(res, 'Deposit requires a bank account (deposit to)', 422);
+    }
+    if (!mergedProposal.categoryAccountId?.trim()) {
+      return fail(res, 'Deposit requires a deposit line account', 422);
+    }
+  }
+
+  if (mergedProposal.qbTxnType === 'SalesReceipt') {
+    if (!mergedProposal.bankAccountId?.trim()) {
+      return fail(res, 'Sales receipt requires a deposit bank account', 422);
+    }
+    if (!mergedProposal.payeeId && !mergedProposal.payeeName) {
+      return fail(res, 'Sales receipt requires a QuickBooks customer', 422);
+    }
+    if (!mergedProposal.salesItemRefId?.trim()) {
+      return fail(res, 'Sales receipt requires a QuickBooks product or service item', 422);
+    }
   }
 
   if (

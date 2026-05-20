@@ -89,7 +89,7 @@ export const StatementMonthCalendar = ({
           </Stack>
         </Stack>
         <Typography variant="caption" color="text.secondary">
-          Green: month closed. Lighter green: ready. Blue: processing. Tap a month to filter the list.
+          Months for the selected bank account only. Green: month closed. Lighter green: ready. Blue: processing.
         </Typography>
         <Box
           sx={{

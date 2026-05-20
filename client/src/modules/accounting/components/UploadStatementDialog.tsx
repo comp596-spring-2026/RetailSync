@@ -265,7 +265,7 @@ export const UploadStatementDialog = ({
       setBankAccountsError(null);
       try {
         const response = await accountingApi.getQuickbooksHubChartOfAccounts({
-          type: 'asset',
+          accountKind: 'bank',
           status: 'active',
           page: 1,
           pageSize: 100,

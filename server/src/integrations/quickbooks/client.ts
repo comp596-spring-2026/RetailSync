@@ -542,6 +542,8 @@ export const listQuickBooksAccounts = async (companyId: string) => {
             : null,
         accountType:
           typeof account.AccountType === 'string' ? account.AccountType.trim() : null,
+        accountSubType:
+          typeof account.AccountSubType === 'string' ? account.AccountSubType.trim() : null,
         active: account.Active !== false
       }))
       .filter((account) => Boolean(account.id) && Boolean(account.name));
@@ -563,6 +565,24 @@ export type QuickBooksItemRecord = {
   active: boolean;
 };
 
+const mapQuickBooksItemRecord = (
+  row: Record<string, unknown>
+): QuickBooksItemRecord | null => {
+  const id = toTrimmedString(row.Id);
+  const name = toTrimmedString(row.Name);
+  if (!id || !name) return null;
+  const type = toTrimmedString(row.Type) || null;
+  if (type && !['Service', 'NonInventory', 'Inventory'].includes(type)) {
+    return null;
+  }
+  return {
+    id,
+    name,
+    type,
+    active: row.Active !== false
+  } satisfies QuickBooksItemRecord;
+};
+
 export const listQuickBooksItems = async (
   companyId: string,
   args?: { search?: string; page?: number; pageSize?: number }
@@ -582,25 +602,68 @@ export const listQuickBooksItems = async (
   const rows = queryResponse?.Item;
   const rawItems = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
   const items = rawItems
-    .map((row) => {
-      const id = toTrimmedString(row.Id);
-      const name = toTrimmedString(row.Name);
-      if (!id || !name) return null;
-      const type = toTrimmedString(row.Type) || null;
-      if (type && !['Service', 'NonInventory', 'Inventory'].includes(type)) {
-        return null;
-      }
-      return {
-        id,
-        name,
-        type,
-        active: row.Active !== false
-      } satisfies QuickBooksItemRecord;
-    })
+    .map((row) => mapQuickBooksItemRecord(row))
     .filter((row): row is QuickBooksItemRecord => Boolean(row));
 
   const total = Number(queryResponse?.totalCount ?? items.length);
   return { items, total: Number.isFinite(total) ? total : items.length };
+};
+
+export const findDefaultQuickBooksIncomeAccount = async (
+  companyId: string
+): Promise<string | null> => {
+  const payload = await runQuickBooksReadQuery(
+    companyId,
+    "select Id, Name, AccountSubType from Account where Active = true and AccountType = 'Income' startposition 1 maxresults 50"
+  );
+  const queryResponse =
+    (payload.QueryResponse as Record<string, unknown> | undefined) ?? undefined;
+  const rows = Array.isArray(queryResponse?.Account)
+    ? (queryResponse?.Account as Array<Record<string, unknown>>)
+    : [];
+  const preferred = rows.find((row) => {
+    const subtype = toTrimmedString(row.AccountSubType);
+    return subtype === 'SalesOfProductIncome' || subtype === 'OtherPrimaryIncome';
+  }) ?? rows[0];
+  return preferred ? toTrimmedString(preferred.Id) || null : null;
+};
+
+export const createQuickBooksItem = async (args: {
+  companyId: string;
+  name: string;
+  type?: 'Service';
+}): Promise<QuickBooksItemRecord> => {
+  const secret = await ensureFreshQuickBooksSecret(args.companyId);
+  if (!secret) {
+    throw new Error('quickbooks_not_connected');
+  }
+
+  const incomeAccountId = await findDefaultQuickBooksIncomeAccount(args.companyId);
+  if (!incomeAccountId) {
+    throw new Error('quickbooks_income_account_required');
+  }
+
+  const payload = (await requestQuickBooksApi({
+    companyId: args.companyId,
+    method: 'POST',
+    path: `/v3/company/${secret.realmId}/item`,
+    query: {
+      minorversion: 75
+    },
+    body: {
+      Name: args.name,
+      Type: args.type ?? 'Service',
+      IncomeAccountRef: { value: incomeAccountId },
+      Active: true
+    }
+  })) as Record<string, unknown>;
+
+  const raw = (payload.Item as Record<string, unknown> | undefined) ?? null;
+  const created = raw ? mapQuickBooksItemRecord(raw) : null;
+  if (!created) {
+    throw new Error('quickbooks_item_create_missing_fields');
+  }
+  return created;
 };
 
 export const createQuickBooksAccount = async (args: {

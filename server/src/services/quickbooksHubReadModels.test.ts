@@ -97,6 +97,202 @@ describe('quickbooks hub read models', () => {
     ledgerFindChain.skip.mockReturnValue(ledgerFindChain);
   });
 
+  it('returns live QuickBooks bank accounts when accountKind is bank', async () => {
+    listQuickBooksAccountsMock.mockResolvedValue([
+      {
+        id: 'qb-checking',
+        name: 'Operating Checking',
+        code: '1000',
+        accountType: 'Bank',
+        accountSubType: 'Checking',
+        active: true
+      },
+      {
+        id: 'qb-cc',
+        name: 'Visa Card',
+        code: null,
+        accountType: 'Credit Card',
+        accountSubType: 'CreditCard',
+        active: true
+      }
+    ]);
+
+    const { listQuickBooksHubChartOfAccounts } = await import('./quickbooksTaxService');
+    const result = await listQuickBooksHubChartOfAccounts({
+      companyId: 'company-1',
+      page: 1,
+      pageSize: 25,
+      sort: 'name',
+      accountKind: 'bank'
+    });
+
+    expect(listQuickBooksAccountsMock).toHaveBeenCalledWith('company-1');
+    expect(chartFindMock).not.toHaveBeenCalled();
+    expect(result.items).toEqual([
+      {
+        id: 'qb-checking',
+        qbId: 'qb-checking',
+        name: 'Operating Checking',
+        type: 'asset',
+        detailType: 'Checking',
+        status: 'active',
+        balance: null
+      }
+    ]);
+  });
+
+  it('returns live QuickBooks income accounts when accountKind is income', async () => {
+    listQuickBooksAccountsMock.mockResolvedValue([
+      {
+        id: 'qb-sales',
+        name: 'Sales of Product Income',
+        code: '4000',
+        accountType: 'Income',
+        accountSubType: 'SalesOfProductIncome',
+        active: true
+      },
+      {
+        id: 'qb-other',
+        name: 'Other Income',
+        code: '4100',
+        accountType: 'Other Income',
+        accountSubType: 'OtherPrimaryIncome',
+        active: true
+      },
+      {
+        id: 'qb-checking',
+        name: 'Operating Checking',
+        code: '1000',
+        accountType: 'Bank',
+        accountSubType: 'Checking',
+        active: true
+      }
+    ]);
+
+    const { listQuickBooksHubChartOfAccounts } = await import('./quickbooksTaxService');
+    const result = await listQuickBooksHubChartOfAccounts({
+      companyId: 'company-1',
+      page: 1,
+      pageSize: 500,
+      sort: 'name',
+      accountKind: 'income'
+    });
+
+    expect(result.items).toEqual([
+      {
+        id: 'qb-other',
+        qbId: 'qb-other',
+        name: 'Other Income',
+        type: 'revenue',
+        detailType: 'OtherPrimaryIncome',
+        status: 'active',
+        balance: null
+      },
+      {
+        id: 'qb-sales',
+        qbId: 'qb-sales',
+        name: 'Sales of Product Income',
+        type: 'revenue',
+        detailType: 'SalesOfProductIncome',
+        status: 'active',
+        balance: null
+      }
+    ]);
+  });
+
+  it('returns live QuickBooks deposit line accounts when accountKind is deposit_line', async () => {
+    listQuickBooksAccountsMock.mockResolvedValue([
+      {
+        id: 'qb-sales',
+        name: 'Sales of Product Income',
+        code: '4000',
+        accountType: 'Income',
+        accountSubType: 'SalesOfProductIncome',
+        active: true
+      },
+      {
+        id: 'qb-clearing',
+        name: 'POS Clearing',
+        code: '2100',
+        accountType: 'Other Current Liability',
+        accountSubType: 'OtherCurrentLiabilities',
+        active: true
+      },
+      {
+        id: 'qb-equity',
+        name: 'Owner Equity',
+        code: '3000',
+        accountType: 'Equity',
+        accountSubType: 'OwnersEquity',
+        active: true
+      },
+      {
+        id: 'qb-checking',
+        name: 'Operating Checking',
+        code: '1000',
+        accountType: 'Bank',
+        accountSubType: 'Checking',
+        active: true
+      }
+    ]);
+
+    const { listQuickBooksHubChartOfAccounts } = await import('./quickbooksTaxService');
+    const result = await listQuickBooksHubChartOfAccounts({
+      companyId: 'company-1',
+      page: 1,
+      pageSize: 500,
+      sort: 'name',
+      accountKind: 'deposit_line'
+    });
+
+    expect(result.items.map((item) => item.qbId).sort()).toEqual(['qb-clearing', 'qb-equity', 'qb-sales']);
+  });
+
+  it('falls back to synced chart of accounts when live income list is empty', async () => {
+    listQuickBooksAccountsMock.mockResolvedValue([]);
+    chartFindMock.mockReturnValue({
+      sort: vi.fn().mockReturnValue({
+        lean: vi.fn().mockResolvedValue([
+          {
+            _id: 'coa-income-1',
+            qbAccountId: 'qb-sales',
+            name: 'Sales Income',
+            type: 'revenue',
+            isSystem: false
+          }
+        ])
+      })
+    });
+
+    const { listQuickBooksHubChartOfAccounts } = await import('./quickbooksTaxService');
+    const result = await listQuickBooksHubChartOfAccounts({
+      companyId: 'company-1',
+      page: 1,
+      pageSize: 500,
+      sort: 'name',
+      accountKind: 'income'
+    });
+
+    expect(chartFindMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyId: 'company-1',
+        type: 'revenue',
+        isSystem: false
+      })
+    );
+    expect(result.items).toEqual([
+      {
+        id: 'coa-income-1',
+        qbId: 'qb-sales',
+        name: 'Sales Income',
+        type: 'revenue',
+        detailType: null,
+        status: 'active',
+        balance: null
+      }
+    ]);
+  });
+
   it('maps chart of accounts into paginated hub rows', async () => {
     chartFindMock.mockReturnValue(chartFindChain);
     chartFindChain.limit.mockResolvedValue([

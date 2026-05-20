@@ -67,6 +67,7 @@ export type QuickBooksAccountRecord = {
   name: string;
   code: string | null;
   accountType: string | null;
+  accountSubType: string | null;
   active: boolean;
 };
 

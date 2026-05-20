@@ -1,4 +1,4 @@
-import { InferSchemaType, Schema, model } from 'mongoose';
+import { InferSchemaType, Schema, Types, model } from 'mongoose';
 import { tenantPlugin } from './plugins/tenantPlugin';
 
 const confidenceSchema = new Schema(
@@ -108,5 +108,5 @@ statementCheckSchema.index({ companyId: 1, statementId: 1, createdAt: -1 });
 statementCheckSchema.index({ companyId: 1, statementId: 1, status: 1, createdAt: -1 });
 statementCheckSchema.plugin(tenantPlugin);
 
-export type StatementCheckDoc = InferSchemaType<typeof statementCheckSchema> & { _id: string };
+export type StatementCheckDoc = InferSchemaType<typeof statementCheckSchema> & { _id: Types.ObjectId };
 export const StatementCheckModel = model('StatementCheck', statementCheckSchema);

@@ -1,6 +1,8 @@
 import type {
   BankStatementDetail,
+  QuickBooksHubChartAccount,
   StatementCheck,
+  StatementSuggestionItem,
   StatementSuggestionsResponse
 } from '@retailsync/shared';
 import { formatDate } from '../../../utils/date';
@@ -42,6 +44,160 @@ export const formatProgressSummary = (progress: BankStatementDetail['progress'])
 
 export const formatStatusLabel = (value: string) =>
   value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+
+export const isCheckSuggestionItem = (item: StatementSuggestionItem) =>
+  item.source === 'check' ||
+  item.rowType === 'check_cleared' ||
+  item.section === 'checks_cleared' ||
+  Boolean(item.checkNumber?.trim());
+
+export const resolveLinkedCheck = (
+  item: StatementSuggestionItem,
+  checks: StatementCheck[]
+): StatementCheck | undefined => {
+  const linkedId = item.linkedCheckId ?? (item.source === 'check' ? item.id : undefined);
+  if (!linkedId) return undefined;
+  return checks.find((check) => check.id === linkedId);
+};
+
+export const resolveCheckNumberForReview = (
+  item: StatementSuggestionItem,
+  linkedCheck?: StatementCheck
+): string => {
+  const fromItem = item.checkNumber?.trim();
+  if (fromItem) return fromItem;
+  return (
+    linkedCheck?.extracted?.checkNumber?.trim() ??
+    linkedCheck?.autoFill?.checkNumber?.trim() ??
+    ''
+  );
+};
+
+/** QuickBooks entity ids are numeric; Mongo chart rows use 24-char hex. */
+export const looksLikeQuickBooksRefId = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return /^[0-9a-fA-F]{24}$/.test(trimmed) || /^\d+$/.test(trimmed);
+};
+
+export const resolveLineAccountRefFromPool = (
+  pool: QuickBooksHubChartAccount[],
+  args: {
+    lineAccountRef: string;
+    lineAccountInput?: string;
+    categorySeed?: string;
+    chartAccountRefValue: (account: QuickBooksHubChartAccount) => string;
+  }
+): string => {
+  const seed =
+    args.lineAccountRef.trim() ||
+    String(args.lineAccountInput ?? '').trim() ||
+    String(args.categorySeed ?? '').trim();
+  if (!seed) return '';
+  const normalizedSeed = seed.toLowerCase();
+  const match = pool.find(
+    (account) =>
+      args.chartAccountRefValue(account) === seed ||
+      account.id === seed ||
+      account.name.trim().toLowerCase() === normalizedSeed
+  );
+  if (match) return args.chartAccountRefValue(match);
+  if (pool.length === 0) return seed;
+  if (looksLikeQuickBooksRefId(seed)) return seed;
+  return '';
+};
+
+export const resolveCategoryAccountSeed = (
+  item: StatementSuggestionItem,
+  linkedCheck?: StatementCheck
+): string =>
+  item.categoryAccountId?.trim() ||
+  linkedCheck?.proposal?.categoryAccountId?.trim() ||
+  '';
+
+export const resolvePayeeNameForReview = (
+  item: StatementSuggestionItem,
+  linkedCheck?: StatementCheck
+): string =>
+  item.payeeName?.trim() ||
+  linkedCheck?.extracted?.payeeName?.trim() ||
+  linkedCheck?.autoFill?.payeeName?.trim() ||
+  linkedCheck?.proposal?.payeeName?.trim() ||
+  '';
+
+export const filterExpenseLineAccounts = (accounts: QuickBooksHubChartAccount[]) =>
+  accounts.filter(
+    (account) => account.type === 'expense' || String(account.type ?? '').toLowerCase().includes('expense')
+  );
+
+export const filterIncomeLineAccounts = (accounts: QuickBooksHubChartAccount[]) =>
+  accounts.filter(
+    (account) => account.type === 'revenue' || String(account.type ?? '').toLowerCase().includes('income')
+  );
+
+/** Accounts QuickBooks allows on a Deposit line (income, clearing, liability, equity, non-bank asset). */
+export const filterDepositLineAccounts = (accounts: QuickBooksHubChartAccount[]) =>
+  accounts.filter((account) => {
+    const type = String(account.type ?? '').toLowerCase();
+    const haystack = `${account.name ?? ''} ${account.detailType ?? ''}`.toLowerCase();
+    if (haystack.includes('checking') || haystack.includes('savings') || /\bbank\b/.test(haystack)) {
+      return false;
+    }
+    return (
+      type === 'revenue' ||
+      type === 'liability' ||
+      type === 'equity' ||
+      (type === 'asset' && !haystack.includes('receivable'))
+    );
+  });
+
+export const formatDepositLineAccountLabel = (account: QuickBooksHubChartAccount) => {
+  return account.name;
+};
+
+export const pickDefaultExpenseLineAccount = (
+  accounts: QuickBooksHubChartAccount[]
+): QuickBooksHubChartAccount | undefined => {
+  const expenseAccounts = filterExpenseLineAccounts(accounts);
+  if (expenseAccounts.length === 0) return undefined;
+  const preferred = expenseAccounts.find((account) =>
+    /(supplies|misc|general|uncategorized|operating|expense)/i.test(account.name)
+  );
+  return preferred ?? expenseAccounts[0];
+};
+
+export const pickDefaultIncomeLineAccount = (
+  accounts: QuickBooksHubChartAccount[]
+): QuickBooksHubChartAccount | undefined => {
+  const incomeAccounts = filterIncomeLineAccounts(accounts);
+  if (incomeAccounts.length === 0) return undefined;
+  const preferred = incomeAccounts.find((account) =>
+    /(sales|deposit|uncategorized|service|product|income)/i.test(account.name)
+  );
+  return preferred ?? incomeAccounts[0];
+};
+
+export const pickDefaultDepositLineAccount = (
+  accounts: QuickBooksHubChartAccount[]
+): QuickBooksHubChartAccount | undefined => {
+  const depositLines = filterDepositLineAccounts(accounts);
+  if (depositLines.length === 0) return undefined;
+  const preferred = depositLines.find((account) =>
+    /(sales|uncategorized|service|product|income|clearing|deposit)/i.test(account.name)
+  );
+  return preferred ?? depositLines[0];
+};
+
+export const isGenericBankDepositRow = (item: {
+  direction?: string;
+  description?: string;
+  proposedTxnType?: string;
+  transactionFamily?: string;
+}) =>
+  item.direction === 'credit' &&
+  /\bdeposit\b/i.test(item.description ?? '') &&
+  item.proposedTxnType !== 'Transfer' &&
+  item.transactionFamily !== 'transfer';
 
 export const getCheckSourceLabel = (check: StatementCheck) => {
   const source = check.extracted?.source;

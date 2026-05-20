@@ -1,6 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { configureStore } from '@reduxjs/toolkit';
@@ -21,7 +20,10 @@ const {
   listStatementRulesMock,
   createStatementRuleFromTransactionMock,
   getStatementArtifactBlobMock,
-  getStatementArtifactTextMock
+  getStatementArtifactTextMock,
+  getQuickbooksHubChartOfAccountsMock,
+  refreshQuickbooksReferenceDataMock,
+  updateStatementSuggestionReviewMock
 } = vi.hoisted(() => ({
   getStatementMock: vi.fn(),
   listStatementChecksMock: vi.fn(),
@@ -31,7 +33,10 @@ const {
   listStatementRulesMock: vi.fn(),
   createStatementRuleFromTransactionMock: vi.fn(),
   getStatementArtifactBlobMock: vi.fn(),
-  getStatementArtifactTextMock: vi.fn()
+  getStatementArtifactTextMock: vi.fn(),
+  getQuickbooksHubChartOfAccountsMock: vi.fn(),
+  refreshQuickbooksReferenceDataMock: vi.fn(),
+  updateStatementSuggestionReviewMock: vi.fn()
 }));
 
 vi.mock('../api', () => ({
@@ -45,7 +50,16 @@ vi.mock('../api', () => ({
     createStatementRuleFromTransaction: (...args: unknown[]) => createStatementRuleFromTransactionMock(...args),
     getStatementStreamUrl: vi.fn(() => 'http://localhost/accounting/statements/statement-1/stream'),
     getStatementArtifactBlob: (...args: unknown[]) => getStatementArtifactBlobMock(...args),
-    getStatementArtifactText: (...args: unknown[]) => getStatementArtifactTextMock(...args)
+    getStatementArtifactText: (...args: unknown[]) => getStatementArtifactTextMock(...args),
+    getQuickbooksHubChartOfAccounts: (...args: unknown[]) => getQuickbooksHubChartOfAccountsMock(...args),
+    refreshQuickbooksReferenceData: (...args: unknown[]) => refreshQuickbooksReferenceDataMock(...args),
+    updateStatementSuggestionReview: (...args: unknown[]) => updateStatementSuggestionReviewMock(...args),
+    getQuickbooksHubEntities: vi.fn().mockResolvedValue({ data: { data: { items: [] } } }),
+    getQuickbooksHubItems: vi.fn().mockResolvedValue({ data: { data: { items: [] } } }),
+    getQuickbooksWriteInvoices: vi.fn().mockResolvedValue({ data: { data: { items: [] } } }),
+    assignStatementBankAccount: vi.fn().mockResolvedValue({
+      data: { data: { statement: { id: 'statement-1', bankAccountId: 'qb-bank-1' } } }
+    })
   }
 }));
 
@@ -106,6 +120,58 @@ describe('StatementDetailPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    refreshQuickbooksReferenceDataMock.mockResolvedValue({ data: { data: { ok: true } } });
+    updateStatementSuggestionReviewMock.mockResolvedValue({ data: { data: { ok: true } } });
+    getQuickbooksHubChartOfAccountsMock.mockImplementation((params: { accountKind?: string }) => {
+      if (params?.accountKind === 'bank') {
+        return Promise.resolve({
+          data: {
+            data: {
+              items: [
+                {
+                  id: 'bank-1',
+                  qbId: 'qb-bank-1',
+                  name: 'Operating Checking',
+                  type: 'asset',
+                  detailType: 'Checking',
+                  status: 'active',
+                  balance: null
+                }
+              ]
+            }
+          }
+        });
+      }
+      if (params?.accountKind === 'deposit_line') {
+        return Promise.resolve({
+          data: {
+            data: {
+              items: [
+                {
+                  id: 'line-rev',
+                  qbId: 'qb-line-rev',
+                  name: 'Sales Income',
+                  type: 'revenue',
+                  detailType: 'SalesOfProductIncome',
+                  status: 'active',
+                  balance: null
+                },
+                {
+                  id: 'line-liab',
+                  qbId: 'qb-line-liab',
+                  name: 'POS Clearing',
+                  type: 'liability',
+                  detailType: 'OtherCurrentLiability',
+                  status: 'active',
+                  balance: null
+                }
+              ]
+            }
+          }
+        });
+      }
+      return Promise.resolve({ data: { data: { items: [] } } });
+    });
     vi.stubGlobal(
       'URL',
       Object.assign(URL, {
@@ -120,6 +186,7 @@ describe('StatementDetailPage', () => {
           id: 'statement-1',
           statementMonth: '2026-03',
           fileName: 'march-statement.pdf',
+          bankAccountId: 'qb-bank-1',
           status: 'checks_queued',
           progress: {
             phase: 'checks_queued',
@@ -171,11 +238,11 @@ describe('StatementDetailPage', () => {
         data: {
           statementId: 'statement-1',
           summary: {
-            totalItems: 3,
+            totalItems: 4,
             checks: 2,
-            deposits: 0,
+            deposits: 1,
             debits: 2,
-            credits: 1,
+            credits: 2,
             expenses: 1,
             transfers: 0,
             checksSuggested: 1,
@@ -206,6 +273,20 @@ describe('StatementDetailPage', () => {
               amount: 800,
               direction: 'credit',
               section: 'deposits',
+              reviewStatus: 'proposed',
+              postingStatus: 'not_posted',
+              status: 'structured',
+              reasons: []
+            },
+            {
+              id: 'txn-deposit',
+              source: 'transaction',
+              date: '2026-03-02',
+              description: '03/02/2026 DEPOSIT $3,085.00',
+              amount: 3085,
+              direction: 'credit',
+              section: 'deposits',
+              proposedTxnType: 'Deposit',
               reviewStatus: 'proposed',
               postingStatus: 'not_posted',
               status: 'structured',
@@ -552,4 +633,78 @@ describe('StatementDetailPage', () => {
     expect(screen.getAllByText(/Staples payment/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/All \d+ rows|Showing 1-/i).length).toBeGreaterThan(0);
   });
+
+  it(
+    'opens Deposit workflow with deposit line accounts and enables posting after selection',
+    async () => {
+    const user = userEvent.setup({ delay: null });
+
+    getStatementSuggestionsMock.mockResolvedValueOnce({
+      data: {
+        data: {
+          statementId: 'statement-1',
+          summary: {
+            totalItems: 1,
+            checks: 0,
+            deposits: 1,
+            debits: 0,
+            credits: 1,
+            expenses: 0,
+            transfers: 0,
+            checksSuggested: 0,
+            uncategorized: 0
+          },
+          items: [
+            {
+              id: 'txn-deposit',
+              source: 'transaction',
+              date: '2026-03-02',
+              description: '03/02/2026 DEPOSIT $3,085.00',
+              amount: 3085,
+              direction: 'credit',
+              section: 'deposits',
+              proposedTxnType: 'Deposit',
+              reviewStatus: 'proposed',
+              postingStatus: 'not_posted',
+              status: 'structured',
+              reasons: []
+            }
+          ]
+        }
+      }
+    });
+
+    render(
+      <Provider store={createStore()}>
+        <MemoryRouter initialEntries={['/dashboard/accounting/statements/statement-1']}>
+          <Routes>
+            <Route path="/dashboard/accounting/statements/:statementId" element={<StatementDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </Provider>
+    );
+
+    await screen.findByRole('tab', { name: /^Overview$/i });
+    await user.click(screen.getByRole('tab', { name: /^Review Transactions$/i }));
+    await screen.findByText(/03\/02\/2026 DEPOSIT/i);
+    await user.click(await screen.findByRole('button', { name: /^Review$/i }));
+
+    const dialog = await screen.findByRole('dialog', {}, { timeout: 15_000 });
+    expect(within(dialog).getByText(/03\/02\/2026 DEPOSIT/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: /Deposit line account \(QuickBooks\)/i })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/Received from \(optional\)/i)).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(getQuickbooksHubChartOfAccountsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ accountKind: 'deposit_line' })
+      );
+    });
+
+    await waitFor(() => {
+      expect(within(dialog).getByRole('button', { name: /Post deposit/i })).toBeEnabled();
+    });
+    expect(within(dialog).queryByText(/Select a customer/i)).not.toBeInTheDocument();
+    },
+    30_000
+  );
 });

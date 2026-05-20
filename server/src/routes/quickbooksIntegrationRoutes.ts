@@ -19,6 +19,7 @@ import {
   getQuickBooksHubChartOfAccounts,
   postQuickBooksHubChartOfAccounts,
   getQuickBooksHubItems,
+  postQuickBooksHubItem,
   getQuickBooksHubEntities,
   getQuickBooksHubOperations,
   getQuickBooksLiveTransactionsByType,
@@ -49,6 +50,24 @@ import { requireQuickBooksDisconnect } from '../middleware/requireQuickBooksDisc
 const requireQuickBooksConnect = requireAnyPermission([
   { moduleKey: 'quickbooks', action: 'connect' },
   { moduleKey: 'quickbooks', action: 'edit' }
+]);
+
+/** Statement review posting uses hub read APIs without full QuickBooks workspace access. */
+const requireStatementQuickBooksHubRead = requireAnyPermission([
+  { moduleKey: 'quickbooks', action: 'view' },
+  { moduleKey: 'bankStatements', action: 'view' },
+  { moduleKey: 'bankStatements', action: 'edit' }
+]);
+
+const requireStatementQuickBooksHubCreate = requireAnyPermission([
+  { moduleKey: 'quickbooks', action: 'create' },
+  { moduleKey: 'quickbooks', action: 'edit' },
+  { moduleKey: 'bankStatements', action: 'edit' }
+]);
+
+const requireStatementQuickBooksReferenceRefresh = requireAnyPermission([
+  { moduleKey: 'quickbooks', action: 'sync' },
+  { moduleKey: 'bankStatements', action: 'edit' }
 ]);
 
 const router = Router();
@@ -86,7 +105,7 @@ router.get(
 router.post(
   '/sync/refresh-reference-data',
   requireAuth,
-  requirePermission('quickbooks', 'sync'),
+  requireStatementQuickBooksReferenceRefresh,
   queueQuickBooksRefreshReferenceData
 );
 router.post(
@@ -140,7 +159,7 @@ router.delete(
 router.get(
   '/write/:txnType',
   requireAuth,
-  requirePermission('quickbooks', 'view'),
+  requireStatementQuickBooksHubRead,
   getQuickBooksWriteTransactionsByType
 );
 router.get(
@@ -170,25 +189,31 @@ router.delete(
 router.get(
   '/hub/chart-of-accounts',
   requireAuth,
-  requirePermission('quickbooks', 'view'),
+  requireStatementQuickBooksHubRead,
   getQuickBooksHubChartOfAccounts
 );
 router.post(
   '/hub/chart-of-accounts',
   requireAuth,
-  requireQuickBooksMutation('create'),
+  requireStatementQuickBooksHubCreate,
   postQuickBooksHubChartOfAccounts
 );
 router.get(
   '/hub/items',
   requireAuth,
-  requirePermission('quickbooks', 'view'),
+  requireStatementQuickBooksHubRead,
   getQuickBooksHubItems
+);
+router.post(
+  '/hub/items',
+  requireAuth,
+  requireStatementQuickBooksHubCreate,
+  postQuickBooksHubItem
 );
 router.get(
   '/hub/entities',
   requireAuth,
-  requirePermission('quickbooks', 'view'),
+  requireStatementQuickBooksHubRead,
   getQuickBooksHubEntities
 );
 router.get(
@@ -200,7 +225,7 @@ router.get(
 router.post(
   '/contacts/:entityType',
   requireAuth,
-  requireQuickBooksMutation('create'),
+  requireStatementQuickBooksHubCreate,
   postQuickBooksContact
 );
 router.patch(

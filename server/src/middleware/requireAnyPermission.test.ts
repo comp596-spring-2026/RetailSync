@@ -84,6 +84,44 @@ describe('requireAnyPermission', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
+  it('allows bank statement editors to use QuickBooks hub read APIs', async () => {
+    const permissions = memberPermissions();
+    permissions.bankStatements = {
+      view: true,
+      create: false,
+      edit: true,
+      delete: false,
+      actions: []
+    };
+    permissions.quickbooks = {
+      view: false,
+      create: false,
+      edit: false,
+      delete: false,
+      actions: []
+    };
+
+    findOneMock.mockResolvedValue({
+      name: 'Statement Reviewer',
+      isSystem: false,
+      permissions
+    });
+
+    const middleware = requireAnyPermission([
+      { moduleKey: 'quickbooks', action: 'view' },
+      { moduleKey: 'bankStatements', action: 'view' },
+      { moduleKey: 'bankStatements', action: 'edit' }
+    ]);
+
+    const req = { companyId: 'c1', roleId: 'r1' } as unknown as Request;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
+    const next = vi.fn();
+
+    await middleware(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects when neither permission is granted', async () => {
     const permissions = memberPermissions();
     permissions.rolesSettings = {

@@ -36,6 +36,8 @@ import {
   QuickBooksTransactionDetail,
   QuickBooksHubChartAccountCreateInput,
   QuickBooksHubChartAccountCreateResponse,
+  QuickBooksHubItemCreateInput,
+  QuickBooksHubItemCreateResponse,
   QuickBooksHubItemsResponse,
   QuickBooksSettings,
   QuickBooksWriteCreateInput,
@@ -108,7 +110,7 @@ export class AccountingApi {
     }>('/accounting/statements', { params });
   }
 
-  listStatementMonths() {
+  listStatementMonths(params?: { bankAccountId?: string }) {
     return api.get<{
       data: {
         months: Array<{
@@ -120,7 +122,7 @@ export class AccountingApi {
           updatedAt: string;
         }>;
       };
-    }>('/accounting/statement-months');
+    }>('/accounting/statement-months', { params });
   }
 
   getStatementMonthSummary(month: string) {
@@ -463,6 +465,12 @@ export class AccountingApi {
       '/integrations/quickbooks/hub/items',
       params
     );
+  }
+
+  createQuickbooksHubItem(payload: QuickBooksHubItemCreateInput) {
+    return api.post<{
+      data: QuickBooksHubItemCreateResponse;
+    }>('/integrations/quickbooks/hub/items', payload);
   }
 
   getQuickbooksWriteInvoices(params?: { customerId?: string; page?: number; pageSize?: number }) {
