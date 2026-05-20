@@ -508,3 +508,67 @@ export const idEquals = (a: unknown, b: unknown): boolean => {
   const bStr = String((b as any)?.toString?.() ?? b ?? "").trim();
   return Boolean(aStr) && Boolean(bStr) && aStr === bStr;
 };
+
+/** Mirror legacy shared-sheet verify/configure into canonical shared.profiles. */
+export const applySharedSheetAccessToCanonical = (
+  settingsDoc: any,
+  input: {
+    profileId?: string | null;
+    profileName?: string | null;
+    spreadsheetId: string;
+    spreadsheetTitle?: string | null;
+    sheetName?: string;
+    headerRow?: number;
+  },
+) => {
+  ensureGoogleSheetsShape(settingsDoc);
+  const gs = settingsDoc.googleSheets as Record<string, any>;
+  const profiles = gs.shared?.profiles ?? [];
+  const profileId = String(input.profileId ?? "").trim();
+  const profileName = String(input.profileName ?? "").trim();
+
+  let profile = profileId
+    ? profiles.find((entry: any) => idEquals(entry._id, profileId))
+    : null;
+  if (!profile && profileName) {
+    profile = profiles.find(
+      (entry: any) => String(entry.name ?? "").trim() === profileName,
+    );
+  }
+  if (!profile) {
+    profile = {
+      _id: profileId && Types.ObjectId.isValid(profileId)
+        ? new Types.ObjectId(profileId)
+        : new Types.ObjectId(),
+      name: profileName || "POS DATA SHEET",
+      connectors: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    profiles.push(profile);
+  }
+
+  const connector = getConnectorFromContainer(profile, DEFAULT_CONNECTOR_KEY);
+  connector.spreadsheetId = String(input.spreadsheetId).trim();
+  if (input.spreadsheetTitle) {
+    connector.spreadsheetTitle = String(input.spreadsheetTitle).trim();
+  }
+  if (input.sheetName) {
+    connector.sheetName = String(input.sheetName).trim();
+  }
+  if (input.headerRow) {
+    connector.headerRow = Math.max(1, Number(input.headerRow) || 1);
+  }
+  connector.enabled = true;
+  connector.updatedAt = new Date().toISOString();
+
+  gs.shared.profiles = profiles;
+  gs.shared.enabled = true;
+  if (!gs.shared.activeProfileId) {
+    gs.shared.activeProfileId = profile._id;
+  }
+  if (!gs.shared.activeConnectorKey) {
+    gs.shared.activeConnectorKey = DEFAULT_CONNECTOR_KEY;
+  }
+  gs.updatedAt = new Date();
+};

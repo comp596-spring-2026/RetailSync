@@ -51,12 +51,20 @@ const previewRequestSchema = z.object({
   tab: z.string().min(1).optional()
 });
 
-const matchMappingSchema = z.object({
-  connectorKey: z.string().default(DEFAULT_CONNECTOR_KEY),
-  mapping: z.record(z.string(), z.string()).default({}),
-  columns: z.array(z.string()).default([]),
-  transformations: z.record(z.string(), z.unknown()).optional()
-});
+const matchMappingSchema = z
+  .object({
+    connectorKey: z.string().default(DEFAULT_CONNECTOR_KEY),
+    mapping: z.record(z.string(), z.string()).default({}),
+    columns: z.array(z.string()).default([]),
+    transformations: z.record(z.string(), z.unknown()).optional(),
+    transforms: z.record(z.string(), z.unknown()).optional()
+  })
+  .transform((body) => ({
+    connectorKey: body.connectorKey,
+    mapping: body.mapping,
+    columns: body.columns,
+    transformations: body.transformations ?? body.transforms
+  }));
 
 const commitImportSchema = z.object({
   connectorKey: z.string().default(DEFAULT_CONNECTOR_KEY),

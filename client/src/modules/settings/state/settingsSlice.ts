@@ -251,6 +251,13 @@ const normalizeGoogleSheetsSettings = (raw: unknown): GoogleSheetsSettings => {
 
   const oauthSourcesRaw = Array.isArray(oauth.sources) ? oauth.sources : [];
   const sharedProfilesRaw = Array.isArray(shared.profiles) ? shared.profiles : [];
+  const legacySharedSheetsRaw = Array.isArray(gs.sharedSheets) ? gs.sharedSheets : [];
+  const legacyShareByProfileId = new Map(
+    legacySharedSheetsRaw.map((sheet) => {
+      const entry = (sheet ?? {}) as Record<string, unknown>;
+      return [String(entry.profileId ?? ''), entry] as const;
+    }),
+  );
   const pickConnector = (
     connectors: unknown[],
     activeKey: string,
@@ -314,6 +321,17 @@ const normalizeGoogleSheetsSettings = (raw: unknown): GoogleSheetsSettings => {
         ? (cfg.transformations as Record<string, unknown>)
         : {};
     const lastImportAt = cfg.lastImportAt == null ? null : String(cfg.lastImportAt);
+    const legacyProfile = legacyShareByProfileId.get(profileId);
+    const legacyShareStatus = legacyProfile?.shareStatus;
+    const shareStatus =
+      legacyShareStatus === 'shared' ||
+      legacyShareStatus === 'not_shared' ||
+      legacyShareStatus === 'no_permission' ||
+      legacyShareStatus === 'not_found' ||
+      legacyShareStatus === 'unknown'
+        ? legacyShareStatus
+        : 'unknown';
+    const legacyLastVerifiedAt = legacyProfile?.lastVerifiedAt;
 
     return {
       profileId,
@@ -324,8 +342,13 @@ const normalizeGoogleSheetsSettings = (raw: unknown): GoogleSheetsSettings => {
       sheetName: String(cfg.sheetName ?? 'Sheet1') || 'Sheet1',
       headerRow: Number(cfg.headerRow ?? 1),
       enabled: Boolean(cfg.enabled ?? true),
-      shareStatus: 'unknown',
-      lastVerifiedAt: null,
+      shareStatus,
+      lastVerifiedAt:
+        legacyLastVerifiedAt == null
+          ? null
+          : legacyLastVerifiedAt instanceof Date
+            ? legacyLastVerifiedAt.toISOString()
+            : String(legacyLastVerifiedAt),
       lastImportAt,
       columnsMap: mapping,
       mappingConfirmedAt: cfg.mappingConfirmedAt == null ? null : String(cfg.mappingConfirmedAt),
@@ -349,7 +372,11 @@ const normalizeGoogleSheetsSettings = (raw: unknown): GoogleSheetsSettings => {
     mode: activeIntegration,
     serviceAccountEmail: typeof next.serviceAccountEmail === 'string' ? next.serviceAccountEmail : '',
     connected: String(oauth.connectionStatus ?? '') === 'connected',
-    connectedEmail: null,
+    connectedEmail:
+      typeof (next as { connectedEmail?: unknown }).connectedEmail === 'string' ||
+      (next as { connectedEmail?: unknown }).connectedEmail === null
+        ? ((next as { connectedEmail?: string | null }).connectedEmail ?? null)
+        : null,
     syncSchedule: undefined,
     lastScheduledSyncAt:
       typeof shared.lastScheduledSyncAt === 'string' || shared.lastScheduledSyncAt === null

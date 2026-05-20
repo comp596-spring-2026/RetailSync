@@ -9,6 +9,11 @@ import {
   getSheetsClientForCompany
 } from '../integrations/google/sheets.client';
 import {
+  applySharedSheetAccessToCanonical,
+  ensureGoogleSheetsShape,
+  getOrCreateSettings as getCanonicalSettings
+} from '../integrations/google/settings';
+import {
   ensureSharedSheets,
   normalizeSharedSheetProfileName,
   pickDefaultSharedSheet,
@@ -142,29 +147,9 @@ export const upsertSharedSheetsConfig = async (req: Request, res: Response) => {
     return fail(res, 'Provide spreadsheetId or a valid Google spreadsheetUrl', 400);
   }
 
-  const settings = await getOrCreateSettings(companyId, userId);
-  const googleSheets = (settings.googleSheets ?? {
-    mode: 'service_account',
-    connected: false,
-    connectedEmail: null,
-    serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
-    sources: [],
-    sharedSheets: [],
-      sharedConfig: {
-        spreadsheetId: null,
-        sheetName: 'Sheet1',
-        sheetId: null,
-        headerRow: 1,
-        columnsMap: {},
-        enabled: false,
-        shareStatus: 'unknown',
-        oauthConnectedAccount: null,
-        lastMapping: null,
-        lastVerifiedAt: null,
-        lastImportAt: null
-      },
-    updatedAt: new Date()
-  }) as any;
+  const settings = await getCanonicalSettings(companyId, userId);
+  ensureGoogleSheetsShape(settings);
+  const googleSheets = settings.googleSheets as any;
 
   googleSheets.serviceAccountEmail =
     googleSheets.serviceAccountEmail || SERVICE_ACCOUNT_EMAIL;
@@ -181,8 +166,14 @@ export const upsertSharedSheetsConfig = async (req: Request, res: Response) => {
     lastVerifiedAt: null,
     isDefault: parsed.data.profileId == null
   });
+  applySharedSheetAccessToCanonical(settings, {
+    profileId: profile.profileId,
+    profileName: profile.name,
+    spreadsheetId,
+    sheetName: parsed.data.sheetName,
+    headerRow: parsed.data.headerRow
+  });
   googleSheets.updatedAt = new Date();
-  settings.googleSheets = googleSheets;
   await settings.save();
 
   return ok(res, {
@@ -591,26 +582,9 @@ export const verifySharedSheetsConfig = async (req: Request, res: Response) => {
     return fail(res, 'Company onboarding required', 403);
   }
 
-  const settings = await getOrCreateSettings(companyId, userId);
-  const googleSheets = (settings.googleSheets ?? {
-    mode: 'service_account',
-    connected: false,
-    connectedEmail: null,
-    serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
-    sources: [],
-    sharedSheets: [],
-    sharedConfig: {
-      spreadsheetId: null,
-      sheetName: 'Sheet1',
-      headerRow: 1,
-      columnsMap: {},
-      enabled: false,
-      lastVerifiedAt: null,
-      lastImportAt: null
-    },
-    updatedAt: new Date()
-  }) as any;
-  settings.googleSheets = googleSheets;
+  const settings = await getCanonicalSettings(companyId, userId);
+  ensureGoogleSheetsShape(settings);
+  const googleSheets = settings.googleSheets as any;
   const legacySharedConfigSpreadsheetId =
     typeof googleSheets.sharedConfig?.spreadsheetId === 'string'
       ? googleSheets.sharedConfig.spreadsheetId.trim()
@@ -725,6 +699,14 @@ export const verifySharedSheetsConfig = async (req: Request, res: Response) => {
       availableTabs,
       lastVerifiedAt: new Date(),
       enabled: targetProfile?.enabled ?? true
+    });
+    applySharedSheetAccessToCanonical(settings, {
+      profileId: targetProfile?.profileId ?? (bodyProfileId || null),
+      profileName: targetProfile?.name ?? null,
+      spreadsheetId,
+      spreadsheetTitle,
+      sheetName: resolvedSheetName || sheetName,
+      headerRow
     });
     googleSheets.updatedAt = new Date();
     await settings.save();

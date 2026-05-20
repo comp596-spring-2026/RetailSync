@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import { Types } from "mongoose";
 import { z } from "zod";
 import { getSheetsClientForCompany } from "../../integrations/google/sheets.client";
+import { loadGoogleOAuthSecret } from "../../integrations/google/oauth";
 import { ensureSharedSheets, pickDefaultSharedSheet } from "../../integrations/google/sharedSheets";
 import { IntegrationSettingsModel } from "../../models/IntegrationSettings";
 import { IntegrationSecretModel } from "../../models/IntegrationSecret";
 import { POSDailySummaryModel } from "../../models/POSDailySummary";
 import { normalizeUtcOffset } from "../../utils/utcOffset";
 import { GoogleSheetsApplicationError } from "./errors";
+import { getGoogleSheetsSettingsView } from "./managementService";
 
 export const DEFAULT_RANGE = "Sheet1!A1:Z";
 export const SERVICE_ACCOUNT_EMAIL =
@@ -230,8 +232,58 @@ export const getOrCreateLegacySettings = async (companyId: string, userId: strin
   );
 
 export const getSettingsPayload = async (companyId: string, userId: string) => {
+  const base = await getGoogleSheetsSettingsView(companyId, userId);
   const settings = ensureSubdocs(await getOrCreateLegacySettings(companyId, userId));
-  return toSafeSettings(settings);
+  const googleSheets = settings.googleSheets as Record<string, unknown>;
+
+  let connectedEmail: string | null = null;
+  try {
+    const secret = await loadGoogleOAuthSecret(companyId);
+    connectedEmail =
+      typeof secret?.connectedEmail === "string" && secret.connectedEmail.trim()
+        ? secret.connectedEmail.trim()
+        : null;
+  } catch {
+    connectedEmail =
+      typeof googleSheets.connectedEmail === "string"
+        ? googleSheets.connectedEmail
+        : null;
+  }
+
+  const oauthConnected =
+    base.googleSheets.oauth.connectionStatus === "connected" ||
+    Boolean(googleSheets.connected);
+
+  return {
+    ...base,
+    googleSheets: {
+      ...base.googleSheets,
+      mode:
+        base.googleSheets.activeIntegration === "oauth"
+          ? "oauth"
+          : "service_account",
+      serviceAccountEmail: String(
+        googleSheets.serviceAccountEmail ?? SERVICE_ACCOUNT_EMAIL,
+      ),
+      connected: oauthConnected,
+      connectedEmail,
+      syncSchedule: googleSheets.syncSchedule ?? {
+        enabled: false,
+        hour: 2,
+        minute: 0,
+        timezone: DEFAULT_SYNC_UTC_OFFSET,
+      },
+      lastScheduledSyncAt:
+        googleSheets.lastScheduledSyncAt ??
+        base.googleSheets.shared.lastScheduledSyncAt ??
+        null,
+      sources: Array.isArray(googleSheets.sources) ? googleSheets.sources : [],
+      sharedSheets: Array.isArray(googleSheets.sharedSheets)
+        ? googleSheets.sharedSheets
+        : [],
+      sharedConfig: googleSheets.sharedConfig ?? null,
+    },
+  };
 };
 
 export const getGoogleSheetsSyncOverview = async (companyId: string) => {
@@ -392,10 +444,14 @@ export const disconnectGoogle = async (companyId: string, userId: string) => {
   const settings = ensureSubdocs(await getOrCreateLegacySettings(companyId, userId));
   settings.googleSheets.connected = false;
   settings.googleSheets.connectedEmail = null;
+  if (settings.googleSheets.oauth) {
+    settings.googleSheets.oauth.enabled = false;
+    settings.googleSheets.oauth.connectionStatus = "not_connected";
+  }
   ensureSharedSheets(settings.googleSheets);
   settings.googleSheets.updatedAt = new Date();
   await settings.save();
-  return toSafeSettings(settings);
+  return getSettingsPayload(companyId, userId);
 };
 
 export const resetGoogleSheetsIntegration = async (
