@@ -25,7 +25,7 @@ The review is **client-computed** from company-scoped daily POS rows already sto
 
 Legacy URL aliases may map old `ai` view tokens to `saleTax` in slice normalization; the visible toolbar label is **Sale Tax**.
 
-RBAC presentation lists POS surfaces as: analytics, table, sale tax (`client/src/modules/rbac/modulePresentation.ts`).
+POS tab visibility is gated by product capabilities (`pos.table`, `pos.analytics`, `pos.saleTax`) via `client/src/utils/productPermissions.ts`.
 
 ## End-to-end flow
 
