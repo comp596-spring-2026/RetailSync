@@ -76,7 +76,7 @@ Supporting visual reference:
 
 ## POS Flow
 
-1. User configures Google Sheets mapping or imports a CSV with required daily targets (`date`, `highTax`, `lowTax`, `saleTax`, `gas`, `lottery`, …).
+1. User configures Google Sheets mapping in **Settings** (connector saved via `commit-change` with `mappingHash`) or imports a CSV with required daily targets (`date`, `highTax`, `lowTax`, `saleTax`, `gas`, `lottery`, …). Settings bootstrap uses canonical `GET /api/settings` (`oauth` / `shared` connectors).
 2. POS **Sync Now** or file import upserts company-scoped `POSDailySummary` rows.
 3. User switches among **Table**, **Analytics**, and **Sale Tax** views in the POS workspace toolbar.
 4. **Table** shows paginated daily records for the selected date range.

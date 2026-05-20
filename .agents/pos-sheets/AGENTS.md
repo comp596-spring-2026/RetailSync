@@ -29,6 +29,8 @@ This specialist covers:
 - `server/src/controllers/posController.ts`
 - `server/src/controllers/google*.ts`
 - `server/src/controllers/settings/*google*.ts`
+- `server/src/services/googleSheets/settingsService.ts` (`getSettingsPayload`)
+- `server/src/integrations/google/settings.ts` (`ensureGoogleSheetsShape`, `applySharedSheetAccessToCanonical`)
 - `server/src/routes/posRoutes.ts`
 - `server/src/routes/google*.ts`
 - `server/src/jobs/syncSheets.ts`
@@ -51,16 +53,26 @@ This specialist covers:
 - mapping validation shows useful diagnostics
 - import commit is idempotent or clearly protected against duplicate execution
 - Google connection state is visible in Settings
+- `GET /api/settings` must return canonical `googleSheets.oauth` / `shared` so OAuth and mapping survive refresh
+- shared verify must update canonical `shared.profiles[].connectors`, not only legacy `sharedSheets`
+- wizard commit must send `mappingHash` + `mappingConfirmedAt` for readiness `ready`
 - sales tax review aggregates daily rows correctly: state 4%, county 3%, vendor compensation brackets, payable tax
 - sales tax modal shows Monthly POS Data, combined Tax Calculation, Vendor Compensation, Payable Sales Tax, and Daily POS Records — no separate collected-vs-calculated comparison section
 
-## Sales tax documentation
+## Documentation
 
 When changing POS daily fields, tax formulas, or the Sale Tax UI, update:
 
 - `docs/pos/sales-tax-review-workflow.md`
 - `docs/wireframes/pos-module.md`
 - `docs/status.md` if product surface changes
+
+When changing Google Sheets settings serialization, OAuth callback, shared verify, or mapping commit, update:
+
+- `docs/operations/google-sheets-e2e.md`
+- `docs/architecture/sheets-integration-flows.md`
+- `docs/backend/api-reference.md` (route table)
+- `docs/testing/module-e2e-cases.md` (Settings smoke cases)
 
 ## Must-Test Cases
 

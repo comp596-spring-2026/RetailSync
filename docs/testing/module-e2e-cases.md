@@ -46,6 +46,9 @@ This is the manual release smoke playbook until a browser E2E harness is introdu
 1. Connect and disconnect QuickBooks.
 2. Configure Google Sheets source, mapping, and sync.
 3. Confirm settings changes persist across refresh.
+4. **Google Sheets OAuth:** connect, land on Settings with `?googleSheets=connected`, refresh — OAuth still shows connected; `GET /api/settings` includes `googleSheets.oauth.connectionStatus: "connected"`.
+5. **Google Sheets shared:** verify spreadsheet with service account, refresh — canonical `shared.profiles[].connectors[].spreadsheetId` matches verified sheet.
+6. **Google Sheets mapping:** complete wizard save — integration readiness **Ready** (`mappingHash` matches); POS **Sync Now** imports without “No saved mapping found.”
 
 ## Access
 

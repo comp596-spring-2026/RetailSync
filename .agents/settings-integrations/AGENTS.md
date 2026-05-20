@@ -30,6 +30,8 @@ It is the operator control surface for integrations.
 
 - `client/src/modules/settings/**`
 - `server/src/controllers/settings/**`
+- `server/src/services/googleSheets/settingsService.ts` (`getSettingsPayload` for `GET /api/settings`)
+- `server/src/integrations/google/settings.ts`
 - `server/src/routes/settingsRoutes.ts`
 - settings integration tests
 - settings-related docs/wireframes
@@ -55,6 +57,8 @@ It is the operator control surface for integrations.
 - callback return-to-settings flow
 - source/config summary correctness
 - integration-specific permissions if changed
+- after OAuth or mapping save, `GET /api/settings` includes `googleSheets.oauth` / `shared` with active connector mapping (refresh does not reset to `not_connected`)
+- shared verify populates canonical profile connector, not only legacy `sharedSheets`
 
 ## Anti-Patterns
 
