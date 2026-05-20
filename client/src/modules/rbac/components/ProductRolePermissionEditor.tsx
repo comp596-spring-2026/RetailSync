@@ -281,7 +281,7 @@ export const ProductRolePermissionEditor = ({
     if (subsections.length === 0) return null;
 
     return (
-      <Box sx={{ px: 2, py: 1.5 }} data-testid="permission-tree-access">
+      <Box key="access" sx={{ px: 2, py: 1.5 }} data-testid="permission-tree-access">
         <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
           Access
         </Typography>
