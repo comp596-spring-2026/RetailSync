@@ -85,11 +85,14 @@ describe('POSSaleTaxPage', () => {
       />
     );
 
-    expect(dailyMock).toHaveBeenCalledWith('2000-01-01', '2100-12-31');
-
     expect(await screen.findByText('Georgia Sales Tax Review')).toBeInTheDocument();
-    expect(screen.getByText('2026')).toBeInTheDocument();
-    expect(screen.getByText('April 2026')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(dailyMock).toHaveBeenCalledWith('2000-01-01', '2100-12-31');
+      expect(screen.getByText('2026')).toBeInTheDocument();
+    });
+
+    expect(await screen.findByText('April 2026')).toBeInTheDocument();
     expect(screen.getByText('View Breakdown')).toBeInTheDocument();
     expect(screen.queryByText('November 2025')).not.toBeInTheDocument();
 

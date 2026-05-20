@@ -2,7 +2,6 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
 import NorthEastIcon from '@mui/icons-material/NorthEast';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import {
   Alert,
   Box,
