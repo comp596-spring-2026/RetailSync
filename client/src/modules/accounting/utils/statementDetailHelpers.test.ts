@@ -27,6 +27,7 @@ const baseCheck = (overrides: Partial<StatementCheck>): StatementCheck => ({
   statementId: 'stmt-1',
   companyId: 'co-1',
   status: 'ready',
+  processing: { retryCount: 0 },
   gcs: { frontPath: 'path/front.jpg' },
   ...overrides
 });
