@@ -96,7 +96,7 @@ export const normalizeRolePermissions = (
     for (const moduleKey of moduleKeys) {
       normalized[moduleKey] = sanitizeModulePermissionSet(
         moduleKey,
-        clonePermissionSet(template[moduleKey])
+        clonePermissionSet(template[moduleKey] ?? emptyPermissionSet())
       );
     }
     return normalized;

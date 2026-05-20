@@ -13,10 +13,10 @@ import { adminPermissions, memberPermissions } from '../utils/defaultPermissions
 describe('productPermissions', () => {
   it('maps admin product capabilities to explicit legacy modules', () => {
     const legacy = productPermissionsToLegacy(adminProductPermissions());
-    expect(legacy.settings.edit).toBe(true);
-    expect(legacy.rolesSettings.create).toBe(true);
-    expect(legacy.pos.actions).toEqual(expect.arrayContaining(['table', 'import']));
-    expect(legacy.quickbooks.actions).toEqual(expect.arrayContaining(['connect', 'sync']));
+    expect(legacy.settings?.edit).toBe(true);
+    expect(legacy.rolesSettings?.create).toBe(true);
+    expect(legacy.pos?.actions).toEqual(expect.arrayContaining(['table', 'import']));
+    expect(legacy.quickbooks?.actions).toEqual(expect.arrayContaining(['connect', 'sync']));
   });
 
   it('round-trips member defaults without granting role admin or settings manage', () => {

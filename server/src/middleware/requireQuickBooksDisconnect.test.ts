@@ -1,3 +1,4 @@
+import type { Request, Response } from 'express';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { memberPermissions } from '../utils/defaultPermissions';
 
@@ -28,8 +29,8 @@ describe('requireQuickBooksDisconnect', () => {
 
     findOneMock.mockResolvedValue({ name: 'QB Disconnect', isSystem: false, permissions });
 
-    const req = { companyId: 'c1', roleId: 'r1' } as never;
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as never;
+    const req = { companyId: 'c1', roleId: 'r1' } as unknown as Request;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
     const next = vi.fn();
 
     await requireQuickBooksDisconnect(req, res, next);
@@ -49,13 +50,14 @@ describe('requireQuickBooksDisconnect', () => {
 
     findOneMock.mockResolvedValue({ name: 'QB Poster', isSystem: false, permissions });
 
-    const req = { companyId: 'c1', roleId: 'r1' } as never;
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as never;
+    const statusMock = vi.fn().mockReturnThis();
+    const req = { companyId: 'c1', roleId: 'r1' } as unknown as Request;
+    const res = { status: statusMock, json: vi.fn() } as unknown as Response;
     const next = vi.fn();
 
     await requireQuickBooksDisconnect(req, res, next);
 
     expect(next).not.toHaveBeenCalled();
-    expect(res.status).toHaveBeenCalledWith(403);
+    expect(statusMock).toHaveBeenCalledWith(403);
   });
 });

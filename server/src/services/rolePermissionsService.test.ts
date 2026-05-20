@@ -37,8 +37,8 @@ describe('rolePermissionsService', () => {
       isSystem: true
     });
 
-    expect(normalized.users.view).toBe(true);
-    expect(normalized.users.actions).toEqual(expect.arrayContaining(['invite', 'assignRole']));
+    expect(normalized.users?.view).toBe(true);
+    expect(normalized.users?.actions).toEqual(expect.arrayContaining(['invite', 'assignRole']));
   });
 
   it('detects the legacy accounting-related modules that need backfill', () => {
