@@ -44,6 +44,12 @@ import { NoAccess, PageHeader, SmartTable } from '../../../components';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { formatDate } from '../../../utils/date';
 import { hasPermission } from '../../../utils/permissions';
+import {
+  canQuickBooksCreate,
+  canQuickBooksDelete,
+  canQuickBooksEdit,
+  canQuickBooksWrite
+} from '../../../utils/quickbooksPermissions';
 import { accountingApi } from '../api';
 import { QuickBooksTabs, RequireQuickBooksConnection } from '../components';
 import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
@@ -365,7 +371,7 @@ const buildUpdatePayload = (
 
 const writeTxnColumns = (
   txnType: QuickBooksWriteTxnType,
-  canPost: boolean,
+  canEdit: boolean,
   navigate: ReturnType<typeof useNavigate>
 ): GridColDef<QuickBooksWriteListItem>[] => [
   {
@@ -405,7 +411,7 @@ const writeTxnColumns = (
   {
     field: 'actions',
     headerName: 'Actions',
-    width: canPost ? 180 : 120,
+    width: canEdit ? 180 : 120,
     sortable: false,
     filterable: false,
     renderCell: (params) => (
@@ -413,7 +419,7 @@ const writeTxnColumns = (
         <Button size="small" onClick={() => navigate(writeDetailPath(txnType, params.row.qbTxnId))}>
           View
         </Button>
-        {canPost ? (
+        {canEdit ? (
           <Button size="small" startIcon={<EditIcon fontSize="small" />} onClick={() => navigate(writeEditPath(txnType, params.row.qbTxnId))}>
             Edit
           </Button>
@@ -473,7 +479,8 @@ export const QuickBooksWriteListPage = () => {
     : inferWriteTxnTypeFromPath(location.pathname);
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
+  const canCreate = canQuickBooksCreate(permissions);
+  const canEdit = canQuickBooksEdit(permissions);
   const { loading: workspaceLoading, isConnected, error: workspaceError, warning: workspaceWarning } =
     useWriteWorkspace(canView);
 
@@ -528,8 +535,8 @@ export const QuickBooksWriteListPage = () => {
 
   const columns = useMemo(() => {
     if (!txnType) return [];
-    return writeTxnColumns(txnType, canPost, navigate);
-  }, [canPost, navigate, txnType]);
+    return writeTxnColumns(txnType, canEdit, navigate);
+  }, [canEdit, navigate, txnType]);
 
   const filters = useMemo(
     () => (
@@ -596,11 +603,14 @@ export const QuickBooksWriteListPage = () => {
         error={workspaceError}
         warning={workspaceWarning}
       >
-        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
-          <Typography variant="body2" color="text.secondary">
-            Server-driven QuickBooks write rows stay live and stateless after creation or update.
-          </Typography>
-          {canPost ? (
+        {!canQuickBooksWrite(permissions) ? (
+          <Alert severity="info">
+            Create and edit actions require QuickBooks write access. In Access → Roles, enable Create/Edit/Delete
+            under QuickBooks, or turn on Full QuickBooks write access (Post).
+          </Alert>
+        ) : null}
+        <Stack direction="row" justifyContent="flex-end" alignItems="center" flexWrap="wrap" gap={1}>
+          {canCreate ? (
             <Button
               variant="contained"
               startIcon={<AddIcon />}
@@ -1109,7 +1119,7 @@ const QuickBooksWriteEditorPage = ({ mode }: { mode: WriteMode }) => {
     : inferWriteTxnTypeFromPath(location.pathname);
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
+  const canEdit = canQuickBooksEdit(permissions);
   const { loading: workspaceLoading, isConnected, error: workspaceError, warning: workspaceWarning } =
     useWriteWorkspace(canView);
 
@@ -1195,7 +1205,7 @@ const QuickBooksWriteEditorPage = ({ mode }: { mode: WriteMode }) => {
       : `Edit ${txnTypeMeta[txnType].singular}`;
   const showForm = mode === 'create' || detail !== null;
 
-  if (mode === 'edit' && !canPost) {
+  if (mode === 'edit' && !canEdit) {
     return <NoAccess />;
   }
 
@@ -1240,7 +1250,8 @@ export const QuickBooksWriteDetailPage = () => {
 
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
+  const canEdit = canQuickBooksEdit(permissions);
+  const canDelete = canQuickBooksDelete(permissions);
   const { loading: workspaceLoading, isConnected, error: workspaceError, warning: workspaceWarning } =
     useWriteWorkspace(canView);
 
@@ -1324,7 +1335,7 @@ export const QuickBooksWriteDetailPage = () => {
           <Button variant="outlined" onClick={() => navigate(writeListPath(txnType))}>
             Back to list
           </Button>
-          {canPost ? (
+          {canDelete ? (
             <Button
               color="error"
               variant="outlined"
@@ -1335,7 +1346,7 @@ export const QuickBooksWriteDetailPage = () => {
               Delete
             </Button>
           ) : null}
-          {canPost ? (
+          {canEdit ? (
             <Button variant="contained" startIcon={<EditIcon />} onClick={() => navigate(writeEditPath(txnType, qbTxnId))}>
               Edit
             </Button>
@@ -1364,9 +1375,9 @@ export const QuickBooksWriteCreatePage = () => {
 
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
+  const canCreate = canQuickBooksCreate(permissions);
 
-  if (!canView || !canPost) {
+  if (!canView || !canCreate) {
     return <NoAccess />;
   }
 
@@ -1385,9 +1396,9 @@ export const QuickBooksWriteEditPage = () => {
 
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
+  const canEdit = canQuickBooksEdit(permissions);
 
-  if (!canView || !canPost) {
+  if (!canView || !canEdit) {
     return <NoAccess />;
   }
 

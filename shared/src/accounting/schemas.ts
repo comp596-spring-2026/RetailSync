@@ -401,6 +401,10 @@ export const reprocessBankStatementSchema = z.object({
   fromJobType: accountingJobTypeSchema.optional().default('statement.extract')
 });
 
+export const assignStatementBankAccountSchema = z.object({
+  bankAccountId: z.string().trim().min(1)
+});
+
 export const bankStatementListItemSchema = z.object({
   id: z.string().trim().min(1),
   statementMonth: statementMonthSchema,
@@ -1563,6 +1567,7 @@ export type RequestStatementUploadUrlInput = z.infer<typeof requestStatementUplo
 export type RequestStatementUploadUrlOutput = z.infer<typeof requestStatementUploadUrlResponseSchema>;
 export type DetectStatementMonthResponse = z.infer<typeof detectStatementMonthResponseSchema>;
 export type CreateBankStatementInput = z.infer<typeof createBankStatementSchema>;
+export type AssignStatementBankAccountInput = z.infer<typeof assignStatementBankAccountSchema>;
 export type ListBankStatementsQuery = z.infer<typeof listBankStatementsQuerySchema>;
 export type ReprocessBankStatementInput = z.infer<typeof reprocessBankStatementSchema>;
 export type BankStatementListItem = z.infer<typeof bankStatementListItemSchema>;

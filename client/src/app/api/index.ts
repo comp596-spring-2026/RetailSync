@@ -3,6 +3,7 @@
  * Import then call: import { authApi } from './app/api'; authApi.me();
  */
 export { api } from "./client";
+export { dashboardApi } from "./dashboardApi";
 export { authApi } from "../../modules/auth/api";
 export { companyApi, userApi } from "../../modules/users/api";
 export { posApi } from "../../modules/pos/api";

@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { useAppSelector } from "./store/hooks";
-import { OnboardingGuard, ProtectedRoute } from "./guards";
+import { OnboardingGuard, ProtectedRoute, RequirePermissionRoute } from "./guards";
 import { DashboardLayout } from "./layout/DashboardLayout";
 import {
   AcceptInvitePage,
@@ -39,6 +39,7 @@ import {
   TaxDashboardPage
 } from "../modules/accounting/pages";
 import { hasPermission } from "../utils/permissions";
+import { hasProductCapability } from "../utils/productPermissions";
 
 const AccountingIndexRedirect = () => {
   const permissions = useAppSelector((state) => state.auth.permissions);
@@ -63,11 +64,21 @@ const QuickBooksIndexRedirect = () => {
 const AccessIndexRedirect = () => {
   const permissions = useAppSelector((state) => state.auth.permissions);
 
-  if (hasPermission(permissions, 'users', 'view')) {
+  if (
+    hasProductCapability(permissions, 'access.users.view') ||
+    hasProductCapability(permissions, 'access.users.invite') ||
+    hasProductCapability(permissions, 'access.users.assignRoles') ||
+    hasProductCapability(permissions, 'access.users.deactivate')
+  ) {
     return <Navigate to="users" replace />;
   }
 
-  if (hasPermission(permissions, 'rolesSettings', 'view')) {
+  if (
+    hasProductCapability(permissions, 'access.roles.view') ||
+    hasProductCapability(permissions, 'access.roles.create') ||
+    hasProductCapability(permissions, 'access.roles.edit') ||
+    hasProductCapability(permissions, 'access.roles.delete')
+  ) {
     return <Navigate to="roles" replace />;
   }
 
@@ -175,7 +186,9 @@ const App = () => {
             <Route path="observability" element={<Navigate to="/dashboard/accounting/statements" replace />} />
           </Route>
           <Route path="quickbooks/*" element={<QuickBooksRoutes />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route element={<RequirePermissionRoute module="settings" action="view" />}>
+            <Route path="settings" element={<SettingsPage />} />
+          </Route>
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />

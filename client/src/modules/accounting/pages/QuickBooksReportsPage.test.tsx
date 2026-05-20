@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { configureStore } from '@reduxjs/toolkit';
@@ -99,7 +99,7 @@ describe('QuickBooksReportsPage', () => {
     getQuickbooksTaxLedgerMock.mockResolvedValue({ data: { data: { entries: [] } } });
   });
 
-  it('redirects disconnected users back to QuickBooks home', async () => {
+  it('shows locked QuickBooks sight when disconnected', async () => {
     getQuickbooksSettingsMock.mockResolvedValue({
       data: {
         data: {
@@ -141,7 +141,6 @@ describe('QuickBooksReportsPage', () => {
       <Provider store={createStore()}>
         <MemoryRouter initialEntries={['/dashboard/quickbooks/reports']}>
           <Routes>
-            <Route path="/dashboard/quickbooks" element={<div>QuickBooks Home Redirect</div>} />
             <Route path="/dashboard/quickbooks/reports" element={<QuickBooksReportsPage />} />
           </Routes>
         </MemoryRouter>
@@ -149,7 +148,7 @@ describe('QuickBooksReportsPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('QuickBooks Home Redirect')).toBeInTheDocument();
+      expect(screen.getByText('Connect QuickBooks to unlock')).toBeInTheDocument();
     });
   });
 
@@ -218,5 +217,123 @@ describe('QuickBooksReportsPage', () => {
     expect(screen.queryByText('QuickBooks Home Redirect')).not.toBeInTheDocument();
     expect(screen.getByText('QuickBooks Reports')).toBeInTheDocument();
     expect(screen.getByText('QuickBooks is connected but degraded: Recent token refresh failed.')).toBeInTheDocument();
+  });
+
+  it('defaults to report viewer tab and keeps chart of accounts secondary', async () => {
+    getQuickbooksSettingsMock.mockResolvedValue({
+      data: {
+        data: {
+          connected: true,
+          environment: 'sandbox',
+          realmId: 'realm-1',
+          companyName: 'RetailSync QB',
+          lastPullStatus: 'idle',
+          lastPullAt: '2026-03-10T00:00:00.000Z',
+          lastPullCount: 0,
+          lastPullError: null,
+          lastPushStatus: 'idle',
+          lastPushAt: null,
+          lastPushCount: 0,
+          lastPushError: null,
+          updatedAt: '2026-03-10T00:00:00.000Z'
+        }
+      }
+    });
+    getQuickbooksOAuthStatusMock.mockResolvedValue({
+      data: {
+        data: {
+          ok: true,
+          reason: null,
+          connected: true,
+          degraded: false,
+          status: 'connected',
+          needsReconnect: false,
+          environment: 'sandbox',
+          realmId: 'realm-1',
+          companyName: 'RetailSync QB',
+          expiresInSec: 3600,
+          health: {
+            status: 'healthy',
+            checkedAt: '2026-03-10T00:00:00.000Z',
+            refreshedAt: '2026-03-10T00:00:00.000Z',
+            accessTokenExpiresAt: null,
+            accessTokenExpiresInSec: null,
+            refreshTokenExpiresAt: null,
+            refreshTokenExpiresInSec: null,
+            lastRefreshError: null,
+            lastRefreshErrorAt: null
+          }
+        }
+      }
+    });
+    getQuickbooksTaxOverviewMock.mockResolvedValue({
+      data: {
+        data: {
+          from: '2026-01-01',
+          to: '2026-05-20',
+          basis: 'accrual',
+          cards: {
+            netIncome: null,
+            totalAssets: 1000,
+            totalLiabilities: 400,
+            totalEquity: 600,
+            arOpen: 0,
+            apOpen: 0
+          }
+        }
+      }
+    });
+    getQuickbooksTaxReportMock.mockResolvedValue({
+      data: {
+        data: {
+          reportKey: 'profit-loss',
+          from: '2026-01-01',
+          to: '2026-05-20',
+          basis: 'accrual',
+          generatedAt: '2026-03-10T00:00:00.000Z',
+          rows: [{ label: 'Revenue', amount: null, path: ['Income'] }],
+          raw: {}
+        }
+      }
+    });
+    getQuickbooksTaxChartOfAccountsMock.mockResolvedValue({
+      data: {
+        data: Array.from({ length: 12 }, (_value, index) => ({
+          id: `acct-${index}`,
+          name: `Account ${index}`,
+          code: `${1000 + index}`,
+          accountType: index % 2 === 0 ? 'Bank' : 'Expense',
+          active: true
+        }))
+      }
+    });
+
+    render(
+      <Provider store={createStore()}>
+        <MemoryRouter initialEntries={['/dashboard/quickbooks/reports']}>
+          <Routes>
+            <Route path="/dashboard/quickbooks/reports" element={<QuickBooksReportsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </Provider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('qb-report-viewer-panel')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Executive summary')).toBeInTheDocument();
+    expect(screen.getAllByText('No value').length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('qb-chart-of-accounts-panel')).not.toBeInTheDocument();
+    expect(getQuickbooksTaxChartOfAccountsMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('qb-reports-tab-accounts'));
+
+    await waitFor(() => {
+      expect(getQuickbooksTaxChartOfAccountsMock).toHaveBeenCalled();
+      expect(screen.getByTestId('qb-chart-of-accounts-panel')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('12 accounts')).toBeInTheDocument();
   });
 });

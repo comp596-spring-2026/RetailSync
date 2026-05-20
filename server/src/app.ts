@@ -21,6 +21,7 @@ import quickbooksIntegrationRoutes from "./routes/quickbooksIntegrationRoutes";
 import accountingRoutes from "./routes/accountingRoutes";
 import ledgerRoutes from "./routes/ledgerRoutes";
 import taskRoutes from "./routes/taskRoutes";
+import dashboardRoutes from "./routes/dashboardRoutes";
 import { notFound } from "./middleware/notFound";
 import { errorHandler } from "./middleware/errorHandler";
 import { withRequestContext } from "./config/requestContext";
@@ -132,6 +133,7 @@ export const createApp = () => {
   });
 
   app.use("/api/auth", authRoutes);
+  app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/company", companyRoutes);
   app.use("/api/roles", roleRoutes);
   app.use("/api/invites", inviteRoutes);

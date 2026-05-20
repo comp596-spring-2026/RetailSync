@@ -1,6 +1,17 @@
-import { moduleActionCatalog, moduleKeys, roleCreateSchema } from '@retailsync/shared';
+import {
+  moduleActionCatalog,
+  moduleKeys,
+  productCapabilityGroups,
+  roleCreateSchema
+} from '@retailsync/shared';
 import { Request, Response } from 'express';
 import { RoleModel } from '../models/Role';
+import { UserModel } from '../models/User';
+import {
+  ROLE_DELEGATION_FORBIDDEN_MESSAGE,
+  prepareRolePermissionsForSave,
+  resolveActorPermissions
+} from '../services/rolePermissionDelegation';
 import { normalizeRolePermissions } from '../services/rolePermissionsService';
 import { fail, ok } from '../utils/apiResponse';
 
@@ -22,6 +33,15 @@ export const listRoles = async (req: Request, res: Response) => {
   );
 };
 
+export const productPermissionCatalog = async (req: Request, res: Response) => {
+  const actor = await resolveActorPermissions(req);
+  if (!actor) {
+    return fail(res, 'Forbidden', 403);
+  }
+
+  return ok(res, { groups: productCapabilityGroups, actorPermissions: actor });
+};
+
 export const createRole = async (req: Request, res: Response) => {
   if (!req.companyId) {
     return fail(res, 'Company onboarding required', 403);
@@ -37,17 +57,26 @@ export const createRole = async (req: Request, res: Response) => {
     return fail(res, 'Role name already exists', 409);
   }
 
-  const role = await RoleModel.create({
-    companyId: req.companyId,
-    name: parsed.data.name,
-    permissions: normalizeRolePermissions(parsed.data.permissions, {
+  try {
+    const permissions = await prepareRolePermissionsForSave(req, parsed.data.permissions, {
       roleName: parsed.data.name,
       isSystem: false
-    }),
-    isSystem: false
-  });
+    });
 
-  return ok(res, role, 201);
+    const role = await RoleModel.create({
+      companyId: req.companyId,
+      name: parsed.data.name,
+      permissions,
+      isSystem: false
+    });
+
+    return ok(res, role, 201);
+  } catch (error) {
+    if (error instanceof Error && error.message === ROLE_DELEGATION_FORBIDDEN_MESSAGE) {
+      return fail(res, error.message, 403);
+    }
+    throw error;
+  }
 };
 
 export const updateRole = async (req: Request, res: Response) => {
@@ -65,16 +94,27 @@ export const updateRole = async (req: Request, res: Response) => {
     return fail(res, 'Role not found', 404);
   }
 
-  const existingRoleName = String(role.name ?? '');
-  role.name = parsed.data.name;
-  role.permissions = normalizeRolePermissions(parsed.data.permissions, {
-    roleName: existingRoleName,
-    isSystem: Boolean(role.isSystem),
-    basePermissions: role.permissions
-  }) as any;
-  await role.save();
+  if (role.isSystem) {
+    return fail(res, 'System roles are read-only.', 400);
+  }
 
-  return ok(res, role);
+  try {
+    const existingRoleName = String(role.name ?? '');
+    role.name = parsed.data.name;
+    role.permissions = (await prepareRolePermissionsForSave(req, parsed.data.permissions, {
+      roleName: existingRoleName,
+      isSystem: Boolean(role.isSystem),
+      basePermissions: role.permissions
+    })) as typeof role.permissions;
+    await role.save();
+
+    return ok(res, role);
+  } catch (error) {
+    if (error instanceof Error && error.message === ROLE_DELEGATION_FORBIDDEN_MESSAGE) {
+      return fail(res, error.message, 403);
+    }
+    throw error;
+  }
 };
 
 export const deleteRole = async (req: Request, res: Response) => {
@@ -88,6 +128,18 @@ export const deleteRole = async (req: Request, res: Response) => {
   }
   if (role.isSystem) {
     return fail(res, 'System role cannot be deleted', 400);
+  }
+
+  const assignedCount = await UserModel.countDocuments({
+    companyId: req.companyId,
+    roleId: role._id
+  });
+  if (assignedCount > 0) {
+    return fail(
+      res,
+      'Cannot delete this role because users are assigned to it. Reassign users first.',
+      400
+    );
   }
 
   await role.deleteOne();

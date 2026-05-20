@@ -9,7 +9,6 @@ import {
   DialogContent,
   DialogTitle,
   MenuItem,
-  Paper,
   Stack,
   TextField,
   Typography
@@ -25,6 +24,12 @@ import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import { extractApiErrorMessage } from '../../../utils/apiError';
 import { hasPermission } from '../../../utils/permissions';
+import {
+  canQuickBooksCreate,
+  canQuickBooksDelete,
+  canQuickBooksEdit,
+  canQuickBooksWrite
+} from '../../../utils/quickbooksPermissions';
 import { accountingApi } from '../../accounting/api';
 import { QuickBooksTabs, RequireQuickBooksConnection } from '../components';
 import { useQuickBooksWorkspace } from '../hooks/useQuickBooksWorkspace';
@@ -88,7 +93,9 @@ export const ContactsPage = () => {
   const dispatch = useAppDispatch();
   const permissions = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissions, 'quickbooks', 'view');
-  const canPost = hasPermission(permissions, 'quickbooks', 'actions:post');
+  const canCreate = canQuickBooksCreate(permissions);
+  const canEdit = canQuickBooksEdit(permissions);
+  const canDelete = canQuickBooksDelete(permissions);
   const {
     loading: workspaceLoading,
     isConnected,
@@ -275,7 +282,7 @@ export const ContactsPage = () => {
       }
     ];
 
-    if (!canPost) {
+    if (!canEdit && !canDelete) {
       return base;
     }
 
@@ -289,22 +296,26 @@ export const ContactsPage = () => {
         filterable: false,
         renderCell: (params) => (
           <Stack direction="row" spacing={1}>
-            <Button size="small" onClick={() => void openEdit(params.row.qbId)}>
-              Edit
-            </Button>
-            <Button
-              size="small"
-              color="error"
-              onClick={() => void onDeactivate(params.row)}
-              disabled={params.row.status === 'inactive'}
-            >
-              Deactivate
-            </Button>
+            {canEdit ? (
+              <Button size="small" onClick={() => void openEdit(params.row.qbId)}>
+                Edit
+              </Button>
+            ) : null}
+            {canDelete ? (
+              <Button
+                size="small"
+                color="error"
+                onClick={() => void onDeactivate(params.row)}
+                disabled={params.row.status === 'inactive'}
+              >
+                Deactivate
+              </Button>
+            ) : null}
           </Stack>
         )
       }
     ];
-  }, [canPost, entityType]);
+  }, [canDelete, canEdit, entityType]);
 
   const filters = useMemo(
     () => (
@@ -327,6 +338,11 @@ export const ContactsPage = () => {
         >
           Vendors
         </Button>
+        {canCreate ? (
+          <Button variant="contained" onClick={openCreate}>
+            New {entityType === 'customer' ? 'Customer' : 'Vendor'}
+          </Button>
+        ) : null}
         <TextField
           select
           size="small"
@@ -346,7 +362,7 @@ export const ContactsPage = () => {
         </TextField>
       </Stack>
     ),
-    [entityType, statusFilter]
+    [canCreate, entityType, statusFilter]
   );
 
   if (!canView) {
@@ -367,23 +383,12 @@ export const ContactsPage = () => {
         error={workspaceError}
         warning={workspaceWarning}
       >
-        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2.5 }}>
-          <Stack
-            direction={{ xs: 'column', md: 'row' }}
-            spacing={1.5}
-            justifyContent="space-between"
-            alignItems={{ xs: 'flex-start', md: 'center' }}
-          >
-            <Typography variant="body2" color="text.secondary">
-              Keep contacts clean here before creating invoices, receiving payments, writing checks, or logging expenses.
-            </Typography>
-            {canPost ? (
-              <Button variant="contained" onClick={openCreate}>
-                New {entityType === 'customer' ? 'Customer' : 'Vendor'}
-              </Button>
-            ) : null}
-          </Stack>
-        </Paper>
+        {!canQuickBooksWrite(permissions) ? (
+          <Alert severity="info">
+            Create and edit actions require QuickBooks write access. In Access → Roles, enable Create/Edit/Delete
+            under QuickBooks, or turn on Full QuickBooks write access (Post).
+          </Alert>
+        ) : null}
         <SmartTable
           rows={rows}
           columns={columns}

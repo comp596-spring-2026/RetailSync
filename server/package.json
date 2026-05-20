@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node --import tsx src/index.ts",
     "seed:pos": "tsx src/scripts/seedPosSample.ts",
+    "db:reset": "tsx src/scripts/resetLocalDatabase.ts",
     "db:cleanup:google-sheets": "tsx src/scripts/cleanupGoogleSheetsDb.ts",
     "backfill:role-permissions": "tsx src/scripts/backfillLegacyRolePermissions.ts",
     "storage:cors:accounting": "tsx src/scripts/setAccountingBucketCors.ts",

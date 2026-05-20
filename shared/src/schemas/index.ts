@@ -90,6 +90,11 @@ export const assignRoleSchema = z.object({
   roleId: z.string().trim().min(1),
 });
 
+export const updateUserSchema = z.object({
+  firstName: z.string().trim().min(1).max(100),
+  lastName: z.string().trim().min(1).max(100),
+});
+
 export const posDailySummarySchema = z.object({
   date: z
     .string()
@@ -164,6 +169,7 @@ export type RoleInput = z.infer<typeof roleSchema>;
 export type RoleCreateInput = z.infer<typeof roleCreateSchema>;
 export type InviteCreateInput = z.infer<typeof inviteCreateSchema>;
 export type AssignRoleInput = z.infer<typeof assignRoleSchema>;
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type PosDailySummaryInput = z.infer<typeof posDailySummarySchema>;
 export type PosDailyQueryInput = z.infer<typeof posDailyQuerySchema>;
 export type MonthlySummaryQueryInput = z.infer<

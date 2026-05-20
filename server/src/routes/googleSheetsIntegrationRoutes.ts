@@ -5,7 +5,7 @@ import { requirePermission } from '../middleware/requirePermission';
 
 const router = Router();
 
-router.use(requireAuth, requirePermission('rolesSettings', 'edit'));
+router.use(requireAuth, requirePermission('settings', 'edit'));
 
 router.post('/oauth/debug', debugOAuthConnector);
 router.post('/shared/debug', debugSharedConnector);

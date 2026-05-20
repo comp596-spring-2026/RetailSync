@@ -16,6 +16,7 @@ import {
   queryPosAi
 } from '../controllers/posController';
 import { requireAuth } from '../middleware/requireAuth';
+import { requireAnyPermission } from '../middleware/requireAnyPermission';
 import { requirePermission } from '../middleware/requirePermission';
 
 const router = Router();
@@ -44,8 +45,10 @@ router.post(
 );
 router.post(
   '/import/sheets/preview',
-  requirePermission('pos', 'create'),
-  requirePermission('pos', 'import'),
+  requireAnyPermission([
+    { moduleKey: 'settings', action: 'edit' },
+    { moduleKey: 'pos', action: 'import' }
+  ]),
   previewPosImportFromSharedSheet
 );
 router.post(
@@ -62,8 +65,10 @@ router.post(
 );
 router.post(
   '/import/sheets/match',
-  requirePermission('pos', 'create'),
-  requirePermission('pos', 'import'),
+  requireAnyPermission([
+    { moduleKey: 'settings', action: 'edit' },
+    { moduleKey: 'pos', action: 'import' }
+  ]),
   matchPosImportMapping
 );
 router.post(

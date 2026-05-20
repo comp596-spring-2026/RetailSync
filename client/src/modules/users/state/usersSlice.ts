@@ -9,14 +9,19 @@ export type UserItem = {
   firstName: string;
   lastName: string;
   email: string;
-  roleId: { _id: string; name: string } | null;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  roleId: { _id: string; name: string; isSystem?: boolean } | null;
 };
 
 export type InviteItem = {
   _id: string;
   email: string;
-  code: string;
   acceptedAt: string | null;
+  expiresAt: string;
+  createdAt?: string;
+  emailStatus?: string;
   roleId: { _id: string; name: string } | null;
 };
 
@@ -26,7 +31,6 @@ type UsersState = {
   loading: boolean;
   mutating: boolean;
   error: string | null;
-  inviteCode: string;
 };
 
 const initialState: UsersState = {
@@ -34,8 +38,7 @@ const initialState: UsersState = {
   invites: [],
   loading: false,
   mutating: false,
-  error: null,
-  inviteCode: ''
+  error: null
 };
 
 export const fetchUsersPageData = createAsyncThunk<
@@ -51,14 +54,26 @@ export const fetchUsersPageData = createAsyncThunk<
 });
 
 export const createInviteThunk = createAsyncThunk<
-  string,
+  void,
   { email: string; roleId: string; expiresInDays?: number },
   { dispatch: AppDispatch }
 >('users/createInvite', async (payload, { dispatch }) => {
-  const res = await userApi.createInvite(payload);
-  dispatch(showSnackbar({ message: 'Invite created', severity: 'success' }));
+  await userApi.createInvite(payload);
+  dispatch(showSnackbar({ message: 'Invite sent successfully', severity: 'success' }));
   await dispatch(fetchUsersPageData());
-  return String(res.data.data.inviteCode ?? '');
+});
+
+export const updateUserThunk = createAsyncThunk<
+  void,
+  { userId: string; firstName: string; lastName: string },
+  { dispatch: AppDispatch }
+>('users/updateUser', async (payload, { dispatch }) => {
+  await userApi.updateUser(payload.userId, {
+    firstName: payload.firstName,
+    lastName: payload.lastName
+  });
+  dispatch(showSnackbar({ message: 'Member updated', severity: 'success' }));
+  await dispatch(fetchUsersPageData());
 });
 
 export const assignRoleThunk = createAsyncThunk<
@@ -71,14 +86,28 @@ export const assignRoleThunk = createAsyncThunk<
   await dispatch(fetchUsersPageData());
 });
 
+export const deleteUserThunk = createAsyncThunk<void, string, { dispatch: AppDispatch }>(
+  'users/deleteUser',
+  async (userId, { dispatch }) => {
+    await userApi.deleteUser(userId);
+    dispatch(showSnackbar({ message: 'Member removed from organization', severity: 'success' }));
+    await dispatch(fetchUsersPageData());
+  }
+);
+
+export const deleteInviteThunk = createAsyncThunk<void, string, { dispatch: AppDispatch }>(
+  'users/deleteInvite',
+  async (inviteId, { dispatch }) => {
+    await userApi.deleteInvite(inviteId);
+    dispatch(showSnackbar({ message: 'Invite revoked', severity: 'success' }));
+    await dispatch(fetchUsersPageData());
+  }
+);
+
 const usersSlice = createSlice({
   name: 'users',
   initialState,
-  reducers: {
-    clearInviteCode(state) {
-      state.inviteCode = '';
-    }
-  },
+  reducers: {},
   extraReducers: (builder) => {
     builder
       .addCase(fetchUsersPageData.pending, (state) => {
@@ -94,34 +123,44 @@ const usersSlice = createSlice({
         state.loading = false;
         state.error = 'Failed to load users';
       })
-      .addCase(createInviteThunk.pending, (state) => {
-        state.mutating = true;
-      })
-      .addCase(createInviteThunk.fulfilled, (state, action) => {
-        state.mutating = false;
-        state.inviteCode = action.payload;
-      })
-      .addCase(createInviteThunk.rejected, (state) => {
-        state.mutating = false;
-      })
-      .addCase(assignRoleThunk.pending, (state) => {
-        state.mutating = true;
-      })
-      .addCase(assignRoleThunk.fulfilled, (state) => {
-        state.mutating = false;
-      })
-      .addCase(assignRoleThunk.rejected, (state) => {
-        state.mutating = false;
-      });
+      .addMatcher(
+        (action) =>
+          [
+            createInviteThunk.pending.type,
+            updateUserThunk.pending.type,
+            assignRoleThunk.pending.type,
+            deleteUserThunk.pending.type,
+            deleteInviteThunk.pending.type
+          ].includes(action.type),
+        (state) => {
+          state.mutating = true;
+        }
+      )
+      .addMatcher(
+        (action) =>
+          [
+            createInviteThunk.fulfilled.type,
+            createInviteThunk.rejected.type,
+            updateUserThunk.fulfilled.type,
+            updateUserThunk.rejected.type,
+            assignRoleThunk.fulfilled.type,
+            assignRoleThunk.rejected.type,
+            deleteUserThunk.fulfilled.type,
+            deleteUserThunk.rejected.type,
+            deleteInviteThunk.fulfilled.type,
+            deleteInviteThunk.rejected.type
+          ].includes(action.type),
+        (state) => {
+          state.mutating = false;
+        }
+      );
   }
 });
 
-export const { clearInviteCode } = usersSlice.actions;
 export const selectUsers = (state: RootState) => state.users.users;
 export const selectInvites = (state: RootState) => state.users.invites;
 export const selectUsersLoading = (state: RootState) => state.users.loading;
 export const selectUsersMutating = (state: RootState) => state.users.mutating;
 export const selectUsersError = (state: RootState) => state.users.error;
-export const selectInviteCode = (state: RootState) => state.users.inviteCode;
 
 export default usersSlice.reducer;

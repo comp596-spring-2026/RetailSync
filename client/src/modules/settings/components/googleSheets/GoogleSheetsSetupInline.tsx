@@ -171,6 +171,9 @@ const mapSharedVerifyErrorMessage = (rawMessage: string, serviceAccountEmail: st
 
 const mapSheetsRuntimeErrorMessage = (rawMessage: string) => {
   const normalized = rawMessage.trim().toLowerCase();
+  if (normalized === 'forbidden') {
+    return 'You do not have permission to configure Google Sheets. Enable Settings edit or POS import on your role, then try again.';
+  }
   if (normalized === 'tab_not_found' || normalized.includes('unable to parse range')) {
     return 'Selected tab was not found. Pick a valid tab in the selected spreadsheet and try again.';
   }

@@ -1,54 +1,122 @@
-import { Card, CardContent, Chip, Grid2 as Grid, Stack, Typography } from '@mui/material';
-import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
-import ApartmentIcon from '@mui/icons-material/Apartment';
-import BadgeIcon from '@mui/icons-material/Badge';
 import DashboardIcon from '@mui/icons-material/Dashboard';
-import { useAppSelector } from '../store/hooks';
-import { PageHeader } from '../../components';
+import { Stack } from '@mui/material';
+import { useEffect, useState } from 'react';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { NoAccess, PageHeader } from '../../components';
+import { hasPermission } from '../../utils/permissions';
+import { extractApiErrorMessage } from '../../utils/apiError';
+import { dashboardApi } from '../api/dashboardApi';
+import { fetchSettings, selectGoogleSheetsSettings, selectSettings, selectSettingsLoading } from '../../modules/settings/state';
+import { DashboardPosSection } from '../dashboard/components/DashboardPosSection';
+import { DashboardQuickBooksSection } from '../dashboard/components/DashboardQuickBooksSection';
+import { useDashboardPosSummary } from '../dashboard/useDashboardPosSummary';
+import { useDashboardQuickBooksSummary } from '../dashboard/useDashboardQuickBooksSummary';
 
 export const DashboardHomePage = () => {
-  const user = useAppSelector((state) => state.auth.user);
+  const dispatch = useAppDispatch();
   const company = useAppSelector((state) => state.company.company);
-  const role = useAppSelector((state) => state.auth.role);
+  const permissions = useAppSelector((state) => state.auth.permissions);
+  const settings = useAppSelector(selectSettings);
+  const googleSheetsCanonical = useAppSelector(selectGoogleSheetsSettings);
+  const settingsLoading = useAppSelector(selectSettingsLoading);
+
+  const canViewDashboard = hasPermission(permissions, 'dashboard', 'view');
+  const [dashboardAccess, setDashboardAccess] = useState<'idle' | 'loading' | 'allowed' | 'denied' | 'error'>(
+    'idle'
+  );
+  const [dashboardAccessError, setDashboardAccessError] = useState<string | null>(null);
+  const canViewPos = hasPermission(permissions, 'pos', 'view');
+  const canImportPos =
+    hasPermission(permissions, 'pos', 'create') && hasPermission(permissions, 'pos', 'actions:import');
+  const canViewQuickbooks = hasPermission(permissions, 'quickbooks', 'view');
+  const canSyncQuickbooks = hasPermission(permissions, 'quickbooks', 'actions:sync');
+  useEffect(() => {
+    if (!canViewDashboard) {
+      setDashboardAccess('denied');
+      return;
+    }
+
+    let cancelled = false;
+    setDashboardAccess('loading');
+    setDashboardAccessError(null);
+
+    void dashboardApi
+      .getSummary()
+      .then(() => {
+        if (!cancelled) {
+          setDashboardAccess('allowed');
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        if (status === 403) {
+          setDashboardAccess('denied');
+          return;
+        }
+        setDashboardAccess('error');
+        setDashboardAccessError(extractApiErrorMessage(error, 'Failed to load dashboard'));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canViewDashboard]);
+
+  useEffect(() => {
+    if (dashboardAccess !== 'allowed') return;
+    void dispatch(fetchSettings());
+  }, [dashboardAccess, dispatch]);
+
+  const settingsReady = !settingsLoading && settings != null;
+
+  const posSummary = useDashboardPosSummary({
+    enabled: canViewPos,
+    settings,
+    googleSheetsCanonical,
+    settingsReady
+  });
+
+  const quickbooksSummary = useDashboardQuickBooksSummary(canViewQuickbooks);
+
+  if (!canViewDashboard || dashboardAccess === 'denied') {
+    return <NoAccess />;
+  }
+
+  if (dashboardAccess === 'loading' || dashboardAccess === 'idle') {
+    return null;
+  }
+
+  if (dashboardAccess === 'error') {
+    return <NoAccess message={dashboardAccessError ?? 'Failed to load dashboard'} />;
+  }
 
   return (
     <Stack spacing={2.5}>
-      <PageHeader title="Dashboard" subtitle="Your current account context" icon={<DashboardIcon />} />
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <Card>
-            <CardContent>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                <PersonOutlineIcon fontSize="small" color="primary" />
-                <Typography variant="subtitle2">User</Typography>
-              </Stack>
-              <Typography>{user ? `${user.firstName} ${user.lastName}` : '-'}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <Card>
-            <CardContent>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                <ApartmentIcon fontSize="small" color="primary" />
-                <Typography variant="subtitle2">Company</Typography>
-              </Stack>
-              <Typography>{company?.name ?? '-'}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <Card>
-            <CardContent>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                <BadgeIcon fontSize="small" color="primary" />
-                <Typography variant="subtitle2">Role</Typography>
-              </Stack>
-              <Chip label={role?.name ?? '-'} />
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      <PageHeader
+        title="Dashboard"
+        subtitle={company?.name ? `${company.name} executive summary` : 'Executive summary'}
+        icon={<DashboardIcon />}
+      />
+
+      <DashboardPosSection
+        state={posSummary.state}
+        canView={canViewPos}
+        canImport={canImportPos}
+        connectLabel="Connect POS Data"
+        connectDisabled={false}
+      />
+
+      <DashboardQuickBooksSection
+        state={quickbooksSummary.reportState}
+        workspaceLoading={quickbooksSummary.workspace.loading}
+        isConnected={quickbooksSummary.workspace.isConnected}
+        warning={quickbooksSummary.workspace.warning}
+        canView={canViewQuickbooks}
+        canSync={canSyncQuickbooks}
+        connectLabel="Connect QuickBooks"
+        connectDisabled={false}
+      />
     </Stack>
   );
 };

@@ -1,32 +1,28 @@
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import SaveIcon from '@mui/icons-material/Save';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import AddIcon from '@mui/icons-material/Add';
 import {
-  Chip,
+  Alert,
   Box,
   Button,
-  Checkbox,
+  Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
   Divider,
-  FormControlLabel,
-  FormGroup,
+  FormControl,
+  InputLabel,
   MenuItem,
-  Paper,
   Select,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  TextField
+  TextField,
+  Typography
 } from '@mui/material';
-import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
-import SaveIcon from '@mui/icons-material/Save';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import TuneIcon from '@mui/icons-material/Tune';
-import { ModuleKey, PermissionsMap, moduleActionCatalog, moduleKeys } from '@retailsync/shared';
+import { PermissionsMap, type ProductCapabilityKey } from '@retailsync/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import {
@@ -34,45 +30,75 @@ import {
   fetchRoles,
   saveRoleThunk,
   selectRbacLoading,
-  selectRbacModules,
   selectRbacMutating,
   selectRoles
 } from '../state';
 import { showSnackbar } from '../../../app/store/uiSlice';
-import { LoadingEmptyStateWrapper, NoAccess, PageHeader } from '../../../components';
+import {
+  LoadingEmptyStateWrapper,
+  NoAccess,
+  PageHeader,
+  RetailSurfaceCard,
+  RetailSurfaceCardBody
+} from '../../../components';
 import { hasPermission } from '../../../utils/permissions';
-import { modulePresentation, navVisibleRoleModules } from '../modulePresentation';
+import { exceedsActorProductPermissions } from '../../../utils/productPermissions';
+import { ROLE_DELEGATION_FORBIDDEN_MESSAGE } from '../components/ProductRolePermissionEditor';
+import { extractApiErrorMessage } from '../../../utils/apiError';
+import {
+  ProductRolePermissionEditor,
+  createDefaultCustomRoleProductState,
+  permissionsMapToProduct,
+  productToPermissionsMap
+} from '../components/ProductRolePermissionEditor';
 
-type LocalPermission = PermissionsMap;
+type ProductState = Record<ProductCapabilityKey, boolean>;
 type RolesPageProps = {
   showHeader?: boolean;
 };
 
-const emptyPermissions = (): LocalPermission =>
-  moduleKeys.reduce((acc, module) => {
-    acc[module] = { view: true, create: false, edit: false, delete: false, actions: [] };
-    return acc;
-  }, {} as LocalPermission);
+const SYSTEM_ROLE_ORDER = ['Admin', 'Member', 'Viewer'] as const;
 
 export const RolesPage = ({ showHeader = true }: RolesPageProps) => {
   const dispatch = useAppDispatch();
   const permissionsAuth = useAppSelector((state) => state.auth.permissions);
   const canView = hasPermission(permissionsAuth, 'rolesSettings', 'view');
+  const canCreate = hasPermission(permissionsAuth, 'rolesSettings', 'create');
+  const canEdit = hasPermission(permissionsAuth, 'rolesSettings', 'edit');
+  const canDelete = hasPermission(permissionsAuth, 'rolesSettings', 'delete');
   const roles = useAppSelector(selectRoles);
-  const reduxModules = useAppSelector(selectRbacModules);
   const loading = useAppSelector(selectRbacLoading);
   const mutating = useAppSelector(selectRbacMutating);
-  const [selectedRoleId, setSelectedRoleId] = useState<string>('new');
+  const [selectedRoleId, setSelectedRoleId] = useState<string>('');
+  const [isCreateMode, setIsCreateMode] = useState(false);
   const [name, setName] = useState('');
-  const [permissions, setPermissions] = useState<LocalPermission>(emptyPermissions());
-  const [actionsModule, setActionsModule] = useState<ModuleKey | null>(null);
-
-  const selectedRole = useMemo(() => roles.find((r) => r._id === selectedRoleId) ?? null, [roles, selectedRoleId]);
-  const availableActions = actionsModule ? moduleActionCatalog[actionsModule] ?? [] : [];
-  const visibleModules = useMemo(
-    () => (reduxModules.length > 0 ? reduxModules : moduleKeys).filter((module) => navVisibleRoleModules.includes(module)),
-    [reduxModules]
+  const [productPermissions, setProductPermissions] = useState<ProductState>(
+    createDefaultCustomRoleProductState()
   );
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  const sortedRoles = useMemo(() => {
+    const system = roles
+      .filter((role) => role.isSystem)
+      .sort(
+        (left, right) =>
+          SYSTEM_ROLE_ORDER.indexOf(left.name as (typeof SYSTEM_ROLE_ORDER)[number]) -
+          SYSTEM_ROLE_ORDER.indexOf(right.name as (typeof SYSTEM_ROLE_ORDER)[number])
+      );
+    const custom = roles
+      .filter((role) => !role.isSystem)
+      .sort((left, right) => left.name.localeCompare(right.name));
+    return [...system, ...custom];
+  }, [roles]);
+
+  const selectedRole = useMemo(
+    () => roles.find((role) => role._id === selectedRoleId) ?? null,
+    [roles, selectedRoleId]
+  );
+  const isSystemRole = Boolean(selectedRole?.isSystem);
+  const matrixReadOnly = isCreateMode ? !canCreate : isSystemRole || !canEdit;
+  const canSave = isCreateMode ? canCreate : Boolean(selectedRole && canEdit && !isSystemRole);
+  const canShowDelete = Boolean(selectedRole && !isSystemRole && canDelete && !isCreateMode);
 
   useEffect(() => {
     if (canView) {
@@ -81,75 +107,105 @@ export const RolesPage = ({ showHeader = true }: RolesPageProps) => {
   }, [canView, dispatch]);
 
   useEffect(() => {
-    const sourceModules = visibleModules;
-    setPermissions((prev) => {
-      const next = {} as LocalPermission;
-      sourceModules.forEach((module) => {
-        next[module] = prev[module] ?? { view: true, create: false, edit: false, delete: false, actions: [] };
-      });
-      return next;
-    });
-  }, [visibleModules]);
+    if (isCreateMode || sortedRoles.length === 0) {
+      return;
+    }
+    if (!selectedRoleId || !sortedRoles.some((role) => role._id === selectedRoleId)) {
+      setSelectedRoleId(sortedRoles[0]._id);
+    }
+  }, [isCreateMode, selectedRoleId, sortedRoles]);
 
   useEffect(() => {
+    if (isCreateMode) {
+      setName('');
+      setProductPermissions(createDefaultCustomRoleProductState());
+      return;
+    }
+
     if (selectedRole) {
       setName(selectedRole.name);
-      setPermissions(selectedRole.permissions);
-    } else {
-      setName('');
-      setPermissions(emptyPermissions());
+      setProductPermissions(permissionsMapToProduct(selectedRole.permissions));
     }
-  }, [selectedRole]);
+  }, [isCreateMode, selectedRole]);
 
-  const updatePermissionField = (module: ModuleKey, field: 'view' | 'create' | 'edit' | 'delete', checked: boolean) => {
-    setPermissions((prev) => ({
-      ...prev,
-      [module]: {
-        ...prev[module],
-        [field]: checked
-      }
-    }));
+  const permissionsForSave = useMemo(
+    () => productToPermissionsMap(productPermissions),
+    [productPermissions]
+  );
+
+  const startCreateMode = () => {
+    setIsCreateMode(true);
+    setName('');
+    setProductPermissions(createDefaultCustomRoleProductState());
   };
 
-  const updateViewScope = (module: ModuleKey, checked: boolean) => {
-    updatePermissionField(module, 'view', checked);
-  };
-
-  const updateActions = (module: ModuleKey, nextActions: string[]) => {
-    setPermissions((prev) => ({
-      ...prev,
-      [module]: {
-        ...prev[module],
-        actions: nextActions
-      }
-    }));
-  };
-
-  const toggleAction = (module: ModuleKey, action: string, checked: boolean) => {
-    const current = permissions[module]?.actions ?? [];
-    const nextActions = checked
-      ? Array.from(new Set([...current, action]))
-      : current.filter((item) => item !== action);
-    updateActions(module, nextActions);
+  const cancelCreateMode = () => {
+    setIsCreateMode(false);
+    if (sortedRoles[0]) {
+      setSelectedRoleId(sortedRoles[0]._id);
+    }
   };
 
   const saveRole = async () => {
+    if (!canSave || (!isCreateMode && isSystemRole)) {
+      return;
+    }
+
     if (!name.trim()) {
       dispatch(showSnackbar({ message: 'Role name is required', severity: 'error' }));
       return;
     }
 
-    if (selectedRole) {
-      await dispatch(saveRoleThunk({ id: selectedRole._id, name, permissions })).unwrap();
-    } else {
-      await dispatch(saveRoleThunk({ name, permissions })).unwrap();
+    if (permissionsAuth && exceedsActorProductPermissions(productPermissions, permissionsAuth)) {
+      dispatch(showSnackbar({ message: ROLE_DELEGATION_FORBIDDEN_MESSAGE, severity: 'error' }));
+      return;
+    }
+
+    try {
+      if (isCreateMode) {
+        const createdRole = await dispatch(
+          saveRoleThunk({ name: name.trim(), permissions: permissionsForSave })
+        ).unwrap();
+        setIsCreateMode(false);
+        if (createdRole?._id) {
+          setSelectedRoleId(createdRole._id);
+        } else if (sortedRoles[0]) {
+          setSelectedRoleId(sortedRoles[0]._id);
+        }
+      } else if (selectedRole) {
+        await dispatch(
+          saveRoleThunk({
+            id: selectedRole._id,
+            name: name.trim(),
+            permissions: permissionsForSave
+          })
+        ).unwrap();
+      }
+    } catch (error) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(error, 'Failed to save role'),
+          severity: 'error'
+        })
+      );
     }
   };
 
   const removeRole = async () => {
-    if (!selectedRole) return;
-    await dispatch(deleteRoleThunk(selectedRole._id)).unwrap();
-    setSelectedRoleId('new');
+    if (!selectedRole || !canDelete) return;
+    try {
+      await dispatch(deleteRoleThunk(selectedRole._id)).unwrap();
+      setDeleteConfirmOpen(false);
+      const remaining = sortedRoles.filter((role) => role._id !== selectedRole._id);
+      setSelectedRoleId(remaining[0]?._id ?? '');
+    } catch (error) {
+      dispatch(
+        showSnackbar({
+          message: extractApiErrorMessage(error, 'Failed to delete role'),
+          severity: 'error'
+        })
+      );
+    }
   };
 
   if (!canView) {
@@ -161,228 +217,213 @@ export const RolesPage = ({ showHeader = true }: RolesPageProps) => {
       {showHeader ? (
         <PageHeader
           title="Roles & Permissions"
-          subtitle="Define module-level access rules for each role"
+          subtitle="Manage team access using simple product capabilities."
           icon={<AdminPanelSettingsIcon />}
         />
       ) : null}
+
       <LoadingEmptyStateWrapper loading={loading} empty={false} loadingLabel="Loading roles...">
-    <Paper sx={{ p: 3 }}>
-      <Stack spacing={2} sx={{ mb: 2 }}>
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ flexWrap: 'wrap' }}>
-        <Select size="small" value={selectedRoleId} onChange={(e) => setSelectedRoleId(e.target.value)}>
-          <MenuItem value="new">Create New Role</MenuItem>
-          {roles.map((role) => (
-            <MenuItem key={role._id} value={role._id}>{`${role.name}${role.isSystem ? ' (system)' : ''}`}</MenuItem>
-          ))}
-        </Select>
-        <TextField size="small" label="Role Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Button variant="contained" startIcon={<SaveIcon />} onClick={() => void saveRole()} disabled={mutating}>
-          Save
-        </Button>
-        {selectedRole && (
-          <Button
-            variant="outlined"
-            color="error"
-            startIcon={<DeleteOutlineIcon />}
-            onClick={() => void removeRole()}
-            disabled={selectedRole.isSystem || mutating}
-          >
-            Delete
-          </Button>
-        )}
-      </Stack>
-      </Stack>
-      <Divider sx={{ mb: 2 }} />
-      <Box sx={{ overflowX: 'auto' }}>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Module</TableCell>
-              <TableCell>Pages</TableCell>
-              <TableCell>View</TableCell>
-              <TableCell>Create</TableCell>
-              <TableCell>Edit</TableCell>
-              <TableCell>Delete</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {visibleModules.map((module) => (
-              <TableRow key={module}>
-                <TableCell>
-                  <Stack spacing={0.5}>
-                    <Box component="span" sx={{ fontWeight: 700 }}>
-                      {modulePresentation[module]?.label ?? module}
-                    </Box>
-                    <Box component="span" sx={{ color: 'text.secondary', fontSize: 12 }}>
-                      {module}
-                    </Box>
-                  </Stack>
-                </TableCell>
-                <TableCell sx={{ minWidth: 220 }}>
-                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                    {(modulePresentation[module]?.surfaces ?? []).map((surface) => (
-                      <Chip key={`${module}-${surface}`} size="small" label={surface} variant="outlined" />
-                    ))}
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Checkbox
-                    checked={permissions[module]?.view ?? false}
-                    onChange={(e) => updatePermissionField(module, 'view', e.target.checked)}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Checkbox
-                    checked={permissions[module]?.create ?? false}
-                    onChange={(e) => updatePermissionField(module, 'create', e.target.checked)}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Checkbox
-                    checked={permissions[module]?.edit ?? false}
-                    onChange={(e) => updatePermissionField(module, 'edit', e.target.checked)}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Checkbox
-                    checked={permissions[module]?.delete ?? false}
-                    onChange={(e) => updatePermissionField(module, 'delete', e.target.checked)}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<TuneIcon />}
-                      onClick={() => setActionsModule(module)}
-                    >
-                      {permissions[module]?.actions.length ? 'Configure' : 'Open'}
-                    </Button>
-                    {(permissions[module]?.actions ?? []).length > 0 ? (
-                      (permissions[module]?.actions ?? []).map((action) => (
-                        <Chip key={`${module}-${action}`} size="small" label={action} />
-                      ))
-                    ) : (
-                      <Box component="span" sx={{ color: 'text.secondary', fontSize: 13 }}>
-                        No actions selected
-                      </Box>
-                    )}
-                  </Stack>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Box>
-    </Paper>
-      </LoadingEmptyStateWrapper>
-      <Dialog open={Boolean(actionsModule)} onClose={() => setActionsModule(null)} fullWidth maxWidth="xs">
-        <DialogTitle>
-          {actionsModule ? modulePresentation[actionsModule]?.label ?? actionsModule : 'Module access'}
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <DialogContentText sx={{ m: 0 }}>
-              This workspace maps to the surfaces below. View access controls everything listed for this module.
-            </DialogContentText>
-
-            {actionsModule ? (
-              <Stack spacing={1}>
-                <Box sx={{ fontWeight: 700 }}>Pages</Box>
-                <FormGroup>
-                  {(modulePresentation[actionsModule]?.surfaces ?? []).map((surface) => (
-                    <FormControlLabel
-                      key={`${actionsModule}-surface-${surface}`}
-                      control={
-                        <Checkbox
-                          checked={permissions[actionsModule]?.view ?? false}
-                          onChange={(e) => updateViewScope(actionsModule, e.target.checked)}
-                        />
+        <Stack spacing={2}>
+          <RetailSurfaceCard data-testid="roles-workspace-card">
+            <RetailSurfaceCardBody sx={{ p: 0 }}>
+              <Box sx={{ px: { xs: 2, md: 2.5 }, pt: { xs: 2, md: 2.5 }, pb: 2 }}>
+              {isCreateMode ? (
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={2}
+                  alignItems={{ sm: 'center' }}
+                  sx={{ width: '100%' }}
+                >
+                  <TextField
+                    data-testid="role-create-name"
+                    size="small"
+                    label="Role name"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && name.trim().length >= 2 && canCreate && !mutating) {
+                        event.preventDefault();
+                        void saveRole();
                       }
-                      label={surface}
-                    />
-                  ))}
-                </FormGroup>
-              </Stack>
-            ) : null}
-
-            {actionsModule ? (
-              <Stack spacing={1}>
-                <Box sx={{ fontWeight: 700 }}>Base permissions</Box>
-                <FormGroup>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={permissions[actionsModule]?.view ?? false}
-                        onChange={(e) => updatePermissionField(actionsModule, 'view', e.target.checked)}
-                      />
-                    }
-                    label="View"
+                    }}
+                    helperText="At least 2 characters"
+                    sx={{ flex: 1, minWidth: 0 }}
                   />
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={permissions[actionsModule]?.create ?? false}
-                        onChange={(e) => updatePermissionField(actionsModule, 'create', e.target.checked)}
-                      />
-                    }
-                    label="Create"
-                  />
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={permissions[actionsModule]?.edit ?? false}
-                        onChange={(e) => updatePermissionField(actionsModule, 'edit', e.target.checked)}
-                      />
-                    }
-                    label="Edit"
-                  />
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={permissions[actionsModule]?.delete ?? false}
-                        onChange={(e) => updatePermissionField(actionsModule, 'delete', e.target.checked)}
-                      />
-                    }
-                    label="Delete"
-                  />
-                </FormGroup>
-              </Stack>
-            ) : null}
-
-            <Stack spacing={1}>
-              <Box sx={{ fontWeight: 700 }}>Actions</Box>
-              {actionsModule && availableActions.length > 0 ? (
-                <FormGroup>
-                  {availableActions.map((action) => (
-                    <FormControlLabel
-                      key={`${actionsModule}-${action}`}
-                      control={
-                        <Checkbox
-                          checked={permissions[actionsModule]?.actions.includes(action) ?? false}
-                          onChange={(e) => toggleAction(actionsModule, action, e.target.checked)}
-                        />
-                      }
-                      label={action}
-                    />
-                  ))}
-                </FormGroup>
+                  <Button
+                    data-testid="role-create-submit"
+                    variant="contained"
+                    color="success"
+                    startIcon={mutating ? <CircularProgress size={14} color="inherit" /> : <AddIcon />}
+                    onClick={() => void saveRole()}
+                    disabled={mutating || name.trim().length < 2}
+                    sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+                  >
+                    Create role
+                  </Button>
+                  <Box sx={{ flexGrow: 1, display: { xs: 'none', sm: 'block' } }} />
+                  <Button
+                    color="inherit"
+                    onClick={cancelCreateMode}
+                    disabled={mutating}
+                    sx={{ flexShrink: 0, ml: { xs: 0, sm: 'auto' } }}
+                  >
+                    Cancel
+                  </Button>
+                </Stack>
               ) : (
-                <Box sx={{ color: 'text.secondary' }}>No custom actions are available for this module.</Box>
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={2}
+                  alignItems={{ sm: 'center' }}
+                >
+                  <FormControl fullWidth size="small" data-testid="role-select-control" sx={{ flex: 1 }}>
+                    <InputLabel id="role-select-label">Role</InputLabel>
+                    <Select
+                      labelId="role-select-label"
+                      label="Role"
+                      data-testid="role-select"
+                      value={
+                        sortedRoles.some((role) => role._id === selectedRoleId) ? selectedRoleId : ''
+                      }
+                      onChange={(event) => setSelectedRoleId(event.target.value)}
+                      renderValue={(value) => {
+                        const role = sortedRoles.find((item) => item._id === value);
+                        if (!role) return '';
+                        return (
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <span>{role.name}</span>
+                            <Chip
+                              size="small"
+                              label={role.isSystem ? 'System' : 'Custom'}
+                              variant="outlined"
+                              sx={{ height: 20, fontSize: '0.7rem' }}
+                            />
+                          </Stack>
+                        );
+                      }}
+                    >
+                      {sortedRoles.map((role) => (
+                        <MenuItem
+                          key={role._id}
+                          value={role._id}
+                          data-testid={`role-option-${role._id}`}
+                        >
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <span>{role.name}</span>
+                            <Chip
+                              size="small"
+                              label={role.isSystem ? 'System' : 'Custom'}
+                              variant="outlined"
+                              sx={{ height: 20, fontSize: '0.7rem' }}
+                            />
+                          </Stack>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  {canCreate ? (
+                    <Button
+                      data-testid="create-role-btn"
+                      variant="contained"
+                      color="success"
+                      startIcon={<AddIcon />}
+                      onClick={startCreateMode}
+                      sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+                    >
+                      New role
+                    </Button>
+                  ) : null}
+                </Stack>
               )}
-            </Stack>
-          </Stack>
+              </Box>
+
+              {!isCreateMode && !isSystemRole && !canEdit && selectedRole ? (
+                <Alert severity="info" sx={{ mx: { xs: 2, md: 2.5 }, mb: 2 }}>
+                  You can view this role, but you do not have permission to edit it.
+                </Alert>
+              ) : null}
+
+              {permissionsAuth ? (
+                <>
+                  <Divider />
+                  <ProductRolePermissionEditor
+                    embedded
+                    value={productPermissions}
+                    actorPermissions={permissionsAuth}
+                    readOnly={matrixReadOnly}
+                    onChange={setProductPermissions}
+                  />
+                </>
+              ) : null}
+
+              {!isCreateMode && (canSave || canShowDelete) ? (
+                <>
+                  <Divider />
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    justifyContent="flex-end"
+                    flexWrap="wrap"
+                    sx={{ px: { xs: 2, md: 2.5 }, py: 2 }}
+                  >
+                    {canShowDelete ? (
+                      <Button
+                        data-testid="role-delete-btn"
+                        variant="outlined"
+                        color="error"
+                        startIcon={<DeleteOutlineIcon />}
+                        onClick={() => setDeleteConfirmOpen(true)}
+                        disabled={mutating}
+                      >
+                        Delete role
+                      </Button>
+                    ) : null}
+                    {canSave ? (
+                      <Button
+                        data-testid="role-save-btn"
+                        variant="contained"
+                        color="success"
+                        startIcon={mutating ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}
+                        onClick={() => void saveRole()}
+                        disabled={mutating}
+                      >
+                        Save changes
+                      </Button>
+                    ) : null}
+                  </Stack>
+                </>
+              ) : null}
+            </RetailSurfaceCardBody>
+          </RetailSurfaceCard>
+        </Stack>
+      </LoadingEmptyStateWrapper>
+
+      <Dialog
+        open={deleteConfirmOpen}
+        onClose={() => {
+          if (!mutating) setDeleteConfirmOpen(false);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Delete role?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will delete the custom role &quot;{selectedRole?.name}&quot;. This cannot be undone.
+          </DialogContentText>
         </DialogContent>
         <DialogActions>
-          {actionsModule ? (
-            <Button onClick={() => updateActions(actionsModule, [])} color="inherit">
-              Clear
-            </Button>
-          ) : null}
-          <Button onClick={() => setActionsModule(null)} variant="contained">
-            Done
+          <Button onClick={() => setDeleteConfirmOpen(false)} color="inherit" disabled={mutating}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            startIcon={mutating ? <CircularProgress size={14} color="inherit" /> : undefined}
+            onClick={() => void removeRole()}
+            disabled={mutating}
+          >
+            Delete
           </Button>
         </DialogActions>
       </Dialog>

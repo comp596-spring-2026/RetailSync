@@ -49,8 +49,8 @@ const renderWithState = (permissions: PermissionsMap) => {
 
   return render(
     <Provider store={store}>
-      <PermissionGate module="suppliers" action="create">
-        <Button>create supplier</Button>
+      <PermissionGate module="bankStatements" action="create">
+        <Button>upload statement</Button>
       </PermissionGate>
     </Provider>
   );
@@ -59,19 +59,19 @@ const renderWithState = (permissions: PermissionsMap) => {
 describe('PermissionGate', () => {
   it('hides children when permission is not granted', () => {
     const permissions = buildPermissions();
-    permissions.suppliers!.create = false;
+    permissions.bankStatements!.create = false;
 
     renderWithState(permissions);
 
-    expect(screen.queryByRole('button', { name: /create supplier/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /upload statement/i })).not.toBeInTheDocument();
   });
 
   it('renders children when permission is granted', () => {
     const permissions = buildPermissions();
-    permissions.suppliers!.create = true;
+    permissions.bankStatements!.create = true;
 
     renderWithState(permissions);
 
-    expect(screen.getByRole('button', { name: /create supplier/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /upload statement/i })).toBeInTheDocument();
   });
 });

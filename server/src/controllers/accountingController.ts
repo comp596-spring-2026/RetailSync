@@ -3,6 +3,7 @@ import {
   bankStatementDetailSchema,
   bankStatementListItemSchema,
   bankStatementStatusResponseSchema,
+  assignStatementBankAccountSchema,
   createBankStatementSchema,
   detectStatementMonthResponseSchema,
   listBankStatementsQuerySchema,
@@ -1995,6 +1996,48 @@ export const getStatementById = async (req: Request, res: Response) => {
     // eslint-disable-next-line no-console
     console.error('[accounting.get-statement] failed', error);
     return fail(res, 'Failed to load statement', 500);
+  }
+};
+
+export const assignStatementBankAccount = async (req: Request, res: Response) => {
+  if (!req.companyId) return fail(res, 'Company onboarding required', 403);
+
+  const parsed = assignStatementBankAccountSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return fail(res, 'Validation failed', 422, parsed.error.flatten());
+  }
+
+  try {
+    const statement = await BankStatement.findOne({ _id: req.params.id, companyId: req.companyId });
+    if (!statement) {
+      return fail(res, 'Statement not found', 404);
+    }
+
+    const ref = parsed.data.bankAccountId.trim();
+    const accountQuery: Record<string, unknown> = { companyId: req.companyId };
+    if (Types.ObjectId.isValid(ref)) {
+      accountQuery._id = new Types.ObjectId(ref);
+    } else {
+      accountQuery.qbAccountId = ref;
+    }
+
+    const account = await ChartOfAccountModel.findOne(accountQuery).select('qbAccountId type').lean();
+    const qbAccountId = account?.qbAccountId?.trim();
+    if (!qbAccountId) {
+      return fail(
+        res,
+        'QuickBooks bank account not found. Assign a bank chart account created in QuickBooks (Statements page → Create account).',
+        404
+      );
+    }
+
+    statement.bankAccountId = qbAccountId;
+    await statement.save();
+    return ok(res, { statement: toListItem(statement) });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[accounting.assign-statement-bank-account] failed', error);
+    return fail(res, 'Failed to assign statement bank account', 500);
   }
 };
 

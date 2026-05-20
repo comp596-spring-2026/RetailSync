@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { moduleKeys } from '@retailsync/shared';
-import { memberPermissions } from '../utils/defaultPermissions';
+import { adminPermissions, memberPermissions } from '../utils/defaultPermissions';
 import {
   findMissingPermissionModules,
   normalizeRolePermissions,
@@ -26,6 +26,19 @@ describe('rolePermissionsService', () => {
     expect(normalized.accounting).toEqual(memberPermissions().accounting);
     expect(normalized.ledger).toEqual(memberPermissions().ledger);
     expect(normalized.quickbooks).toEqual(memberPermissions().quickbooks);
+  });
+
+  it('restores canonical Admin permissions when stored grants are stale', () => {
+    const staleAdmin = adminPermissions();
+    staleAdmin.users = { view: true, create: false, edit: false, delete: false, actions: [] };
+
+    const normalized = normalizeRolePermissions(staleAdmin, {
+      roleName: 'Admin',
+      isSystem: true
+    });
+
+    expect(normalized.users.view).toBe(true);
+    expect(normalized.users.actions).toEqual(expect.arrayContaining(['invite', 'assignRole']));
   });
 
   it('detects the legacy accounting-related modules that need backfill', () => {

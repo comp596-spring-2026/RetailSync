@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import {
+  assignStatementBankAccount,
   createStatement,
   deleteStatement,
   detectStatementMonth,
@@ -54,6 +55,11 @@ router.get('/statements', requirePermission('bankStatements', 'view'), listState
 router.get('/statement-months', requirePermission('bankStatements', 'view'), listStatementMonths);
 router.get('/statement-months/:month', requirePermission('bankStatements', 'view'), getStatementMonthSummary);
 router.get('/statements/:id', requirePermission('bankStatements', 'view'), getStatementById);
+router.patch(
+  '/statements/:id/bank-account',
+  requirePermission('bankStatements', 'edit'),
+  assignStatementBankAccount
+);
 router.get('/statements/:id/status', requirePermission('bankStatements', 'view'), getStatementStatus);
 router.get('/statements/:id/checks', requirePermission('bankStatements', 'view'), getStatementChecks);
 router.get('/statements/:id/entries', requirePermission('bankStatements', 'view'), listStatementEntries);

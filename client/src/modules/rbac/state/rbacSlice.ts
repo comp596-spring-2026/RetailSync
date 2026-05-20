@@ -41,18 +41,23 @@ export const fetchRoles = createAsyncThunk<{ modules: ModuleKey[]; roles: RoleIt
 );
 
 export const saveRoleThunk = createAsyncThunk<
-  void,
+  RoleItem | null,
   { id?: string; name: string; permissions: PermissionsMap },
   { dispatch: AppDispatch }
 >('rbac/saveRole', async (payload, { dispatch }) => {
+  let createdRole: RoleItem | null = null;
+
   if (payload.id) {
     await rbacApi.updateRole(payload.id, { name: payload.name, permissions: payload.permissions });
     dispatch(showSnackbar({ message: 'Role updated', severity: 'success' }));
   } else {
-    await rbacApi.createRole({ name: payload.name, permissions: payload.permissions });
+    const response = await rbacApi.createRole({ name: payload.name, permissions: payload.permissions });
+    createdRole = response.data.data as RoleItem;
     dispatch(showSnackbar({ message: 'Role created', severity: 'success' }));
   }
+
   await dispatch(fetchRoles());
+  return createdRole;
 });
 
 export const deleteRoleThunk = createAsyncThunk<void, string, { dispatch: AppDispatch }>(

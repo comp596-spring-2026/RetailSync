@@ -15,7 +15,7 @@ import {
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import { BankStatementStatus } from '@retailsync/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../app/store/hooks';
 import { showSnackbar } from '../../../app/store/uiSlice';
 import { LoadingEmptyStateWrapper, NoAccess, PageHeader } from '../../../components';
@@ -27,8 +27,13 @@ import {
   StatementMonthCalendar,
   type StatementMonthInfo,
   StatementWorkflowCard,
-  UploadStatementDialog
+  UploadStatementDialog,
+  type UploadStatementResult
 } from '../components';
+import {
+  readDefaultStatementBankAccountId,
+  writeDefaultStatementBankAccountId
+} from '../constants/statementBankAccount';
 import { formatStatementMonthShort } from '../utils/statementDisplay';
 import { isStatementInFlight } from '../utils/statementStatus';
 
@@ -58,11 +63,14 @@ type BankChartAccountOption = {
   detailType?: string;
 };
 
-const STATEMENT_BANK_ACCOUNT_STORAGE_KEY = 'accounting.statement.defaultBankAccountId';
+type StatementsLocationState = {
+  refreshStatementsAt?: number;
+};
 
 export const StatementsPage = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const location = useLocation();
   const permissions = useAppSelector((state) => state.auth.permissions);
 
   const canView = hasPermission(permissions, 'bankStatements', 'view');
@@ -76,10 +84,9 @@ export const StatementsPage = () => {
   const [rows, setRows] = useState<StatementItem[]>([]);
   const [monthInfos, setMonthInfos] = useState<StatementMonthInfo[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankChartAccountOption[]>([]);
-  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>(() => {
-    if (typeof window === 'undefined') return '';
-    return window.localStorage.getItem(STATEMENT_BANK_ACCOUNT_STORAGE_KEY) ?? '';
-  });
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>(() =>
+    readDefaultStatementBankAccountId()
+  );
   const [filterMonth, setFilterMonth] = useState('');
   const [calendarYear, setCalendarYear] = useState(() => new Date().getUTCFullYear());
   const [loading, setLoading] = useState(true);
@@ -95,26 +102,36 @@ export const StatementsPage = () => {
     'Checking'
   );
   const hasAssignedBankAccount = Boolean(selectedBankAccountId);
+  const needsQuickBooksConnection = canViewQuickBooks && !quickBooksConnected;
+  const workspaceReady = hasAssignedBankAccount && !needsQuickBooksConnection;
 
-  const load = useCallback(async () => {
-    if (!canView || !hasAssignedBankAccount) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [listResponse, monthsResponse] = await Promise.all([
-        accountingApi.listStatements({
-          month: filterMonth || undefined
-        }),
-        accountingApi.listStatementMonths()
-      ]);
-      setRows(listResponse.data.data.statements);
-      setMonthInfos(monthsResponse.data.data.months as StatementMonthInfo[]);
-    } catch (loadError) {
-      setError(extractApiErrorMessage(loadError, 'Failed to load statements'));
-    } finally {
-      setLoading(false);
-    }
-  }, [canView, filterMonth, hasAssignedBankAccount]);
+  const goToQuickBooksSettings = useCallback(() => {
+    navigate('/dashboard/settings?open=quickbooks');
+  }, [navigate]);
+
+  const load = useCallback(
+    async (options?: { month?: string }) => {
+      if (!canView || !workspaceReady) return;
+      const monthFilter = options?.month !== undefined ? options.month : filterMonth;
+      setLoading(true);
+      setError(null);
+      try {
+        const [listResponse, monthsResponse] = await Promise.all([
+          accountingApi.listStatements({
+            month: monthFilter || undefined
+          }),
+          accountingApi.listStatementMonths()
+        ]);
+        setRows(listResponse.data.data.statements);
+        setMonthInfos(monthsResponse.data.data.months as StatementMonthInfo[]);
+      } catch (loadError) {
+        setError(extractApiErrorMessage(loadError, 'Failed to load statements'));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [canView, filterMonth, workspaceReady]
+  );
 
   const loadBankAccounts = useCallback(async () => {
     if (!canView || !canViewQuickBooks || !quickBooksConnected) {
@@ -144,7 +161,7 @@ export const StatementsPage = () => {
       setBankAccounts(options);
       if (options.every((option) => option.qbId !== selectedBankAccountId)) {
         setSelectedBankAccountId('');
-        window.localStorage.removeItem(STATEMENT_BANK_ACCOUNT_STORAGE_KEY);
+        writeDefaultStatementBankAccountId('');
       }
     } catch (apiError) {
       setBankAccountError(extractApiErrorMessage(apiError, 'Failed to load bank chart accounts'));
@@ -159,18 +176,31 @@ export const StatementsPage = () => {
   }, [load]);
 
   useEffect(() => {
+    const refreshAt = (location.state as StatementsLocationState | null)?.refreshStatementsAt;
+    if (!refreshAt) return;
+    void load();
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, load, navigate]);
+
+  useEffect(() => {
     void loadBankAccounts();
   }, [loadBankAccounts]);
 
   useEffect(() => {
+    if (quickBooksConnected) return;
     if (!selectedBankAccountId) return;
-    window.localStorage.setItem(STATEMENT_BANK_ACCOUNT_STORAGE_KEY, selectedBankAccountId);
+    setSelectedBankAccountId('');
+    writeDefaultStatementBankAccountId('');
+  }, [quickBooksConnected, selectedBankAccountId]);
+
+  useEffect(() => {
+    writeDefaultStatementBankAccountId(selectedBankAccountId);
   }, [selectedBankAccountId]);
 
   const hasInFlightRows = useMemo(() => rows.some((row) => isStatementInFlight(row.status)), [rows]);
 
   useEffect(() => {
-    if (!canView || !hasAssignedBankAccount) return;
+    if (!canView || !workspaceReady) return;
     if (!hasInFlightRows && !uploadOpen) return;
 
     const intervalMs = uploadOpen ? 2000 : 4000;
@@ -178,7 +208,7 @@ export const StatementsPage = () => {
       void load();
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [canView, hasAssignedBankAccount, hasInFlightRows, uploadOpen, load]);
+  }, [canView, workspaceReady, hasInFlightRows, uploadOpen, load]);
 
   const reprocess = async (id: string) => {
     try {
@@ -215,14 +245,17 @@ export const StatementsPage = () => {
     }
   };
 
-  const onUploaded = async () => {
+  const onUploaded = async (result: UploadStatementResult) => {
+    if (result.statementMonth) {
+      setFilterMonth(result.statementMonth);
+    }
     dispatch(
       showSnackbar({
         message: 'Statement uploaded and processing started',
         severity: 'success'
       })
     );
-    await load();
+    await load({ month: result.statementMonth || filterMonth });
   };
 
   const createBankAccount = async () => {
@@ -241,7 +274,9 @@ export const StatementsPage = () => {
       const created = response.data.data.account;
       await loadBankAccounts();
       if (created.qbId) {
-        setSelectedBankAccountId(created.qbId);
+        const qbId = String(created.qbId);
+        setSelectedBankAccountId(qbId);
+        writeDefaultStatementBankAccountId(qbId);
       }
       setCreateAccountOpen(false);
       setNewAccountName('');
@@ -297,8 +332,11 @@ export const StatementsPage = () => {
   const selectedBankAccountValue = bankAccounts.some((account) => account.qbId === selectedBankAccountId)
     ? selectedBankAccountId
     : '';
-  const bankAccountGuardMessage = useMemo(() => {
-    if (hasAssignedBankAccount) return null;
+  const workspaceBlockedMessage = useMemo(() => {
+    if (workspaceReady) return null;
+    if (needsQuickBooksConnection) {
+      return 'Connect QuickBooks in Settings to use bank statements.';
+    }
     if (!canViewQuickBooks) {
       return 'QuickBooks account access is required to assign a bank chart account before using statements.';
     }
@@ -309,7 +347,14 @@ export const StatementsPage = () => {
       return 'No active bank chart accounts found. Create one to continue.';
     }
     return 'Select a bank chart account to unlock statement upload and workspace visibility.';
-  }, [hasAssignedBankAccount, canViewQuickBooks, quickBooksConnected, loadingBankAccounts, bankAccounts.length]);
+  }, [
+    workspaceReady,
+    needsQuickBooksConnection,
+    canViewQuickBooks,
+    quickBooksConnected,
+    loadingBankAccounts,
+    bankAccounts.length
+  ]);
 
   if (!canView) {
     return <NoAccess />;
@@ -353,15 +398,36 @@ export const StatementsPage = () => {
       />
       {error && <Alert severity="error">{error}</Alert>}
       {bankAccountError && <Alert severity="error">{bankAccountError}</Alert>}
-      {bankAccountGuardMessage ? <Alert severity="warning">{bankAccountGuardMessage}</Alert> : null}
+      {workspaceBlockedMessage ? (
+        <Alert
+          severity="warning"
+          action={
+            needsQuickBooksConnection ? (
+              <Button color="inherit" size="small" onClick={goToQuickBooksSettings}>
+                Go to Settings
+              </Button>
+            ) : undefined
+          }
+        >
+          {workspaceBlockedMessage}
+        </Alert>
+      ) : null}
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, lg: 8 }} order={{ xs: 2, lg: 1 }}>
-          {!hasAssignedBankAccount ? (
+          {!workspaceReady ? (
             <Paper sx={{ p: 2 }}>
-              <Typography variant="body2" color="text.secondary">
-                Statement workspace is locked until bank account assignment is complete.
-              </Typography>
+              <Stack spacing={1.5} alignItems="flex-start">
+                <Typography variant="body2" color="text.secondary">
+                  {workspaceBlockedMessage ??
+                    'Statement workspace is locked until QuickBooks is connected and a bank chart account is selected.'}
+                </Typography>
+                {needsQuickBooksConnection ? (
+                  <Button variant="contained" size="small" onClick={goToQuickBooksSettings}>
+                    Go to Settings
+                  </Button>
+                ) : null}
+              </Stack>
             </Paper>
           ) : (
             <LoadingEmptyStateWrapper
@@ -420,13 +486,13 @@ export const StatementsPage = () => {
             <Paper sx={{ p: 2 }}>
               <Stack spacing={1.5}>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Button variant="outlined" onClick={() => void load()} disabled={!hasAssignedBankAccount}>
+                  <Button variant="outlined" onClick={() => void load()} disabled={!workspaceReady}>
                     Refresh
                   </Button>
                   <Button
                     variant="contained"
                     onClick={() => setUploadOpen(true)}
-                    disabled={!canCreate || !hasAssignedBankAccount}
+                    disabled={!canCreate || !workspaceReady}
                   >
                     Upload PDF
                   </Button>
@@ -439,11 +505,9 @@ export const StatementsPage = () => {
 
       <UploadStatementDialog
         open={uploadOpen}
-        onClose={() => {
-          setUploadOpen(false);
-          void load();
-        }}
+        onClose={() => setUploadOpen(false)}
         onUploaded={onUploaded}
+        defaultBankAccountId={selectedBankAccountId}
         onSaveError={(message) => {
           dispatch(showSnackbar({ message, severity: 'error' }));
         }}
