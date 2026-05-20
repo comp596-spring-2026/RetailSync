@@ -59,6 +59,18 @@ erDiagram
 - `notes`
 - Unique index: `(companyId, date)`
 
+**Sales tax review usage** (client-side, no extra collection):
+
+| Field | Sales tax role |
+| --- | --- |
+| `highTax` | Full-rate taxable base (**High Tax Food** in UI) |
+| `lowTax` | Local-only taxable base (**Low Tax Grocery** in UI) |
+| `saleTax` | Daily collected tax; summed to **Total Tax Collected** |
+| `gas`, `lottery` | Reference sales in Monthly POS Data and daily table |
+| `notes` | Optional manual tax adjustment parsing (included in collected total) |
+
+See [pos/sales-tax-review-workflow.md](../pos/sales-tax-review-workflow.md).
+
 ### Item
 
 - `companyId`

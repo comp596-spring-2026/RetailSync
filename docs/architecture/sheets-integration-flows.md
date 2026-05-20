@@ -92,6 +92,10 @@ POS `Sync Now` client logic:
 
 This allows server-side resolver to run and avoids false local “mapping missing” failures.
 
+## 6b) Downstream Sale Tax review
+
+After sync or CSV import, daily rows feed the POS **Sale Tax** view. The client groups rows by month and applies Georgia / Troup County tax math — no additional Sheets commit step. Specification: [pos/sales-tax-review-workflow.md](../pos/sales-tax-review-workflow.md).
+
 ## 7) Status and action model (UI)
 
 Per connector readiness:

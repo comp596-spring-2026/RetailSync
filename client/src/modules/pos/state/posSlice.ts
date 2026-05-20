@@ -11,7 +11,7 @@ import type {
 import type { AppDispatch, RootState } from '../../../app/store';
 import { showSnackbar } from '../../../app/store/uiSlice';
 
-export type PosView = 'table' | 'analytics' | 'ai';
+export type PosView = 'table' | 'analytics' | 'saleTax';
 
 export type PosDateRange = {
   from: string;
@@ -64,6 +64,7 @@ export type PosState = {
   page: number;
   limit: number;
   records: PosDailyRecord[];
+  rangeRows: PosDailyRecord[];
   totals: PosTotals;
   kpis: PosKpis;
   sparkline7: PosChartSeriesPoint[];
@@ -80,7 +81,7 @@ const LOCAL_STORAGE_VIEW_KEY = 'retailsync.pos.view';
 const LOCAL_STORAGE_ICON_ONLY_KEY = 'retailsync.pos.iconOnly';
 
 const normalizePosView = (value: string | null | undefined): PosView => {
-  if (value === 'ai') return 'ai';
+  if (value === 'saleTax' || value === 'ai') return 'saleTax';
   if (value === 'analytics' || value === 'dashboard') return 'analytics';
   return 'table';
 };
@@ -168,6 +169,7 @@ const initialState: PosState = {
   page: 1,
   limit: 100,
   records: [],
+  rangeRows: [],
   totals: defaultTotals,
   kpis: defaultKpis,
   sparkline7: [],
@@ -687,6 +689,7 @@ export const posSlice = createSlice({
       .addCase(fetchOverview.fulfilled, (state, action) => {
         state.loading.overview = false;
         state.kpis = action.payload.overview.kpis;
+        state.rangeRows = action.payload.chartRows;
         state.sparkline7 = action.payload.overview.sparkline7;
         state.alerts = action.payload.overview.alerts.map((alert) => ({ ...alert, acknowledged: false }));
         state.chartsData = {

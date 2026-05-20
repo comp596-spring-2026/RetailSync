@@ -1,13 +1,13 @@
 # Module Test Matrix
 
-Date: 2026-04-17
+Date: 2026-05-20
 
 ## Client Modules
 
 | Module | Automated Tests | Primary Assertions |
 | --- | --- | --- |
 | auth | `modules/auth/pages/LoginPage.test.tsx`, `RegisterPage.test.tsx`, `AcceptInvitePage.test.tsx`, `ForgotPasswordPage.test.tsx`, `ResetPasswordPage.test.tsx`, `VerifyEmailPage.test.tsx`, `CreateCompanyPage.test.tsx`, `modules/auth/api/AuthApi.test.ts`, `app/auth/fetchMeAndSync.test.ts` | public auth pages render, auth API requests are shaped correctly, session bootstrap and redirects work |
-| pos | POS tests under `modules/pos` plus import and AI page coverage | imports, table/analytics transitions, and POS presentation stay stable |
+| pos | `modules/pos/utils/saleTaxReview.test.ts`, `modules/pos/tests/POSSaleTaxPage.test.tsx`, `modules/pos/tests/POSWorkspacePage.test.tsx`, `modules/pos/tests/posSlice.test.ts`, matching wizard tests | imports, table/analytics/sale-tax view transitions, monthly tax aggregation, vendor compensation math, modal section layout |
 | access | `modules/rbac/tests/rbacSlice.test.ts`, `components/PermissionGate.test.tsx`, access page tests | role state and permission-based rendering work |
 | settings | settings slice and Google Sheets component tests | integration state, source config, and helper logic stay stable |
 | accounting | statements page tests and API contract tests | statements routes and detail flows stay wired |

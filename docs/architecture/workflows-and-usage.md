@@ -1,6 +1,6 @@
 # RetailSync Workflows and Usage
 
-Last updated: 2026-05-17
+Last updated: 2026-05-20
 
 This document is the operational companion to the top-level README. It describes the active user-facing flows and keeps the strongest final-demo path easy to follow.
 
@@ -12,7 +12,7 @@ If you are reviewing the project quickly, use this order:
 2. Dashboard workspace structure
 3. Accounting statements workflow
 4. QuickBooks workspace
-5. POS and Access as supporting modules
+5. POS (Table, Analytics, Sale Tax review) and Access as supporting modules
 
 ## Monorepo Structure
 
@@ -76,9 +76,20 @@ Supporting visual reference:
 
 ## POS Flow
 
-1. User imports POS data from file or configured Google Sheets source.
-2. POS views update across table, analytics, and AI views.
-3. Reports remain API-driven and tied to the same company-scoped data.
+1. User configures Google Sheets mapping or imports a CSV with required daily targets (`date`, `highTax`, `lowTax`, `saleTax`, `gas`, `lottery`, …).
+2. POS **Sync Now** or file import upserts company-scoped `POSDailySummary` rows.
+3. User switches among **Table**, **Analytics**, and **Sale Tax** views in the POS workspace toolbar.
+4. **Table** shows paginated daily records for the selected date range.
+5. **Analytics** shows KPI and chart summaries for the same range.
+6. **Sale Tax** loads all daily rows client-side, groups them by calendar month, and presents the Georgia / Troup County review:
+   - year pager and monthly summary cards (collected tax, vendor compensation, payable tax)
+   - **Monthly Sales Tax Breakdown** modal with five sections: Monthly POS Data, Tax Calculation, Vendor Compensation, Payable Sales Tax, Daily POS Records
+
+Sales tax math is computed in the browser by `buildSalesTaxReviewIndex` — there is no dedicated sales-tax API. Full specification:
+
+- [POS sales tax review workflow](../pos/sales-tax-review-workflow.md)
+- [POS module docs index](../pos/README.md)
+- [Google Sheets POS mapping requirements](../operations/google-sheets-e2e.md)
 
 ## Accounting Flow
 

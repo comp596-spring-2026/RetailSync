@@ -15,12 +15,13 @@ const fetchSettingsMock = vi.fn(() => ({ type: 'settings/fetchSettings' }));
 
 const usePosState = vi.hoisted(() => ({
   state: {
-    view: 'table' as 'table' | 'analytics' | 'ai',
+    view: 'table' as 'table' | 'analytics' | 'saleTax',
     iconOnly: false,
     dateRange: { from: '2026-03-01', to: '2026-03-02' },
     page: 1,
     limit: 100,
     records: [],
+    rangeRows: [],
     totals: {
       totalSales: 0,
       creditCard: 0,
@@ -92,8 +93,17 @@ vi.mock('../../../app/guards', () => ({
 }));
 
 vi.mock('../../../components', () => ({
-  DateRangeControlPanel: ({ actions }: { actions: React.ReactNode }) => (
-    <div data-testid="date-range-control-panel">{actions}</div>
+  DateRangeControlPanel: ({
+    leadingActions,
+    actions
+  }: {
+    leadingActions?: React.ReactNode;
+    actions?: React.ReactNode;
+  }) => (
+    <div data-testid="date-range-control-panel">
+      {leadingActions}
+      {actions}
+    </div>
   ),
   NoAccess: () => <div data-testid="no-access" />,
   PageHeader: ({ title, subtitle }: { title: string; subtitle: string }) => (
@@ -149,8 +159,8 @@ vi.mock('../pages/POSAnalyticsPage', () => ({
   POSAnalyticsPage: () => <div data-testid="pos-analytics-view">Analytics view</div>
 }));
 
-vi.mock('../pages/POSAssistantPage', () => ({
-  POSAssistantPage: () => <div data-testid="pos-ai-view">AI view</div>
+vi.mock('../pages/POSSaleTaxPage', () => ({
+  POSSaleTaxPage: () => <div data-testid="pos-sale-tax-view">Sale tax view</div>
 }));
 
 vi.mock('../pages/POSDailySummaryPage', () => ({
@@ -174,7 +184,7 @@ describe('POSWorkspacePage', () => {
     usePosState.state.view = 'table';
   });
 
-  it('dispatches the AI tab switch and keeps the POS AI route in the page shell', async () => {
+  it('dispatches the sale tax tab switch and keeps the sales tax route in the page shell', async () => {
     const user = userEvent.setup();
 
     render(<POSWorkspacePage />);
@@ -182,17 +192,17 @@ describe('POSWorkspacePage', () => {
     expect(screen.getByRole('heading', { name: 'POS Table View' })).toBeInTheDocument();
     expect(screen.getByTestId('pos-table-view')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /AI view/i }));
+    await user.click(screen.getByRole('button', { name: /Sale tax view/i }));
 
-    expect(setViewMock).toHaveBeenCalledWith('ai');
+    expect(setViewMock).toHaveBeenCalledWith('saleTax');
   });
 
-  it('renders the AI view when the state is already switched there', () => {
-    usePosState.state.view = 'ai';
+  it('renders the sale tax view when the state is already switched there', () => {
+    usePosState.state.view = 'saleTax';
 
     render(<POSWorkspacePage />);
 
-    expect(screen.getByRole('heading', { name: 'POS AI View' })).toBeInTheDocument();
-    expect(screen.getByTestId('pos-ai-view')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'POS Sale Tax View' })).toBeInTheDocument();
+    expect(screen.getByTestId('pos-sale-tax-view')).toBeInTheDocument();
   });
 });

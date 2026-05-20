@@ -33,14 +33,6 @@ type PosTableRow = {
   gas: number;
   lottery: number;
   cashExpenses: number;
-  notes: string;
-  source?: 'file' | 'google_sheets' | 'manual';
-  sourceRef?: {
-    profileName?: string | null;
-    sheetName?: string | null;
-    mode?: string | null;
-    sourceId?: string | null;
-  } | null;
 };
 
 type PosTableTotals = {
@@ -67,16 +59,6 @@ type POSDailySummaryPageProps = {
   primaryAction: PosPrimaryAction;
 };
 
-const resolveSourceLabel = (row: PosTableRow) => {
-  if (row.source === 'google_sheets') return 'Google Sheets';
-  if (row.source === 'file') return 'CSV Import';
-  if (row.source === 'manual') return 'Manual Entry';
-  return 'Unknown source';
-};
-
-const resolveSourceDetail = (row: PosTableRow) =>
-  row.sourceRef?.profileName ?? row.sourceRef?.sheetName ?? row.sourceRef?.mode ?? 'Operational source';
-
 export const POSDailySummaryPage = ({
   loading,
   rows,
@@ -88,8 +70,12 @@ export const POSDailySummaryPage = ({
   onLimitChange,
   primaryAction
 }: POSDailySummaryPageProps) => {
-  const sourceCount = new Set(rows.map((row) => resolveSourceLabel(row))).size;
   const netTotal = totals.totalSales - totals.saleTax;
+  const avgDailySales = rows.length > 0 ? totals.totalSales / rows.length : 0;
+  const bestDayRow =
+    rows.length > 0
+      ? rows.reduce((best, row) => (row.totalSales > best.totalSales ? row : best), rows[0])
+      : null;
 
   return (
     <LoadingEmptyStateWrapper
@@ -111,7 +97,7 @@ export const POSDailySummaryPage = ({
                   Daily POS Summary
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Business summary first, with source-linked day rows below.
+                  Daily sales, tax, and net totals for the selected range.
                 </Typography>
               </Stack>
               <Chip
@@ -124,23 +110,7 @@ export const POSDailySummaryPage = ({
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
               <Paper variant="outlined" sx={{ p: 1.5, flex: 1, borderRadius: 2 }}>
                 <Typography variant="caption" color="text.secondary">
-                  Gross sales
-                </Typography>
-                <Typography variant="h6" fontWeight={900}>
-                  {fmt(totals.totalSales)}
-                </Typography>
-              </Paper>
-              <Paper variant="outlined" sx={{ p: 1.5, flex: 1, borderRadius: 2 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Tax
-                </Typography>
-                <Typography variant="h6" fontWeight={900}>
-                  {fmt(totals.saleTax)}
-                </Typography>
-              </Paper>
-              <Paper variant="outlined" sx={{ p: 1.5, flex: 1, borderRadius: 2 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Net sales
+                  Net sale
                 </Typography>
                 <Typography variant="h6" fontWeight={900}>
                   {fmt(netTotal)}
@@ -148,10 +118,29 @@ export const POSDailySummaryPage = ({
               </Paper>
               <Paper variant="outlined" sx={{ p: 1.5, flex: 1, borderRadius: 2 }}>
                 <Typography variant="caption" color="text.secondary">
-                  Source mix
+                  Tax collected
                 </Typography>
                 <Typography variant="h6" fontWeight={900}>
-                  {sourceCount} source{sourceCount === 1 ? '' : 's'}
+                  {fmt(totals.saleTax)}
+                </Typography>
+              </Paper>
+              <Paper variant="outlined" sx={{ p: 1.5, flex: 1, borderRadius: 2 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Average sale
+                </Typography>
+                <Typography variant="h6" fontWeight={900}>
+                  {fmt(avgDailySales)}
+                </Typography>
+              </Paper>
+              <Paper variant="outlined" sx={{ p: 1.5, flex: 1, borderRadius: 2 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Best day
+                </Typography>
+                <Typography variant="h6" fontWeight={900}>
+                  {bestDayRow?.day ?? '-'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {bestDayRow ? fmt(bestDayRow.totalSales) : '-'}
                 </Typography>
               </Paper>
             </Stack>
@@ -174,8 +163,6 @@ export const POSDailySummaryPage = ({
                   <TableCell sx={{ fontWeight: 600 }} align="right">
                     Net
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>Source</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>Notes</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -189,21 +176,6 @@ export const POSDailySummaryPage = ({
                     <TableCell align="right">{fmt(row.saleTax)}</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 600 }}>
                       {fmt(row.totalSales - row.saleTax)}
-                    </TableCell>
-                    <TableCell>
-                      <Stack spacing={0.25}>
-                        <Typography variant="body2" fontWeight={600}>
-                          {resolveSourceLabel(row)}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {resolveSourceDetail(row)}
-                        </Typography>
-                      </Stack>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">
-                        {row.notes || 'No note attached'}
-                      </Typography>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -221,8 +193,6 @@ export const POSDailySummaryPage = ({
                     <TableCell align="right" sx={{ fontWeight: 700 }}>
                       {fmt(netTotal)}
                     </TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>{sourceCount} sources</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>-</TableCell>
                   </TableRow>
                 )}
               </TableBody>

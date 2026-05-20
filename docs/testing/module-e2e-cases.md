@@ -20,8 +20,11 @@ This is the manual release smoke playbook until a browser E2E harness is introdu
 ## POS
 
 1. Import POS data and confirm rows appear in the table view.
-2. Switch between table, analytics, and AI views and confirm each loads without losing context.
+2. Switch between table, analytics, and **Sale Tax** views and confirm each loads without losing context.
 3. Trigger Google Sheets-backed POS sync and confirm imported data updates.
+4. Open **Sale Tax**, paginate years, and open a month **View Breakdown** modal.
+5. Confirm modal sections: Monthly POS Data (3 | 3 split), Tax Calculation (state + county + calculated total), Vendor Compensation, Payable Sales Tax, Daily POS Records with totals footer.
+6. Confirm required mapped fields (`highTax`, `lowTax`, `saleTax`, `gas`, `lottery`) drive the review — see [pos/sales-tax-review-workflow.md](../pos/sales-tax-review-workflow.md).
 
 ## Accounting
 

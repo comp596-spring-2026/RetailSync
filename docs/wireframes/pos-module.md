@@ -2,14 +2,29 @@
 
 Path: `/client/src/modules/pos/pages/POSWorkspacePage.tsx`
 
-The POS hub utilizes a universal control panel governing three distinct sub-views: Table, Analytics, and AI.
+The POS hub uses a shared date-range control panel and toolbar that govern three workspace views: **Table**, **Analytics**, and **Sale Tax**.
+
+## Shared Toolbar
+
+```text
++------------------------------------------------------------------------------------------+
+|  POS Workspace                          [ FROM ▼ ] [ TO ▼ ]   [Table][Analytics][Sale Tax] |
+|                                                                      [ Sync Now ]          |
++------------------------------------------------------------------------------------------+
+```
+
+- **Table** — daily record review
+- **Analytics** — KPI strip and charts
+- **Sale Tax** — Georgia / Troup County monthly sales tax review
+
+Detailed sales tax behavior: [docs/pos/sales-tax-review-workflow.md](../pos/sales-tax-review-workflow.md)
 
 ## Layout Sketch (Analytics Sub-View)
 
 ```text
 +------------------------------------------------------------------------------------------+
 |  📊 POS Analytics View                                               [ FROM ▼ ] [ TO ▼ ] |
-|  Analyze sales trends, distribution, and patterns.                   [Table][Anal][AI]   |
+|  Analyze sales trends, distribution, and patterns.              [Table][Analytics][Sale Tax] |
 |                                                                      [ (G) Sync Now ]    |
 |                                                                                          |
 | +--------------------------------------------------------------------------------------+ |
@@ -19,54 +34,74 @@ The POS hub utilizes a universal control panel governing three distinct sub-view
 |                                                                                          |
 | +----------------------------------------+ +-------------------------------------------+ |
 | |  Sales Trends (Line Chart)             | |  Tender Distribution (Pie Chart)          | |
-| |                                        | |                                           | |
-| |       _.-~-._                          | |             ,-***-,                       | |
-| |     ,/       \                         | |           /         \                     | |
-| |    /          `-_                      | |          |           |                    | |
-| |  ,-              `-.                   | |           \         /                     | |
-| | /                   \                  | |             `-***-'                       | |
 | +----------------------------------------+ +-------------------------------------------+ |
 +------------------------------------------------------------------------------------------+
 ```
 
-## Sub-View Wireframes (Table & AI)
+## Sub-View Wireframes
 
 ### Daily Summary View (`POSDailySummaryPage`)
-Filters explicitly change from charts to a paginated Data Table.
+
+Filters apply to a paginated data table of daily POS rows.
 
 ```text
 +------------------------------------------------------------------------------------------+
 |  📟 POS Table View                                                   [ FROM ▼ ] [ TO ▼ ] |
-|  Review daily POS records, totals, and mapped data.                  [Table][Anal][AI]   |
+|  Review daily POS records, totals, and mapped data.              [Table][Analytics][Sale Tax] |
 |                                                                      [ (G) Sync Now ]    |
 |                                                                                          |
 | +--------------------------------------------------------------------------------------+ |
-| | DATE        | GROSS SALES | CHECKS | TAX      | NET       | SOURCE                   | |
-| |-------------|-------------|--------|----------|-----------|--------------------------| |
-| | 2026-04-10  | $4,320.00   | 145    | $210.00  | $4,110.00 | GoogleSheets             | |
-| | 2026-04-09  | $3,900.50   | 120    | $180.25  | $3,720.25 | CSV Import               | |
-| | 2026-04-08  | $5,120.00   | 185    | $260.00  | $4,860.00 | GoogleSheets             | |
-| |                 < 1 2 3 >                            Total Net: $12,690.25         | |
+| | DATE     | HIGH TAX | LOW TAX | SALE TAX | GAS | LOTTERY | ...                       | |
+| |----------|----------|---------|----------|-----|---------|---------------------------| |
+| | 04/10/26 | $809.59  | $832.03 | $81.58   | ... | ...     |                           | |
 | +--------------------------------------------------------------------------------------+ |
 +------------------------------------------------------------------------------------------+
 ```
-*(On mobile, the table strictly uses `overflowX: auto` requiring horizontal swiping to access the far-right columns.)*
 
-### Assistant View (`POSAssistantPage`)
-Converts the bottom area to alert cards and a chat interface.
+*(On mobile, the table uses horizontal scroll for far-right columns.)*
+
+### Sale Tax View (`POSSaleTaxPage`)
+
+Year pager and monthly cards; card opens the breakdown modal.
 
 ```text
 +------------------------------------------------------------------------------------------+
-|  ✨ POS AI View                                                      [ FROM ▼ ] [ TO ▼ ] |
-|  Ask questions, compare patterns, and explore signals.               [Table][Anal][AI]   |
+|  Georgia Sales Tax Review — Troup County, GA                    [ ◀ 2026 ▶ ]             |
 |                                                                                          |
-| +--------------------------------------------------------------------------------------+ |
-| | ⚠️ Anomaly Detected                                                                  | |
-| | The cash difference on Friday the 14th was off by 4% compared to the 30-day moving.  | |
-| +--------------------------------------------------------------------------------------+ |
-|                                                                                          |
-| +--------------------------------------------------------------------------------------+ |
-| | Ask AI about POS Data...                                              [ SEND ✈ ]     | |
-| +--------------------------------------------------------------------------------------+ |
+| +------------------------+  +------------------------+  +------------------------+     |
+| | January 2026           |  | February 2026          |  | March 2026             |     |
+| | Total Tax Collected    |  | ...                    |  | ...                    |     |
+| | Vendor Compensation    |  |                        |  |                        |     |
+| | Payable Sales Tax      |  |                        |  |                        |     |
+| | [ View Breakdown → ]   |  |                        |  |                        |     |
+| +------------------------+  +------------------------+  +------------------------+     |
 +------------------------------------------------------------------------------------------+
 ```
+
+### Monthly Sales Tax Breakdown modal
+
+```text
++------------------------------------------------------------------------------------------+
+|  Monthly Sales Tax Breakdown                                                             |
+|  January 2026 — Troup County, GA                                                         |
+|                                                                                          |
+|  1. Monthly POS Data                                                                     |
+|  ┌─────────────────────────────┬─────────────────────────────┐                         |
+|  │ High Tax Food    $29,741.00 │ Gasoline Sales  $122,608.48 │                         |
+|  │ Low Tax Grocery  $31,661.05 │ Lottery Sales    $19,584.50 │                         |
+|  │ Total Tax Coll.   $2,512.58 │ Total Sales     $190,949.64 │                         |
+|  └─────────────────────────────┴─────────────────────────────┘                         |
+|                                                                                          |
+|  2. Tax Calculation                                                                      |
+|  ┌ State Tax ────────────────┬ County Tax ────────────────┐                              |
+|  │ Tax Base / Rate / Due     │ Tax Base / Rate / Due       │                              |
+|  └───────────────────────────┴─────────────────────────────┘                              |
+|  Calculated Sales Tax                                           $3,031.70                |
+|                                                                                          |
+|  3. Vendor Compensation   4. Payable Sales Tax   5. Daily POS Records                    |
+|                                                                                          |
+|                                                              [ Close ]                   |
++------------------------------------------------------------------------------------------+
+```
+
+Section formulas and field mapping: [sales-tax-review-workflow.md](../pos/sales-tax-review-workflow.md)
