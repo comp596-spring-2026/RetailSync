@@ -1,4 +1,4 @@
-import { InferSchemaType, Schema, model } from 'mongoose';
+import { InferSchemaType, Schema, Types, model } from 'mongoose';
 import { tenantPlugin } from './plugins/tenantPlugin';
 
 const proposalSchema = new Schema(
@@ -135,7 +135,7 @@ statementTransactionSchema.index({ companyId: 1, statementId: 1, statementCheckI
 statementTransactionSchema.plugin(tenantPlugin);
 
 export type StatementTransactionDoc = InferSchemaType<typeof statementTransactionSchema> & {
-  _id: string;
+  _id: Types.ObjectId;
 };
 export const StatementTransactionModel = model(
   'StatementTransaction',

@@ -583,8 +583,13 @@ export const postLedgerEntryToQuickBooks = async (
       throw new Error('Typed posting did not return txn id');
     }
 
+    const qbTxnType = proposal.qbTxnType ?? baseProposal.qbTxnType;
+    if (!qbTxnType) {
+      throw new Error('Missing proposal.qbTxnType after posting');
+    }
+
     const finalPreview = buildStatementPostingPreviewLines({
-      qbTxnType: proposal.qbTxnType,
+      qbTxnType,
       amount: entry.amount,
       direction: entry.type,
       bankAccountLabel: bankLabel,
@@ -609,11 +614,11 @@ export const postLedgerEntryToQuickBooks = async (
     );
     await syncStatementTransactionPosting(companyId, entry.statementTransactionId, 'posted', qbTxnId, undefined);
 
-    const registerSummary = finalPreview[0] ?? `Posted to QuickBooks (${proposal.qbTxnType}).`;
+    const registerSummary = finalPreview[0] ?? `Posted to QuickBooks (${qbTxnType}).`;
     return {
       ok: true,
       qbTxnId,
-      qbTxnType: proposal.qbTxnType,
+      qbTxnType,
       matchedExisting,
       registerSummary,
       previewLines: finalPreview

@@ -1,9 +1,12 @@
 import { inferDefaultQuickBooksTxnType } from '@retailsync/shared';
-import type { HydratedDocument, Types } from 'mongoose';
+import type { HydratedDocument } from 'mongoose';
 import { LedgerEntryModel } from '../models/LedgerEntry';
-import { StatementCheckModel } from '../models/StatementCheck';
+import { StatementCheckModel, type StatementCheckDoc } from '../models/StatementCheck';
 import { StatementTransactionModel, type StatementTransactionDoc } from '../models/StatementTransaction';
 import { buildMatchingProposal } from './matchingEngine';
+
+type StatementTxn = HydratedDocument<StatementTransactionDoc>;
+type StatementCheck = HydratedDocument<StatementCheckDoc>;
 
 const firstNonBlank = (...values: Array<unknown>): string => {
   for (const value of values) {
@@ -21,22 +24,7 @@ const clearedCheckLookupKey = (args: {
   postDate?: string;
 }) => `${(args.checkNumber ?? '').trim()}::${Number(args.amount ?? 0).toFixed(2)}::${args.postDate ?? ''}`;
 
-const readCheckFields = (check: {
-  extracted?: {
-    checkNumber?: string | null;
-    date?: string | null;
-    payeeName?: string | null;
-    amount?: number | null;
-    memo?: string | null;
-  };
-  autoFill?: {
-    checkNumber?: string | null;
-    date?: string | null;
-    payeeName?: string | null;
-    amount?: number | null;
-    memo?: string | null;
-  };
-}) => {
+const readCheckFields = (check: Pick<StatementCheck, 'extracted' | 'autoFill'>) => {
   const checkNumber = firstNonBlank(check.extracted?.checkNumber, check.autoFill?.checkNumber);
   const postDate = firstNonBlank(check.extracted?.date, check.autoFill?.date);
   const payeeName = firstNonBlank(check.extracted?.payeeName, check.autoFill?.payeeName);
@@ -48,10 +36,10 @@ const readCheckFields = (check: {
 };
 
 const backfillCheckTransactionLink = async (args: {
-  companyId: Types.ObjectId;
+  companyId: string;
   statementId: string;
-  check: { _id: { toString(): string }; match?: { statementTransactionId?: string | null; reasons?: string[] } };
-  entry: HydratedDocument<StatementTransactionDoc>;
+  check: StatementCheck;
+  entry: StatementTxn;
   statementPdfPath?: string;
   checkFrontPath?: string;
 }) => {
@@ -129,12 +117,12 @@ const backfillCheckTransactionLink = async (args: {
 };
 
 const findClearedCheckTransaction = async (args: {
-  companyId: Types.ObjectId;
+  companyId: string;
   statementId: string;
   checkNumber?: string;
   amount: number;
   postDate?: string;
-}) => {
+}): Promise<StatementTxn | null> => {
   const key = clearedCheckLookupKey(args);
   const candidates = await StatementTransactionModel.find({
     companyId: args.companyId,
@@ -154,22 +142,17 @@ const findClearedCheckTransaction = async (args: {
 };
 
 const createStatementEntryFromCheck = async (args: {
-  companyId: Types.ObjectId;
+  companyId: string;
   statementId: string;
   checkId: string;
-  check: {
-    extracted?: StatementCheckDocFields['extracted'];
-    autoFill?: StatementCheckDocFields['autoFill'];
-    gcs?: { frontPath?: string | null };
-    artifacts?: { geminiPath?: string | null; pageNumber?: number | null };
-  };
+  check: StatementCheck;
   statementBankAccountId?: string;
   statementPdfPath?: string;
-}) => {
+}): Promise<StatementTxn> => {
   const fields = readCheckFields(args.check);
   const postDate = fields.postDate || new Date().toISOString().slice(0, 10);
   const matchingProposal = await buildMatchingProposal({
-    companyId: args.companyId.toString(),
+    companyId: args.companyId,
     description: fields.description,
     merchant: fields.payeeName || undefined,
     amount: fields.amount,
@@ -278,29 +261,12 @@ const createStatementEntryFromCheck = async (args: {
   return createdTxn;
 };
 
-type StatementCheckDocFields = {
-  extracted?: {
-    checkNumber?: string | null;
-    date?: string | null;
-    payeeName?: string | null;
-    amount?: number | null;
-    memo?: string | null;
-  };
-  autoFill?: {
-    checkNumber?: string | null;
-    date?: string | null;
-    payeeName?: string | null;
-    amount?: number | null;
-    memo?: string | null;
-  };
-};
-
 export type ResolveStatementEntryForCheckResult =
-  | { ok: true; entry: HydratedDocument<StatementTransactionDoc>; linked: 'existing' | 'matched' | 'created' }
+  | { ok: true; entry: StatementTxn; linked: 'existing' | 'matched' | 'created' }
   | { ok: false; error: string; status: number; details?: Record<string, unknown> };
 
 export const resolveStatementEntryForCheckSuggestion = async (args: {
-  companyId: Types.ObjectId;
+  companyId: string;
   statementId: string;
   checkId: string;
   statement?: { bankAccountId?: string | null; gcs?: { pdfPath?: string | null } };

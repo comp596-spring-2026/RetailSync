@@ -1044,16 +1044,20 @@ export const createQuickBooksHubChartAccount = async (args: {
   companyId: string;
   name: string;
   accountNumber?: string;
-  accountKind?: 'bank' | 'expense' | 'income';
+  accountKind?: 'bank' | 'expense' | 'income' | 'deposit_line';
   detailType?: 'Checking' | 'Savings' | 'CashOnHand';
 }) => {
   const accountKind = args.accountKind ?? 'bank';
   const accountType =
-    accountKind === 'expense' ? 'Expense' : accountKind === 'income' ? 'Income' : 'Bank';
+    accountKind === 'expense'
+      ? 'Expense'
+      : accountKind === 'income' || accountKind === 'deposit_line'
+        ? 'Income'
+        : 'Bank';
   const accountSubType =
     accountKind === 'expense'
       ? 'OtherBusinessExpenses'
-      : accountKind === 'income'
+      : accountKind === 'income' || accountKind === 'deposit_line'
         ? 'SalesOfProductIncome'
         : args.detailType ?? 'Checking';
 

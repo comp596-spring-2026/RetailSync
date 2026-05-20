@@ -2428,9 +2428,9 @@ export const updateStatementSuggestionReview = async (req: Request, res: Respons
     if (!entry) return fail(res, 'Suggestion not found', 404);
   } else {
     const resolved = await resolveStatementEntryForCheckSuggestion({
-      companyId: req.companyId,
-      statementId: req.params.id,
-      checkId: req.params.suggestionId,
+      companyId: String(req.companyId),
+      statementId: String(req.params.id),
+      checkId: String(req.params.suggestionId),
       statement: {
         bankAccountId: statement.bankAccountId,
         gcs: { pdfPath: statement.gcs?.pdfPath }
