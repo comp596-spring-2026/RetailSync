@@ -1,3 +1,4 @@
+import type { Request, Response } from 'express';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { memberPermissions } from '../utils/defaultPermissions';
 
@@ -29,8 +30,8 @@ describe('requirePermission dashboard.view', () => {
     findOneMock.mockResolvedValue({ name: 'Member', isSystem: true, permissions });
 
     const middleware = requirePermission('dashboard', 'view');
-    const req = { companyId: 'c1', roleId: 'r1' } as never;
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as never;
+    const req = { companyId: 'c1', roleId: 'r1' } as unknown as Request;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
     const next = vi.fn();
 
     await middleware(req, res, next);
@@ -51,13 +52,14 @@ describe('requirePermission dashboard.view', () => {
     findOneMock.mockResolvedValue({ name: 'Custom', isSystem: false, permissions });
 
     const middleware = requirePermission('dashboard', 'view');
-    const req = { companyId: 'c1', roleId: 'r1' } as never;
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as never;
+    const statusMock = vi.fn().mockReturnThis();
+    const req = { companyId: 'c1', roleId: 'r1' } as unknown as Request;
+    const res = { status: statusMock, json: vi.fn() } as unknown as Response;
     const next = vi.fn();
 
     await middleware(req, res, next);
 
     expect(next).not.toHaveBeenCalled();
-    expect(res.status).toHaveBeenCalledWith(403);
+    expect(statusMock).toHaveBeenCalledWith(403);
   });
 });

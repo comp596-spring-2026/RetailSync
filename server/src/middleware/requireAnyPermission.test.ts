@@ -1,3 +1,4 @@
+import type { Request, Response } from 'express';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { adminPermissions, memberPermissions } from '../utils/defaultPermissions';
 
@@ -44,8 +45,8 @@ describe('requireAnyPermission', () => {
       { moduleKey: 'pos', action: 'import' }
     ]);
 
-    const req = { companyId: 'c1', roleId: 'r1' } as never;
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as never;
+    const req = { companyId: 'c1', roleId: 'r1' } as unknown as Request;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
     const next = vi.fn();
 
     await middleware(req, res, next);
@@ -74,8 +75,8 @@ describe('requireAnyPermission', () => {
       { moduleKey: 'pos', action: 'import' }
     ]);
 
-    const req = { companyId: 'c1', roleId: 'r1' } as never;
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as never;
+    const req = { companyId: 'c1', roleId: 'r1' } as unknown as Request;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
     const next = vi.fn();
 
     await middleware(req, res, next);
@@ -111,13 +112,14 @@ describe('requireAnyPermission', () => {
       { moduleKey: 'pos', action: 'import' }
     ]);
 
-    const req = { companyId: 'c1', roleId: 'r1' } as never;
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as never;
+    const statusMock = vi.fn().mockReturnThis();
+    const req = { companyId: 'c1', roleId: 'r1' } as unknown as Request;
+    const res = { status: statusMock, json: vi.fn() } as unknown as Response;
     const next = vi.fn();
 
     await middleware(req, res, next);
 
     expect(next).not.toHaveBeenCalled();
-    expect(res.status).toHaveBeenCalledWith(403);
+    expect(statusMock).toHaveBeenCalledWith(403);
   });
 });
