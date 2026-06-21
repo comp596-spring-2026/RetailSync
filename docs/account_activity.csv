@@ -1,0 +1,20 @@
+Description,Activity Type,Date,Term,Amount
+"Payments ACH E-Check",Payment,2026-03-02,Spring 2026,-50
+"Graduation Fee",Charge,2026-02-06,Spring 2026,50
+"Payments ACH E-Check",Payment,2026-01-21,Spring 2026,-2300
+"Ext Ed - MS Comp Science",Charge,2025-12-10,Spring 2026,1725
+"Ext Ed - MS Comp Science",Charge,2025-12-01,Spring 2026,575
+"Payments ACH E-Check",Payment,2025-12-09,Winter 2026,-1275
+"EU Intersession - PBAC",Charge,2025-12-03,Winter 2026,1275
+"Payments ACH E-Check",Payment,2025-07-25,Fall 2025,-5750
+"Ext Ed - MS Comp Science",Charge,2025-06-01,Fall 2025,5750
+"Payments ACH E-Check",Payment,2025-07-01,Summer 2025,-3175
+"Returned Payment Fee",Charge,2025-06-30,Summer 2025,25
+"Returned Payments",Charge,2025-06-30,Summer 2025,3150
+"Payments ACH E-Check",Payment,2025-05-28,Summer 2025,-3150
+"Ext Ed - MS Comp Science",Charge,2025-05-01,Summer 2025,3150
+"Ext Ed - MS Comp Science",Charge,2025-02-03,Spring 2025,-1575
+"Ext Ed - MS Comp Science",Charge,2025-02-03,Spring 2025,1575
+"Payments ACH E-Check",Payment,2025-01-06,Spring 2025,-4475
+"Ext Ed - MS Comp Science",Charge,2024-12-01,Spring 2025,4725
+"Intent to Enroll - MS Programs",Payment,2024-11-20,Spring 2025,-250
