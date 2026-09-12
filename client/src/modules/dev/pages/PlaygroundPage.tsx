@@ -713,7 +713,7 @@ const CropPresetLab = () => {
                     <Button size="small" variant="outlined" onClick={() => loadPreset(preset)}>
                       Load
                     </Button>
-                    <IconButton size="small" color="error" onClick={() => deletePreset(preset.id)}>
+                    <IconButton size="small" color="error" aria-label="Delete preset" onClick={() => deletePreset(preset.id)}>
                       <DeleteOutlineIcon fontSize="small" />
                     </IconButton>
                   </Stack>
