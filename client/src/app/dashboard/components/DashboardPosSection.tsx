@@ -114,7 +114,9 @@ export const DashboardPosSection = ({
 
   const { data } = state;
   const { overview, totals, chartSeries } = data;
-  const taxCollected = totals.highTax + totals.lowTax + totals.saleTax;
+  // highTax and lowTax are taxable sales amounts (their sum is totalSales), not tax;
+  // saleTax is the tax actually collected at the register.
+  const taxCollected = totals.saleTax;
 
   return (
     <RetailSurfaceCard>
