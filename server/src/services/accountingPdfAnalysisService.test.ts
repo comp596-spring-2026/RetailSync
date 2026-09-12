@@ -7,6 +7,11 @@ import {
   extractPdfFallbackText,
 } from './accountingPdfAnalysisService';
 
+// The statement fixture is a private document and is not committed; its test runs only with a local copy.
+const hasFixturePdf = fs.existsSync(
+  path.resolve(process.cwd(), '../shared/src/accounting/testStatmentPDF.pdf')
+);
+
 describe('accountingPdfAnalysisService', () => {
   const hasPdftotext = (() => {
     try {
@@ -83,7 +88,7 @@ describe('accountingPdfAnalysisService', () => {
     expect(result.source).toBe('unknown');
   });
 
-  it('prefers statement ending text over PDF metadata for the project fixture', () => {
+  it.skipIf(!hasFixturePdf)('prefers statement ending text over PDF metadata for the project fixture', () => {
     const pdfPath = path.resolve(process.cwd(), '../shared/src/accounting/testStatmentPDF.pdf');
     const pdfBuffer = fs.readFileSync(pdfPath);
 

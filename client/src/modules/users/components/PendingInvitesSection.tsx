@@ -116,6 +116,7 @@ export const PendingInvitesSection = ({ invites, canRevoke, mutating, onRevoke }
                           <Tooltip title="Revoke invite">
                             <span>
                               <IconButton
+                                aria-label="Revoke invite"
                                 size="small"
                                 color="error"
                                 disabled={mutating}

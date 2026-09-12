@@ -1,335 +1,198 @@
 <p align="center">
-  <img src="client/public/brand/BigLogo.png" alt="RetailSync Big Logo" width="320" />
+  <img src="docs/assets/banner.svg" alt="RetailSync: POS, bank statements and QuickBooks in one workspace" width="100%" />
 </p>
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![pnpm](https://img.shields.io/badge/pnpm-10.x-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
-[![React](https://img.shields.io/badge/React-18.x-149ECA?logo=react&logoColor=white)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
-[![Material UI](https://img.shields.io/badge/MUI-6.x-007FFF?logo=mui&logoColor=white)](https://mui.com/)
-[![Express](https://img.shields.io/badge/Express-4.x-000000?logo=express&logoColor=white)](https://expressjs.com/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-7.x-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
-
-# RetailSync
-
-RetailSync is a multi-tenant retail operations platform that brings authentication, permissions, POS data, accounting workflows, and third-party integrations into one reviewable system.
-
-## Problem Statement
-
-Retail businesses often have operational data split across multiple tools: POS exports, bank statements, accounting review workflows, user/role management, and external systems like QuickBooks and Google Sheets. That fragmentation makes reconciliation slower, increases manual errors, and makes it harder to explain or audit how financial records were produced.
-
-RetailSync addresses that problem by giving one company-scoped application a consistent place to handle access control, operational data, accounting workflows, and integration boundaries.
-
-## High-Level Project Description
-
-RetailSync is a TypeScript monorepo for a retail operations SaaS with:
-- auth and onboarding
-- role-based company access
-- POS imports and summaries
-- bank statement processing and review
-- QuickBooks operational workflows
-- Google Sheets and QuickBooks integration management
-
-The current active product surface is intentionally focused on `Dashboard`, `POS`, `Accounting`, `QuickBooks`, `Settings`, and `Access`.
-
-## Current Product Shape
-
-### Authentication and Onboarding
-- Email/password register and login
-- Google OAuth sign-in
-- Email verification
-- Forgot/reset password
-- Invite acceptance
-- Create company
-- Join company
-- QuickBooks-assisted company onboarding
-
-### Dashboard Workspaces
-- `Dashboard`: company and account context
-- `POS`: import, table, analytics, Georgia sales tax review (Troup County)
-- `Accounting`: statements list and statement detail
-- `QuickBooks`: hub, accounts, contacts, sales, money, operations, reports, tax
-- `Settings`: Google Sheets and QuickBooks integration management
-- `Access`: users and roles
-
-### Important Notes
-- Accounting is intentionally narrowed to statements in the visible app shell.
-- QuickBooks is a separate workspace, not an accounting tab.
-- Procurement remains hidden/not release-ready.
-
-## What The System Does End-To-End
-
-1. A user authenticates with email/password or Google OAuth.
-2. The server resolves company membership and enforces tenant-scoped RBAC.
-3. The user navigates across focused workspaces for POS, accounting, QuickBooks, settings, and access.
-4. In accounting, the user uploads a bank statement PDF, which is stored in company-scoped cloud storage.
-5. Background jobs render pages, extract text/layout, build structured artifacts, and update statement/check progress.
-6. The user reviews the statement detail workspace, inspects artifacts and validation signals, and follows the workflow downstream into ledger and QuickBooks-related operations.
-
-## Architecture At A Glance
-
-### System Overview
-
-```mermaid
-flowchart LR
-  User["Retail user"] --> Client["React client\nVite + Redux Toolkit"]
-  Client -->|"HTTPS + JWT"| API["Express API"]
-  Client -->|"refresh cookie"| API
-  Client --> Shared["Shared schemas\n@retailsync/shared"]
-  API --> Shared
-  API --> Mongo[("MongoDB")]
-  API --> Storage["Google Cloud Storage"]
-  API --> Queue["Background jobs / task runners"]
-  API --> Sheets["Google Sheets + OAuth"]
-  API --> QuickBooks["QuickBooks OAuth + APIs"]
-```
-
-### Strongest Demo Workflow
-
-```mermaid
-flowchart TD
-  A["Login / company-scoped access"] --> B["Open Accounting workspace"]
-  B --> C["Upload statement PDF"]
-  C --> D["Store original file in cloud storage"]
-  D --> E["Queue async extraction + structuring jobs"]
-  E --> F["Generate OCR/layout/check artifacts"]
-  F --> G["Review statement detail, validation, and progress"]
-  G --> H["Continue into ledger / QuickBooks follow-through"]
-```
-
-### Visual Docs To Review First
-
-- System overview and runtime model: [docs/architecture/system-overview.md](docs/architecture/system-overview.md)
-- Statement pipeline deep dive: [docs/architecture/statement-pdf-processing-workflow.md](docs/architecture/statement-pdf-processing-workflow.md)
-- App shell wireframe: [docs/wireframes/app-shell.md](docs/wireframes/app-shell.md)
-- POS workspace wireframe: [docs/wireframes/pos-module.md](docs/wireframes/pos-module.md)
-- POS sales tax workflow: [docs/pos/sales-tax-review-workflow.md](docs/pos/sales-tax-review-workflow.md)
-- Accounting workspace wireframe: [docs/wireframes/accounting-module.md](docs/wireframes/accounting-module.md)
-- QuickBooks workspace wireframe: [docs/wireframes/quickbooks-module.md](docs/wireframes/quickbooks-module.md)
-
-## Why The Architecture Looks This Way
-
-- Multi-tenant isolation keeps company data scoped and queryable by tenant boundary instead of relying on client-side trust.
-- Server-authoritative RBAC keeps permissions enforceable at the API boundary and consistent across the UI.
-- The monorepo plus shared schemas reduce drift between frontend state, backend validation, and domain types.
-- Async statement processing separates long-running PDF/OCR/check work from the interactive request path.
-- External integrations are isolated behind service layers so Google and QuickBooks behavior can fail independently without collapsing the whole app.
-
-## Recommended Final Demo Flow
-
-1. Start with login and company-scoped navigation.
-2. Briefly show the platform surface: Dashboard, POS, Accounting, QuickBooks, Settings, and Access.
-3. Enter Accounting and show the statements-first workflow.
-4. Upload or open a statement and show processing status, artifacts, validation, and review controls.
-5. Transition into the downstream QuickBooks workspace to show how accounting review connects to operational actions.
-6. Use POS, settings, or access pages only as short supporting proof points, not the main storyline.
-
-## Grading-Focused Documentation Map
-
-- System overview: [docs/architecture/system-overview.md](docs/architecture/system-overview.md)
-- Workflow reference: [docs/architecture/workflows-and-usage.md](docs/architecture/workflows-and-usage.md)
-- POS sales tax review: [docs/pos/sales-tax-review-workflow.md](docs/pos/sales-tax-review-workflow.md)
-- Statement pipeline: [docs/architecture/statement-pdf-processing-workflow.md](docs/architecture/statement-pdf-processing-workflow.md)
-- Testing strategy: [docs/testing/testing-strategy.md](docs/testing/testing-strategy.md)
-- Execution status: [docs/status.md](docs/status.md)
-
-For presentation prep, use the aligned slide/story outline in [docs/presentation/final-presentation-outline.md](docs/presentation/final-presentation-outline.md).
-
-## Tech Stack
-
-- Frontend: React, Vite, Redux Toolkit, Material UI
-- Backend: Express, Mongoose, Zod, JWT
-- Shared contracts: shared TypeScript + Zod package
-- Testing: Vitest, Supertest, mongodb-memory-server
-- Integrations: Google Sheets, Google OAuth, QuickBooks OAuth/API
-- Tooling: pnpm workspaces, Docker Compose, GitHub Actions
-
-## Monorepo Structure
-
-```text
-RetailSync/
-  client/        # React + Vite application
-  server/        # Express API
-  shared/        # Shared types, schemas, constants
-  docs/          # Status, architecture, wireframes, testing docs
-```
-
-## Official Architecture Diagram
-
-The official architecture diagram for this repo is the local-development Docker topology used in the app and supporting docs.
-
-- **D2 Architectural Definition**: [docs/diagrams/retailsync-local-architecture.d2](docs/diagrams/retailsync-local-architecture.d2)
-- **Rendered official diagram asset**: [client/public/architecture-diagram.png](client/public/architecture-diagram.png)
+<p align="center"><strong>A multi-tenant retail operations app that puts POS sales, bank statement review and QuickBooks bookkeeping in one company workspace.</strong></p>
 
 <p align="center">
-  <img src="client/public/architecture-diagram.png" alt="RetailSync official local architecture diagram" width="1100" />
+  <a href="https://trupalpatel.com/projects/retailsync"><img src="https://img.shields.io/badge/Case_study-trupalpatel.com-3D9C74?style=flat-square&amp;labelColor=050505" alt="Case study" /></a>
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/React-149ECA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React" />
+  <img src="https://img.shields.io/badge/MUI-007FFF?style=flat-square&amp;logo=mui&amp;logoColor=white" alt="MUI" />
+  <img src="https://img.shields.io/badge/Express-000000?style=flat-square&amp;logo=express&amp;logoColor=white" alt="Express" />
+  <img src="https://img.shields.io/badge/MongoDB-47A248?style=flat-square&amp;logo=mongodb&amp;logoColor=white" alt="MongoDB" />
+  <img src="https://img.shields.io/badge/License-MIT-262626?style=flat-square" alt="License: MIT" />
 </p>
 
-This keeps the architecture story consistent across the README, the public architecture page, and the detailed architecture docs.
+<p align="center">
+  <a href="https://trupalpatel.com/projects/retailsync"><strong>Case study</strong></a> ·
+  <a href="https://trupalpatel.com"><strong>Portfolio</strong></a>
+</p>
 
-## Routing Summary
+---
 
-```mermaid
-flowchart TD
-  Start["App Entry"] --> Public{Public route?}
-  Public -- "yes" --> Auth["/login /register /accept-invite /verify-email /forgot-password /reset-password"]
-  Public -- "no" --> Protected{Has session?}
-  Protected -- "no" --> Login["/login"]
-  Protected -- "yes" --> Company{Has company?}
-  Company -- "no" --> Onboarding["/onboarding/*"]
-  Company -- "yes" --> Dashboard["/dashboard/*"]
-  Dashboard --> Accounting["/dashboard/accounting/statements"]
-  Dashboard --> QuickBooks["/dashboard/quickbooks/*"]
-```
+## Overview
 
-## QuickBooks Workspace
+Small retailers keep their numbers in separate places: POS exports, bank statements, spreadsheets and QuickBooks. RetailSync gives each company one workspace for all of them. It imports daily POS data, turns uploaded bank statement PDFs into transactions you can review, and reads and writes QuickBooks records directly. Every request is scoped to the user's company and checked against their role on the server.
 
-The QuickBooks workspace is organized as a hub plus focused pages:
-- Accounts
-- Contacts
-- Sales
-- Money
-- Operations
-- Reports
-- Tax
+> Built as a team project for COMP 596 (Spring 2026) in the [comp596-spring-2026](https://github.com/comp596-spring-2026) organization. Trupal's role: full-stack development of the client, API, integrations and deployment; he authored the commit history in this repository.
 
-Implemented operational flows include:
-- customer CRUD
-- vendor CRUD
-- invoice CRUD
-- payment CRUD
-- deposit CRUD
-- check CRUD
-- expense CRUD
-- transfer CRUD
+## Features
 
-## Local Development
+- **Company workspaces**: email/password and Google sign-in, email verification and password reset, invites, and create-or-join company onboarding (including a QuickBooks-assisted path).
+- **Server-side access control**: tenant-scoped data and role-based permissions, with a roles editor built on product capabilities (show POS, upload statements, post to QuickBooks and so on).
+- **Dashboard**: 30-day POS KPIs and sales trend next to a year-to-date QuickBooks summary.
+- **POS workspace**: CSV or Google Sheets import with a column-matching wizard, a daily table, an analytics view, and a Georgia / Troup County monthly sales tax review.
+- **Bank statement processing**: statement PDFs upload straight to Cloud Storage. Background jobs extract the PDF text and layout, render pages, crop check images and validate section totals. Check fields can fall back to Tesseract OCR (`USE_TESSERACT_FALLBACK`), and Gemini drafts posting suggestions when a key is configured. The review workspace has Overview, Review Transactions and Source Proof tabs.
+- **QuickBooks workspace**: OAuth connection and create/read/update/delete for customers, vendors, invoices, payments, deposits, checks, expenses and transfers, plus accounts, registers, reports and tax.
+- **Integration settings**: Google Sheets and QuickBooks cards with connection and token health, mapping summary, sync, and soft or hard reset.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screen-dashboard.svg" alt="Dashboard: POS KPIs for the last 30 days, the sales trend chart and the QuickBooks year-to-date summary" />
+      <br /><sub><b>Dashboard</b>: POS KPIs, sales trend and QuickBooks summary</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screen-pos-analytics.svg" alt="POS analytics view: KPI overview, revenue distribution donut and daily trend chart" />
+      <br /><sub><b>POS analytics</b>: KPI overview, revenue distribution and daily trend</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screen-statement-review.svg" alt="Bank statement detail on the Review Transactions tab, with the Deposits section expanded" />
+      <br /><sub><b>Statement review</b>: parsed deposits with proposed and approved rows</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screen-roles.svg" alt="Access workspace, Roles tab: capability checkboxes for a custom Store Manager role" />
+      <br /><sub><b>Roles and permissions</b>: capability editor for a custom role</sub>
+    </td>
+  </tr>
+</table>
+
+<sub>Screens are recreated from the app's real UI in SVG, filled with fictional demo data (Magnolia Crossing Market is not a real store).</sub>
+
+## Architecture
+
+<p align="center">
+  <img src="docs/assets/architecture.svg" alt="RetailSync architecture" width="100%" />
+</p>
+
+The React client calls the Express API over HTTPS with a JWT access token and a refresh cookie. Statement PDFs go from the browser straight to Google Cloud Storage through a signed URL. The API then runs the statement pipeline, inline in local development and through Cloud Tasks in production, and stores the results in MongoDB. Google Sheets, QuickBooks, Vision/Gemini and SMTP sit behind their own service layers, so each can fail without taking down the rest of the app.
+
+More detail: [system overview](docs/architecture/system-overview.md), [statement PDF pipeline](docs/architecture/statement-pdf-processing-workflow.md), [API reference](docs/backend/api-reference.md), [routing and permission gates](docs/frontend/routing-and-permission-gates.md) and the D2 source for the local Docker topology ([docs/diagrams/retailsync-local-architecture.d2](docs/diagrams/retailsync-local-architecture.d2), rendered with `pnpm diagram:architecture` when [d2](https://d2lang.com) is installed).
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Client | React 18, Vite 6, TypeScript, Material UI 6 + MUI X, Redux Toolkit + redux-persist, react-hook-form + Zod, ApexCharts |
+| API | Node.js 22, Express 4, Mongoose 8, Zod, JWT, node-cron |
+| Statement processing | pdfjs-dist, pdf-parse, @napi-rs/canvas, sharp, Tesseract.js; optional Google Vision / Gemini |
+| Data | MongoDB 7, Google Cloud Storage |
+| Integrations | Google OAuth + Sheets API, QuickBooks Online OAuth + API, SMTP |
+| Tooling | pnpm workspaces, Vitest, Supertest, mongodb-memory-server, Docker Compose + nginx, GitHub Actions (Cloud Run + Firebase Hosting deploys) |
+
+## Getting started
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm 10+
-- MongoDB or Docker Desktop
+- Node.js 22 (see `.nvmrc`; run `nvm use`)
+- pnpm 10
+- MongoDB 7, or Docker Desktop (`make dev` starts the `mongo` service if nothing is listening on port 27017)
+- For the integrations only: a Google Cloud project with a Cloud Storage bucket (statement uploads), a Google OAuth client, a QuickBooks developer app and an SMTP account
 
 ### Install
 
 ```bash
-pnpm install
+git clone https://github.com/comp596-spring-2026/RetailSync.git
+cd RetailSync
+nvm use
+pnpm install        # if pnpm blocks build scripts: make approve-builds
 ```
 
-### Start
+### Environment variables
 
 ```bash
-pnpm dev
+cp server/.env.example server/.env
+cp client/.env.example client/.env
+openssl rand -base64 32   # paste the output into ENCRYPTION_KEY in server/.env
 ```
 
-Default local endpoints:
-- client: `http://localhost:4630`
-- server: `http://localhost:4000`
-- health: `http://localhost:4000/health`
+The server refuses to start without a valid `ENCRYPTION_KEY` (a base64-encoded 32-byte key). The JWT signing secrets and the internal task secret are derived from it.
 
-### Recommended Validation
+| Variable | Required | Description |
+|---|---|---|
+| `PORT` | Yes | API port (`4000` locally) |
+| `MONGO_URI` | Yes | MongoDB connection string |
+| `CLIENT_URL` | Yes | Client origin, used for CORS and the redirect back after QuickBooks OAuth |
+| `ENCRYPTION_KEY` | Yes | Base64 32-byte key; also derives the JWT and task secrets |
+| `NODE_ENV` | No | `development` or `production` |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | No | Google sign-in and Sheets OAuth |
+| `GOOGLE_AUTH_REDIRECT_URI`, `GOOGLE_INTEGRATION_REDIRECT_URI` | No | OAuth callback URLs for sign-in and the Sheets integration |
+| `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_INTEGRATION_REDIRECT_URI` | No | QuickBooks Online OAuth app |
+| `GCS_BUCKET_NAME` | No | Cloud Storage bucket for statement PDFs and artifacts (needed for statement upload) |
+| `TASKS_MODE` | No | `inline` (default) or `cloud`; cloud mode also reads `GCP_PROJECT_ID`, `GCP_REGION`, `TASKS_QUEUE_PIPELINE`, `TASKS_QUEUE_SYNC`, `TASKS_OIDC_SERVICE_ACCOUNT_EMAIL`, `INTERNAL_TASKS_ENDPOINT` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_FROM_NAME` | No | Outgoing email for verification, resets and invites |
+| `STATEMENT_OCR_PROVIDER`, `STATEMENT_GEMINI_API_KEY` | No | Statement OCR provider setting (default `offline`) and the Gemini key for AI posting suggestions |
+| `USE_TESSERACT_FALLBACK` | No | `true` runs Tesseract OCR on check images when the PDF text is missing the payee or memo |
+| `API_SERVICE_NAME`, `DEBUG_VERBOSE_API` | No | Log labelling and verbose request tracing |
+| `ENABLE_LOCAL_CRON`, `LOCAL_CRON_EXPR` | No | Outside production, run the Google Sheets POS sync on a node-cron schedule (default `0 2 * * *`) |
+| `VITE_API_URL` (client) | No | API base URL for the client, e.g. `http://localhost:4000/api` |
+
+Direct browser uploads to the statement bucket also need a CORS policy on it: `pnpm --filter @retailsync/server run storage:cors:accounting -- --apply`.
+
+### Run
 
 ```bash
-pnpm -r typecheck
-pnpm -r build
-pnpm -r test
+pnpm dev        # or: make dev (also starts MongoDB in Docker if needed)
 ```
 
-## Environment
+The client runs on http://localhost:4630 and the API on http://localhost:4000 (health check at `/health`).
 
-Important server env:
-- `PORT`
-- `MONGO_URI`
-- `CLIENT_URL`
-- `ENCRYPTION_KEY`
-- `GOOGLE_OAUTH_CLIENT_ID`
-- `GOOGLE_OAUTH_CLIENT_SECRET`
-- `GOOGLE_AUTH_REDIRECT_URI`
-- `QUICKBOOKS_CLIENT_ID`
-- `QUICKBOOKS_CLIENT_SECRET`
-- `QUICKBOOKS_INTEGRATION_REDIRECT_URI`
-- `SMTP_HOST`
-- `SMTP_PORT`
-- `SMTP_SECURE`
-- `SMTP_USER`
-- `SMTP_PASS`
-- `SMTP_FROM`
+Full stack in Docker: `make start` serves the client on http://localhost:8080 and the API on port 4000. `docker-compose.yml` falls back to a placeholder `ENCRYPTION_KEY` that is only meant for a local demo; export your own `ENCRYPTION_KEY` before running it anywhere else. `make help` lists every shortcut. For sample data, see [docs/operations/seeding-and-sample-data.md](docs/operations/seeding-and-sample-data.md).
 
-## Extended Engineering Docs
+Checks and tests:
 
-- Backend API: [docs/backend/api-reference.md](docs/backend/api-reference.md)
-- Frontend routing: [docs/frontend/routing-and-permission-gates.md](docs/frontend/routing-and-permission-gates.md)
-- Testing matrix: [docs/testing/module-test-matrix.md](docs/testing/module-test-matrix.md)
-- Wireframes: [docs/wireframes](docs/wireframes)
+```bash
+pnpm typecheck
+pnpm test                                           # unit tests in every package
+pnpm --filter @retailsync/server test:integration   # API integration tests (mongodb-memory-server)
+pnpm build
+```
 
-## Project Policies
+The statement-extraction fixture tests run only when a local statement PDF exists at `shared/src/accounting/testStatmentPDF.pdf`. That path is gitignored and no statement ships with the repo, so those tests skip by default.
 
-- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-- Security policy: [SECURITY.md](SECURITY.md)
+### Contributing
 
-## Agent And Skill System
+See [CONTRIBUTING](.github/CONTRIBUTING.md), the [code of conduct](CODE_OF_CONDUCT.md), the [security policy](SECURITY.md) and the [release flow](RELEASE.md). Work lands on `development` and is released to `production`.
 
-RetailSync includes a repo-level multi-agent operating system for Codex, Cursor, and orchestrated agent workflows.
-
-### Main entrypoint
-
-- Agent system map: [.agents/README.md](.agents/README.md)
-
-### Layer agents
-
-- Manager: [.agents/manager/AGENTS.md](.agents/manager/AGENTS.md)
-- Database: [.agents/database/AGENTS.md](.agents/database/AGENTS.md)
-- Backend: [.agents/backend/AGENTS.md](.agents/backend/AGENTS.md)
-- Integrations: [.agents/integrations/AGENTS.md](.agents/integrations/AGENTS.md)
-- Frontend: [.agents/frontend/AGENTS.md](.agents/frontend/AGENTS.md)
-- Tester: [.agents/tester/AGENTS.md](.agents/tester/AGENTS.md)
-
-### Domain specialists
-
-- Auth & Onboarding: [.agents/auth-onboarding/AGENTS.md](.agents/auth-onboarding/AGENTS.md)
-- Access & RBAC: [.agents/access-rbac/AGENTS.md](.agents/access-rbac/AGENTS.md)
-- POS & Sheets: [.agents/pos-sheets/AGENTS.md](.agents/pos-sheets/AGENTS.md)
-- Accounting Statements: [.agents/accounting-statements/AGENTS.md](.agents/accounting-statements/AGENTS.md)
-- QuickBooks: [.agents/quickbooks/AGENTS.md](.agents/quickbooks/AGENTS.md)
-- Release & Docs: [.agents/release-docs/AGENTS.md](.agents/release-docs/AGENTS.md)
-
-### Workflow skills
-
-- Skill index: [.agents/skills/README.md](.agents/skills/README.md)
-- Auth workflow: [.agents/skills/auth-onboarding-workflow.md](.agents/skills/auth-onboarding-workflow.md)
-- RBAC alignment: [.agents/skills/rbac-and-route-alignment.md](.agents/skills/rbac-and-route-alignment.md)
-- POS + Sheets mapping: [.agents/skills/pos-sheets-mapping-workflow.md](.agents/skills/pos-sheets-mapping-workflow.md)
-- Statement processing: [.agents/skills/statement-processing-workflow.md](.agents/skills/statement-processing-workflow.md)
-- QuickBooks workspace: [.agents/skills/quickbooks-workspace-workflow.md](.agents/skills/quickbooks-workspace-workflow.md)
-- Release readiness: [.agents/skills/release-readiness-workflow.md](.agents/skills/release-readiness-workflow.md)
-
-### Cursor support
-
-Cursor-specific rules live in:
-
-- [.cursor/rules](.cursor/rules)
-
-These mirror the same project boundaries so Cursor prompts can reference the same agents and skills directly.
-
-### Recommended usage pattern
-
-1. Pick a domain specialist first.
-2. Pick one or more layer agents second.
-3. Add the matching workflow skill if the task is complex or repeated.
-4. Use Manager for cross-cutting or multi-phase work.
-
-Example prompt:
+## Project structure
 
 ```text
-Use .agents/quickbooks/AGENTS.md, .agents/frontend/AGENTS.md, and .agents/skills/quickbooks-workspace-workflow.md.
-
-Improve the QuickBooks Money workspace without changing provider contracts.
+RetailSync/
+├── client/              # React + Vite app (modules: auth, pos, accounting, quickbooks, settings, users, rbac)
+├── server/              # Express API: routes, controllers, Mongoose models, jobs, integrations, scripts
+├── shared/              # @retailsync/shared: Zod schemas, permission catalog, POS and accounting types
+├── docs/                # architecture, operations, testing, wireframes and course reports
+│   └── assets/          # README banner, logo, icon, screenshots and architecture diagram
+├── .agents/, .cursor/   # agent and Cursor rules used while developing the project
+├── .github/workflows/   # CI on pull requests, deploy on push to production
+├── docker-compose.yml   # MongoDB, API and nginx client for local runs
+├── Makefile             # dev, start, test and reset shortcuts (make help)
+└── firebase.json        # Firebase Hosting config for the client
 ```
 
-## Release Flow
+## Roadmap
 
-- active branch: `development`
-- release target: `production`
-- release guide: [RELEASE.md](RELEASE.md)
+- [ ] Procurement, invoice OCR and wider reconciliation <sub>(Phase 4, `PLANNED` in [docs/status.md](docs/status.md); `/dashboard/procurement` is a hidden prototype with sample rows)</sub>
+- [ ] Release hardening: broader tests and a fully green release gate <sub>(validation posture `PARTIAL` in [docs/status.md](docs/status.md))</sub>
+
+## Authors
+
+Built by the COMP 596 (Spring 2026) team in the [comp596-spring-2026](https://github.com/comp596-spring-2026) organization.
+
+**Trupal Patel**
+
+<p>
+  <a href="https://trupalpatel.com">Portfolio</a> ·
+  <a href="mailto:trupal.work@gmail.com">trupal.work@gmail.com</a> ·
+  <a href="https://www.linkedin.com/in/trupalix">LinkedIn</a> ·
+  <a href="https://github.com/TRUPALIX9">GitHub</a>
+</p>
+
+## License
+
+Released under the MIT License (Copyright (c) 2026 comp596-spring-2026). See [LICENSE](LICENSE).

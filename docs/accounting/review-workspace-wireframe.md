@@ -6,7 +6,7 @@ Last updated: 2026-05-14
 | Area | Content |
 |---|---|
 | Title | Statement Review |
-| Subtitle | Dec 2025 · SouthState Checking xxxx3561 |
+| Subtitle | Dec 2025 · Example Bank Checking xxxx4417 |
 | Alert | Validation or extraction warnings when present |
 | Validation | Pass / Warning / Fail |
 | Actions | Back · Refresh · Reprocess · Open Ledger Review · Complete Month |

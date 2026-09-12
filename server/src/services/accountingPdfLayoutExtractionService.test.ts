@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -14,9 +15,11 @@ import { parseTransactionsFromOcrPages } from '../jobs/accountingTaskRunner';
 import { buildStatementValidationReport } from './statementValidationService';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// The statement fixture is a private document and is not committed; these tests run only with a local copy.
+const hasFixturePdf = existsSync(path.resolve(here, '../../../shared/src/accounting/testStatmentPDF.pdf'));
 
 describe('accountingPdfLayoutExtractionService', () => {
-  it('extracts coordinate items and section bounds from the SouthState fixture', async () => {
+  it.skipIf(!hasFixturePdf)('extracts coordinate items and section bounds from the SouthState fixture', async () => {
     const pdfPath = path.resolve(
       here,
       '../../../shared/src/accounting/testStatmentPDF.pdf'
@@ -74,7 +77,7 @@ describe('accountingPdfLayoutExtractionService', () => {
     }
   }, 30000);
 
-  it('reconciles parsed transactions with layout section bounds for SouthState truth', async () => {
+  it.skipIf(!hasFixturePdf)('reconciles parsed transactions with layout section bounds for SouthState truth', async () => {
     const pdfPath = path.resolve(
       here,
       '../../../shared/src/accounting/testStatmentPDF.pdf'

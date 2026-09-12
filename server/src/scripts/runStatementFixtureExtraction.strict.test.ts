@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { runStatementFixtureExtraction } from './runStatementFixtureExtraction';
+import { existsSync } from 'node:fs';
+import { fixturePdfPath, runStatementFixtureExtraction } from './runStatementFixtureExtraction';
 
 const hasPdfToPpm = () => {
   const result = spawnSync('pdftoppm', ['-h'], {
@@ -14,7 +15,7 @@ const hasPdfToPpm = () => {
 
 describe('SouthState fixture strict validation', () => {
   it('matches SouthState truth exactly', async () => {
-    if (!hasPdfToPpm()) {
+    if (!hasPdfToPpm() || !existsSync(fixturePdfPath)) {
       return;
     }
 

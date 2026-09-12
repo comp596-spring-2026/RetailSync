@@ -43,7 +43,8 @@ import { buildStatementValidationReport } from '../services/statementValidationS
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
-const fixturePdfPath = path.resolve(repoRoot, 'shared/src/accounting/testStatmentPDF.pdf');
+// Private statement fixture: not committed (see .gitignore). Place a local copy here to run the script.
+export const fixturePdfPath = path.resolve(repoRoot, 'shared/src/accounting/testStatmentPDF.pdf');
 const outputRoot = path.resolve(repoRoot, 'server/tmp/statement-fixture-output');
 
 const ensureDir = async (filePath: string) => {

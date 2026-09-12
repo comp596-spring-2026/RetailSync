@@ -2,17 +2,23 @@
 
 ## Prerequisites
 
-- Node 20+
+- Node 22 (see `.nvmrc`; run `nvm use`)
 - pnpm 10+
 - Docker Desktop (recommended for Mongo)
 
 ## Initial Setup
 
 ```bash
-cd /Users/trupal/Projects/RetailSync
+cd RetailSync
 make install
-cp /Users/trupal/Projects/RetailSync/server/.env.example /Users/trupal/Projects/RetailSync/server/.env
-cp /Users/trupal/Projects/RetailSync/client/.env.example /Users/trupal/Projects/RetailSync/client/.env
+cp server/.env.example server/.env
+cp client/.env.example client/.env
+```
+
+Then set `ENCRYPTION_KEY` in `server/.env` to a base64-encoded 32-byte key (the example value is empty and the server refuses to start without a valid key):
+
+```bash
+openssl rand -base64 32
 ```
 
 ## Start Development (Non-Docker)
@@ -96,7 +102,7 @@ For accounting task processing:
 
 Local convenience fallback is also supported for Sheets calls:
 
-- `/Users/trupal/Projects/RetailSync/credentials/gcp-service-account-retailsync-run-sa.json`
+- `credentials/gcp-service-account-retailsync-run-sa.json`
 
 In non-production mode, if this file exists, the server uses it automatically for Google Sheets API auth.
 

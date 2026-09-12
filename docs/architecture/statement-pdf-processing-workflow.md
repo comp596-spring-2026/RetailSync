@@ -410,7 +410,7 @@ Visible review outputs include:
 
 ## Fixture / Repro Path
 
-The local fixture script reproduces the statement PDF pipeline from the sample PDF:
+The local fixture script reproduces the statement PDF pipeline from a local statement PDF. The fixture is a private document, so it is **not committed** (it is listed in `.gitignore`); place a local copy at the path below to run the script. The fixture-dependent tests skip when the file is absent.
 
 - source fixture:
   - `shared/src/accounting/testStatmentPDF.pdf`

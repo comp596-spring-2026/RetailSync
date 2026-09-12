@@ -10,7 +10,7 @@ This project follows a structured development workflow to maintain code quality,
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22 (see `.nvmrc`)
 - pnpm 10+
 - Docker Desktop (recommended for MongoDB)
 
