@@ -260,7 +260,7 @@
 
   <!-- Footer -->
   <path d="M96 560.5H1184" stroke="#c9ddd2"/>
-  <rect x="96" y="587" width="8" height="8" fill="#3d9c74"/>
-  <text x="112" y="595" class="rsb-m" font-size="13" fill="#3f5249">trupalpatel.com</text>
-  <text x="1184" y="595" class="rsb-m" font-size="13" text-anchor="end" fill="#3f5249">comp596-spring-2026/RetailSync</text>
+  <rect x="96" y="582" width="8" height="8" fill="#3d9c74"/>
+  <text x="116" y="591" class="rsb-m" font-size="15" letter-spacing="1" fill="#3f5249">trupalpatel.com</text>
+  <text x="1184" y="591" class="rsb-m" font-size="15" letter-spacing="1" text-anchor="end" fill="#3f5249">comp596-spring-2026/RetailSync</text>
 </svg>
