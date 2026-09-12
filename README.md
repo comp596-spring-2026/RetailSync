@@ -33,7 +33,7 @@ Small retailers keep their numbers in separate places: POS exports, bank stateme
 - **Server-side access control**: tenant-scoped data and role-based permissions, with a roles editor built on product capabilities (show POS, upload statements, post to QuickBooks and so on).
 - **Dashboard**: 30-day POS KPIs and sales trend next to a year-to-date QuickBooks summary.
 - **POS workspace**: CSV or Google Sheets import with a column-matching wizard, a daily table, an analytics view, and a Georgia / Troup County monthly sales tax review.
-- **Bank statement processing**: statement PDFs upload straight to Cloud Storage. Background jobs render pages, extract text and layout, run OCR (Google Vision or Gemini when configured, Tesseract otherwise), crop check images and validate totals. The review workspace has Overview, Review Transactions and Source Proof tabs.
+- **Bank statement processing**: statement PDFs upload straight to Cloud Storage. Background jobs extract the PDF text and layout, render pages, crop check images and validate section totals. Check fields can fall back to Tesseract OCR (`USE_TESSERACT_FALLBACK`), and Gemini drafts posting suggestions when a key is configured. The review workspace has Overview, Review Transactions and Source Proof tabs.
 - **QuickBooks workspace**: OAuth connection and create/read/update/delete for customers, vendors, invoices, payments, deposits, checks, expenses and transfers, plus accounts, registers, reports and tax.
 - **Integration settings**: Google Sheets and QuickBooks cards with connection and token health, mapping summary, sync, and soft or hard reset.
 
@@ -126,7 +126,8 @@ The server refuses to start without a valid `ENCRYPTION_KEY` (a base64-encoded 3
 | `GCS_BUCKET_NAME` | No | Cloud Storage bucket for statement PDFs and artifacts (needed for statement upload) |
 | `TASKS_MODE` | No | `inline` (default) or `cloud`; cloud mode also reads `GCP_PROJECT_ID`, `GCP_REGION`, `TASKS_QUEUE_PIPELINE`, `TASKS_QUEUE_SYNC`, `TASKS_OIDC_SERVICE_ACCOUNT_EMAIL`, `INTERNAL_TASKS_ENDPOINT` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_FROM_NAME` | No | Outgoing email for verification, resets and invites |
-| `STATEMENT_OCR_PROVIDER`, `STATEMENT_GEMINI_API_KEY` | No | Statement OCR provider and Gemini key |
+| `STATEMENT_OCR_PROVIDER`, `STATEMENT_GEMINI_API_KEY` | No | Statement OCR provider setting (default `offline`) and the Gemini key for AI posting suggestions |
+| `USE_TESSERACT_FALLBACK` | No | `true` runs Tesseract OCR on check images when the PDF text is missing the payee or memo |
 | `API_SERVICE_NAME`, `DEBUG_VERBOSE_API` | No | Log labelling and verbose request tracing |
 | `ENABLE_LOCAL_CRON`, `LOCAL_CRON_EXPR` | No | Outside production, run the Google Sheets POS sync on a node-cron schedule (default `0 2 * * *`) |
 | `VITE_API_URL` (client) | No | API base URL for the client, e.g. `http://localhost:4000/api` |
