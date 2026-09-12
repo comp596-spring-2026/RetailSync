@@ -13,6 +13,9 @@ import { detectStatementMonthFromPdf } from './services/accountingPdfAnalysisSer
 
 const TEST_MONGO_URI = process.env.TEST_MONGO_URI?.trim() ?? '';
 const maybeDescribe = TEST_MONGO_URI ? describe : describe.skip;
+const fixturePdfPath = path.resolve(process.cwd(), '../shared/src/accounting/testStatmentPDF.pdf');
+// The statement fixture is a private document and is not committed; these tests run only with a local copy.
+const hasFixturePdf = fs.existsSync(fixturePdfPath);
 const bucketName = 'retailsync-accounting-test';
 
 vi.hoisted(() => {
@@ -99,7 +102,7 @@ maybeDescribe('accounting upload flow with bundled PDF', () => {
     await mongoose.disconnect();
   });
 
-  it('runs detect-month, upload-url, create-statement, and inline processing with the fixture PDF', async () => {
+  it.skipIf(!hasFixturePdf)('runs detect-month, upload-url, create-statement, and inline processing with the fixture PDF', async () => {
     const pdfPath = path.resolve(process.cwd(), '../shared/src/accounting/testStatmentPDF.pdf');
     const pdfBuffer = fs.readFileSync(pdfPath);
     const expectedDetection = detectStatementMonthFromPdf({
@@ -244,7 +247,7 @@ maybeDescribe('accounting upload flow with bundled PDF', () => {
     expect(suggestionsResponse.body.data.summary).toBeTruthy();
   });
 
-  it('persists a failed statement row when the uploaded PDF cannot be read back from storage', async () => {
+  it.skipIf(!hasFixturePdf)('persists a failed statement row when the uploaded PDF cannot be read back from storage', async () => {
     const pdfPath = path.resolve(process.cwd(), '../shared/src/accounting/testStatmentPDF.pdf');
     const pdfBuffer = fs.readFileSync(pdfPath);
     const { accessToken } = await registerAndCreateCompany(app, 'AcctFixtureMissingObject');
@@ -317,7 +320,7 @@ maybeDescribe('accounting upload flow with bundled PDF', () => {
     );
   });
 
-  it('keeps only one statement per company month and removes superseded mongo records', async () => {
+  it.skipIf(!hasFixturePdf)('keeps only one statement per company month and removes superseded mongo records', async () => {
     const pdfPath = path.resolve(process.cwd(), '../shared/src/accounting/testStatmentPDF.pdf');
     const pdfBuffer = fs.readFileSync(pdfPath);
     const { accessToken } = await registerAndCreateCompany(app, 'AcctFixtureSingleMonth');

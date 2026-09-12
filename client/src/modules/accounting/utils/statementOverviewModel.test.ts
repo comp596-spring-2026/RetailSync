@@ -22,7 +22,7 @@ const baseStatement = {
   updatedAt: '2026-01-01T00:00:00.000Z',
   createdAt: '2026-01-01T00:00:00.000Z',
   bankName: 'Example Bank',
-  accountLast4: '3561',
+  accountLast4: '4417',
   periodEnd: '2025-12-31',
   gcs: { rootPrefix: 'r', pdfPath: 'r/original.pdf' },
   checks: [],

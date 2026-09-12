@@ -13,3 +13,6 @@ coverage
 credentials/
 
 server/tmp
+
+# Private statement fixture (real bank statement). Never commit it; keep a local copy only.
+shared/src/accounting/testStatmentPDF.pdf
